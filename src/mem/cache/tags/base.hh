@@ -132,6 +132,11 @@ class BaseTags : public ClockedObject
     /** Occ % of each context/cpu using the cache */
     Stats::Formula percentOccsTaskId;
 
+    /** Number of tags consulted over all accesses. */
+    Stats::Scalar tagAccesses;
+    /** Number of data blocks consulted over all accesses. */
+    Stats::Scalar dataAccesses;
+
     /**
      * @}
      */

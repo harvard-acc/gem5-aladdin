@@ -69,5 +69,7 @@ class BaseCache(MemObject):
     mem_side = MasterPort("Port on side closer to MEM")
     addr_ranges = VectorParam.AddrRange([AllMemory], "The address range for the CPU-side port")
     system = Param.System(Parent.any, "System we belong to")
+    sequential_access = Param.Bool(False,
+        "Whether to access tags and data sequentially")
     tags = Param.BaseTags(LRU(), "Tag Store for LRU caches")
     is_perfect_cache = Param.Bool(False, "Is this cache perfect (e.g. always hit)")
