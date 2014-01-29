@@ -1202,7 +1202,7 @@ typename Cache<TagStore>::BlkType*
 Cache<TagStore>::allocateBlock(Addr addr, bool is_secure,
                                PacketList &writebacks)
 {
-    BlkType *blk = tags->findVictim(addr, writebacks);
+    BlkType *blk = tags->findVictim(addr);
     DPRINTF(Cache, "allocateBlock: addr : %x with tag: %s\n", addr, blk->print());
 
     if (blk->isValid()) {
