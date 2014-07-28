@@ -56,13 +56,23 @@ class BaseTags(ClockedObject):
     # Get the is_perfect_cache from the parent (cache)
     is_perfect_cache = Param.Bool(Parent.is_perfect_cache, "Is this cache perfect (e.g. always hit)")
 
-class LRU(BaseTags):
-    type = 'LRU'
-    cxx_class = 'LRU'
-    cxx_header = "mem/cache/tags/lru.hh"
+class BaseSetAssoc(BaseTags):
+    type = 'BaseSetAssoc'
+    abstract = True
+    cxx_header = "mem/cache/tags/base_set_assoc.hh"
     assoc = Param.Int(Parent.assoc, "associativity")
     sequential_access = Param.Bool(Parent.sequential_access,
         "Whether to access tags and data sequentially")
+
+class LRU(BaseSetAssoc):
+    type = 'LRU'
+    cxx_class = 'LRU'
+    cxx_header = "mem/cache/tags/lru.hh"
+
+class RandomRepl(BaseSetAssoc):
+    type = 'RandomRepl'
+    cxx_class = 'RandomRepl'
+    cxx_header = "mem/cache/tags/random_repl.hh"
 
 class FALRU(BaseTags):
     type = 'FALRU'
