@@ -35,7 +35,7 @@
 #include "base/compiler.hh"
 #include "base/cprintf.hh"
 #include "base/varargs.hh"
-
+#include <stddef.h>
 #if defined(__SUNPRO_CC)
 #define __FUNCTION__ "how to fix me?"
 #endif

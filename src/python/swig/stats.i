@@ -29,6 +29,12 @@
  */
 
 %module(package="m5.internal") stats
+%{
+#include <cstddef>
+#include <stddef.h>
+using std::ptrdiff_t;
+%}
+
 
 %include <std_list.i>
 %include <std_string.i>
@@ -43,6 +49,7 @@
 #include "base/statistics.hh"
 #include "sim/core.hh"
 #include "sim/stat_control.hh"
+
 
 namespace Stats {
 template <class T>
