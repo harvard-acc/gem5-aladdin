@@ -67,7 +67,6 @@ def setCPUClass(options):
        returns these two types of cpus and the initial mode of operation
        depending on the options provided.
     """
-
     TmpClass, test_mem_mode = getCPUClass(options.cpu_type)
     CPUClass = None
     if TmpClass.require_caches() and \
@@ -87,7 +86,6 @@ def setCPUClass(options):
 
 def setMemClass(options):
     """Returns a memory controller class."""
-
     return MemConfig.get(options.mem_type)
 
 def setWorkCountOptions(system, options):

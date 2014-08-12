@@ -76,7 +76,7 @@ def get(name):
     """Get a CPU class from a user provided class name or alias."""
 
     real_name = _cpu_aliases.get(name, name)
-
+    print "name:%s, real_name:%s" % (name, real_name)
     try:
         cpu_class = _cpu_classes[real_name]
         return cpu_class

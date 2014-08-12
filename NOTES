@@ -1,5 +1,141 @@
 This file is to record things I try to figure out how gem5 works. 
 
+08-12-2014
+
+Supported SE CPU Types:
+
+             | Alpha | ARM | MIPS | POWER | SPARC | x86 | 
+SimpleAtomic |   Y   |  Y  |  Y   |   Y   |   Y   |  Y  |
+SimpleTiming |   Y   |  Y  |  Y   |   Y   |   Y   |  Y  |
+In-Order     |   Y   |  N  |  Y   |   N   |   N   |  N  |
+Out-of-Order |   Y   |  Y  |  Y   |   Y   |   Y   |  Y  |
+
+             | Alpha | ARM | MIPS | POWER | SPARC | x86 | 
+vtophys      |   Y   |  Y  |  N   |   N   |   Y   |  Y  |
+(src/arch/
+*/vtophys.cc)
+
+Useful flags (and their default values):
+--list-cpu-types
+--cpu-type=atomic //detailed:out-of-order model
+--caches //required for out-of-order model
+--l2cache 
+--mem-type=simple_mem  //mem aliase there
+--mem-channels=1
+--mem-size=512MB
+--num-dirs=1
+--num-l2caches=1
+--num-l3caches=1
+--l1d_size=64KB
+--l1i_size=32KB
+--l2_size=2MB
+--l3_size=16MB
+--l1d_assoc=2
+--l1i_assoc=2
+--l2_assoc=8
+--l3_assoc=16
+--cacheline_size=64
+
+--sys-voltage=1.0V
+--sys-clock=1GHz
+--cpu-clock=2GHz
+
+--output=OUTPUT  //redirect stdout
+--errout=ERROUT  //redirect stderr
+
+
+configs/common/Caches.py
+
+L1Cache:
+assoc=2
+hit_latency = 2
+response_latency = 2
+mshrs = 4
+tgts_per_mshr = 20
+is_top_level = True
+
+L2Cache:
+assoc=8
+hit_latency = 20
+response_latency = 20
+mshrs = 20
+tgts_per_mshr = 12
+write_buffers = 8
+
+IOCache: 
+assoc = 8
+hit_latency = 50
+response_latency = 50
+mshrs = 20
+size = 1kB
+tgts_per_mshr = 12
+forward_snoops = False
+is_top_level = True
+
+PageTableWalkerCache
+assoc = 2
+hit_latency = 2
+response_latency = 2
+mshrs = 10
+size = 1kB
+tgts_per_mshr = 12
+is_top_level = True
+
+configs/common/CacheConfig.py
+l2 and tol2bus is the same clock frequency as the core
+L1-to-L2 bus width = 32 Bytes (256 bits)
+
+to compile MachSuite for gem5/POWER
+gcc -static -m32 
+
+config/common/Simulation.py
+benchCheckpoints: 
+=>m5.simulate()
+=>src/python/m5/simulate.py
+=>internal.event.simulate()
+
+=>src/sim/simulate.cc
+
+
+common/example/se.py
+cpu_type: atomic (AtomicSimpleCPU)
+mem_type: simple_mem (SimpleMemory)
+
+src/sim/system.cc
+Class System
+
+config/common/CpuConfig.py
+
+CPU Classes: 
+arm_detailed
+AtomicSimpleCPU: Simple CPU model executing a configurable number of
+instructions per cycle. This model uses the simplified 'atomic' memory mode. 
+DerivO3CPU
+TimingSimpleCPU
+
+CPU Aliases:
+timing => TimingSimpleCPU
+detailed => DerivO3CPU
+atomic => AtomicSimpleCPU
+
+config/common/MemConfig.py
+
+Mem Classes: 
+LPDDR2_S4_1066_x32
+LPDDR3_1600_x32
+WideIO_200_x128
+DDR3_1600_x64
+SimpleMemory
+SimpleDRAM
+
+Mem aliases:
+lpddr3_1600_x32 -> LPDDR3_1600_x32
+lpddr2_s4_1066)x32 => LPDDR2_S4_1066)x32
+DDR3_1600_x64 => DDR3_1600_x64
+WIO_200_x128 => WideIO_200_x128
+simple_mem => SimpleMemory
+
+
 
 08-11-2014
 1. To compile gem5

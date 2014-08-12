@@ -150,6 +150,7 @@ else:
 
 
 (CPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(options)
+#print "CPUClass:%s, test_mem_mode:%s, FutureClass:%s" % (CPUClass, test_mem_mode, FutureClass)
 CPUClass.numThreads = numThreads
 
 MemClass = Simulation.setMemClass(options)

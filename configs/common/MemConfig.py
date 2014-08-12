@@ -74,9 +74,7 @@ def is_mem_class(cls):
 
 def get(name):
     """Get a memory class from a user provided class name or alias."""
-
     real_name = _mem_aliases.get(name, name)
-
     try:
         mem_class = _mem_classes[real_name]
         return mem_class
