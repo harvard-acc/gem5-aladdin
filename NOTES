@@ -81,7 +81,50 @@ size = 1kB
 tgts_per_mshr = 12
 is_top_level = True
 
-configs/common/CacheConfig.py
+src/arch/x86/X86TLB.py
+TLB size: 64
+Number of outstanding walks that can be squashed per cycle: 4
+
+src/arch/x86/isa_traits.hh
+VMPageSize = 1 << 12 = 4KB
+
+src/cpu/o3/O3CPU.py (default parameters for O3CPU)
+fetchWidth = 8
+fetchBufferSize = 64
+decodeWidth=8
+renameWidth=8
+dispatchWidth=8
+issueWidth=8
+wbWidth=8
+commitWidth=8
+LQEntries = 32
+SQEntries = 32
+numRobs = 1
+numPhysIntRegs = 256
+numPhysFloatRegs = 256
+numIQEntries = 64
+numROBEntries = Param.Unsigned(192, "Number of reorder buffer entries);
+
+src/cpu/o3/O3CPU.py (default parameters for O3CPU)
+IntALU: count=6
+IntMultDiv: count=2
+*IntMult: opLat = 3
+*IntDiv: opLat = 20, issueLat=19
+FP_ALU: count=4
+*FloatAdd: opLat = 2
+*FloatCmp: opLat = 2
+*FloatCvt: opLat = 2
+FP_MulDiv: count = 2
+*FloatMult, opLat = 2
+*FloatDiv, opLat = 12, issueLat = 12
+*FloatSqrt, opLat = 24, issueLat = 24
+SIMD_Unit: count = 4
+ReadPort: count = 0
+WritePort: count = 0
+RdWrPort: count = 4
+IprPort: count = 1, opLat = 3, issueLat = 3
+
+configs/common/FuncUnitConfig.py
 l2 and tol2bus is the same clock frequency as the core
 L1-to-L2 bus width = 32 Bytes (256 bits)
 
