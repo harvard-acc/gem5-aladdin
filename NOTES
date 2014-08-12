@@ -33,3 +33,6 @@ gem5 takes debug flags, to see all the flags:
 to enable specific flags, e.g., Decode and Decoder,
 
 ./gem5.opt --debug-flags=Decode,Decoder
+
+3. Useful wiki links
+http://www.gem5.org/docs/html/gem5MemorySystem.html
