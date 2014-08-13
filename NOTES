@@ -2,6 +2,9 @@ This file is to record things I try to figure out how gem5 works.
 
 08-12-2014
 
+allocate physical pages:src/sim/system.cc
+allocPhysPages(int npages) -- always continues
+
 Supported SE CPU Types:
 
              | Alpha | ARM | MIPS | POWER | SPARC | x86 | 
@@ -123,6 +126,9 @@ ReadPort: count = 0
 WritePort: count = 0
 RdWrPort: count = 4
 IprPort: count = 1, opLat = 3, issueLat = 3
+
+src/mem/SimpleMemory.py
+SimpleMemory: latency=30ns, bandwidth=12.8GB/s
 
 configs/common/FuncUnitConfig.py
 l2 and tol2bus is the same clock frequency as the core

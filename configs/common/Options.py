@@ -202,7 +202,7 @@ def addSEOptions(parser):
     # Benchmark options
     parser.add_option("-c", "--cmd", default="",
                       help="The binary to run in syscall emulation mode.")
-    parser.add_option("-o", "--options", default="",
+    parser.add_option("-o", "--options", default="input.data check.data",
                       help="""The options to pass to the binary, use " "
                               around the entire string""")
     parser.add_option("-i", "--input", default="",
