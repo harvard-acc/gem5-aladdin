@@ -53,6 +53,7 @@ class L1Cache(BaseCache):
     mshrs = 4
     tgts_per_mshr = 20
     is_top_level = True
+    is_perfect_cache = False
 
 class L2Cache(BaseCache):
     assoc = 8
@@ -61,6 +62,7 @@ class L2Cache(BaseCache):
     mshrs = 20
     tgts_per_mshr = 12
     write_buffers = 8
+    is_perfect_cache = False
 
 class IOCache(BaseCache):
     assoc = 8
@@ -71,6 +73,7 @@ class IOCache(BaseCache):
     tgts_per_mshr = 12
     forward_snoops = False
     is_top_level = True
+    is_perfect_cache = False
 
 class PageTableWalkerCache(BaseCache):
     assoc = 2
@@ -80,3 +83,4 @@ class PageTableWalkerCache(BaseCache):
     size = '1kB'
     tgts_per_mshr = 12
     is_top_level = True
+    is_perfect_cache = False

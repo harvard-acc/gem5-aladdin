@@ -269,6 +269,8 @@ class BaseCache : public MemObject
      * side */
     const bool isTopLevel;
 
+    /** Is this cache a perfect cache (e.g., always hit). */
+    const bool isPerfectCache;
     /**
      * Bit vector of the blocking reasons for the access path.
      * @sa #BlockedCause

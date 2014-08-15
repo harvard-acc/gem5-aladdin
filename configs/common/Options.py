@@ -96,6 +96,7 @@ def addCommonOptions(parser):
 
     # Cache Options
     parser.add_option("--caches", action="store_true")
+    parser.add_option("--is_perfect_cache", type="int", default=0)
     parser.add_option("--l2cache", action="store_true")
     parser.add_option("--fastmem", action="store_true")
     parser.add_option("--num-dirs", type="int", default=1)

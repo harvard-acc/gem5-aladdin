@@ -75,6 +75,7 @@ BaseCache::BaseCache(const Params *p)
       numTarget(p->tgts_per_mshr),
       forwardSnoops(p->forward_snoops),
       isTopLevel(p->is_top_level),
+      isPerfectCache(p->is_perfect_cache),
       blocked(0),
       noTargetMSHR(NULL),
       missCount(p->max_miss_count),

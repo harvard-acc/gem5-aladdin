@@ -293,6 +293,13 @@ Cache<TagStore>::access(PacketPtr pkt, BlkType *&blk,
 {
     DPRINTF(Cache, "%s for %s address %x size %d\n", __func__,
             pkt->cmdString(), pkt->getAddr(), pkt->getSize());
+    if (isPerfectCache)
+    {
+      incHitCount(pkt);
+      lat = hitLatency;
+      return true;
+     //FIXME
+    }
     if (pkt->req->isUncacheable()) {
         uncacheableFlush(pkt);
         blk = NULL;

@@ -2,13 +2,32 @@ This file is to record things I try to figure out how gem5 works.
 
 08-15-2014
 
+#things I did to get a perfect cache:
+1. src/mem/cache/BaseCache.py
+add: perfect_cache = Param.Bool(False, "is this cache perfect (e.g. always hit)")
+2. src/mem/cache/base.hh
+add: const bool isPerfectCache;
+3. src/mem/cache/base.cc
+add in BaseCache constructor:
+isPerfectCache(p->is_perfect_cache),
+4. src/mem/cache_impl.hh
+inside function Cache::access()
+add:
+if (isPerfectCache)
+{
+
+}
+5. build/X86/params/BaseCache.hh
+add bool is_perfect_cache;
+
+
+
 Cache related debugging flags:
 Cache,CachePort,CacheRepl,CacheTags,TLB
 
 adding l1d/i/2_hit_latency into Options.py and CacheConfig.py
 
 modify cache replacement policy: files to check
-
 src/mem/cache/base.cc (at the bottom)
 src/mem/cache/tags/Tags.py 
 src/mem/cache/BaseCache.py ?
