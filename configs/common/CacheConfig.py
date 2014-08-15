@@ -69,19 +69,26 @@ def config_cache(options, system):
         # bytes (256 bits).
         system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
                                    size=options.l2_size,
-                                   assoc=options.l2_assoc)
+                                   assoc=options.l2_assoc,
+                                   hit_latency=options.l2_hit_latency,
+                                   response_latency=options.l2_hit_latency)
 
         system.tol2bus = CoherentBus(clk_domain = system.cpu_clk_domain,
                                      width = 32)
+
         system.l2.cpu_side = system.tol2bus.master
         system.l2.mem_side = system.membus.slave
 
     for i in xrange(options.num_cpus):
         if options.caches:
             icache = icache_class(size=options.l1i_size,
-                                  assoc=options.l1i_assoc)
+                                  assoc=options.l1i_assoc,
+                                  hit_latency=options.l1i_hit_latency,
+                                  response_latency=options.l1i_hit_latency)
             dcache = dcache_class(size=options.l1d_size,
-                                  assoc=options.l1d_assoc)
+                                  assoc=options.l1d_assoc,
+                                  hit_latency=options.l1d_hit_latency,
+                                  response_latency=options.l1d_hit_latency)
 
             # When connecting the caches, the clock is also inherited
             # from the CPU in question
