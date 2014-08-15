@@ -1,9 +1,44 @@
 This file is to record things I try to figure out how gem5 works. 
 
-08-13-2014
+08-15-2014
+
+Cache related debugging flags:
+Cache,CachePort,CacheRepl,CacheTags,TLB
+
+adding l1d/i/2_hit_latency into Options.py and CacheConfig.py
+
+modify cache replacement policy: files to check
+
+src/mem/cache/base.cc (at the bottom)
+src/mem/cache/tags/Tags.py 
+src/mem/cache/BaseCache.py ?
+
+and use configs/common/Caches.py 
+
+forexample, 
+class L1Cache(BaseCache):
+  tags = LRU()
+
+(can use python eval() function to set in the config options.py)
 
 
+08-14-2014
+src/mem/cache/cache_impl.hh
+access()
+cache replacement policy:
+src/mem/cache/tags/fa_lru.hh
+src/mem/cache/tags/lru.hh
 
+
+no TLB delay model added:
+http://www.mail-archive.com/gem5-users@gem5.org/msg09823.html
+
+monitoring:
+http://www.mail-archive.com/gem5-users@gem5.org/msg09221.html
+
+src/cpu/o3: lsq_unit.hh
+read():
+ dcachePort->sendTimingReq
 08-12-2014
 
 allocate physical pages:src/sim/system.cc
