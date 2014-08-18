@@ -226,6 +226,11 @@ class CacheBlk
         clearLoadLocks();
     }
 
+    void setStatus(State input_status)
+    {
+      status = input_status;
+    }
+
     /**
      * Check to see if a block has been written.
      * @return True if the block is dirty.

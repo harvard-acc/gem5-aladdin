@@ -103,6 +103,8 @@ LRU::LRU(const Params *p)
 
             // invalidate new cache block
             blk->invalidate();
+            if (isPerfectCache)
+              blk->setStatus(BlkValid);
 
             //EGH Fix Me : do we need to initialize blk?
 
@@ -163,6 +165,7 @@ LRU::findVictim(Addr addr, PacketList &writebacks)
     unsigned set = extractSet(addr);
     // grab a replacement candidate
     BlkType *blk = sets[set].blks[assoc-1];
+    DPRINTF(CacheRepl, "findVictim: addr: %x set: %x, assoc: %d\n", addr, set, assoc);
 
     if (blk->isValid()) {
         DPRINTF(CacheRepl, "set %x: selecting blk %x for replacement\n",
@@ -189,7 +192,7 @@ LRU::insertBlock(PacketPtr pkt, BlkType *blk)
     // stats for it. This can't be done in findBlock() because a
     // found block might not actually be replaced there if the
     // coherence protocol says it can't be.
-    if (blk->isValid()) {
+    if (blk->isValid() && (!isPerfectCache)) {
         replacements[0]++;
         totalRefs += blk->refCount;
         ++sampledRefs;

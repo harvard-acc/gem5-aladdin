@@ -991,7 +991,9 @@ DefaultCommit<Impl>::commitInsts()
 
         // If the head instruction is squashed, it is ready to retire
         // (be removed from the ROB) at any time.
+        DPRINTF(Commit, "Before checking head_inst->isSquashed()\n");
         if (head_inst->isSquashed()) {
+            DPRINTF(Commit, "After checking head_inst->isSquashed(): True\n");
 
             DPRINTF(Commit, "Retiring squashed instruction from "
                     "ROB.\n");
@@ -1003,6 +1005,7 @@ DefaultCommit<Impl>::commitInsts()
             // Record that the number of ROB entries has changed.
             changedROBNumEntries[tid] = true;
         } else {
+            DPRINTF(Commit, "After checking head_inst->isSquashed(): False\n");
             pc[tid] = head_inst->pcState();
 
             // Increment the total number of non-speculative instructions

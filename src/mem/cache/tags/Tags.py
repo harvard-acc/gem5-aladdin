@@ -53,6 +53,9 @@ class BaseTags(ClockedObject):
     hit_latency = Param.Cycles(Parent.hit_latency,
                                "The hit latency for this cache")
 
+    # Get the is_perfect_cache from the parent (cache)
+    is_perfect_cache = Param.Bool(Parent.is_perfect_cache, "Is this cache perfect (e.g. always hit)")
+
 class LRU(BaseTags):
     type = 'LRU'
     cxx_class = 'LRU'

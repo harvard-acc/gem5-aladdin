@@ -1,10 +1,44 @@
 This file is to record things I try to figure out how gem5 works. 
 
+08-18-2014
+get compatible x86 assembily code:
+objdump -M intel intel-mnemonic -D aes > aes.s
+
+error now:
+load value is 0->needs real value
+
+
+inst executing process: 
+src/cpu/o3/iwe_impl.hh
+if (inst->isMemRef())
+{
+  if (inst->isLoad())
+    fault = ldstQueue.executeLoad(inst);
+  else if (inst->isStore())
+    fault = ldstQueue.executeStore(inst);
+}
+else
+{
+  inst->setExecuted();
+  instToCommit(inst);
+}
+
+executeLoad()
+=> src/cpu/o3/lsq_unit_impl.hh
+load_fault = inst->initiateAcc() //initiate memory access
+writeback()
+{
+  inst->completeAcc(pkt);
+}
+=>src/cpu/o3/dyn_inst.hh
+=>src/cpu/o3/dyn_inst_impl.hh
+
+
 08-15-2014
 
 #things I did to get a perfect cache:
 1. src/mem/cache/BaseCache.py
-add: perfect_cache = Param.Bool(False, "is this cache perfect (e.g. always hit)")
+add: is_perfect_cache = Param.Bool(False, "is this cache perfect (e.g. always hit)")
 2. src/mem/cache/base.hh
 add: const bool isPerfectCache;
 3. src/mem/cache/base.cc
@@ -17,9 +51,74 @@ if (isPerfectCache)
 {
 
 }
+does not work...
+change to:
+
+  if (blk != NULL) {
+
+    if (pkt->needsExclusive() ? blk->isWritable() : blk->isReadable()) {
+      // OK to satisfy access
+      incHitCount(pkt);
+      satisfyCpuSideRequest(pkt, blk);
+      return true;
+    }
+  }
+  else if (isPerfectCache)
+  {
+    incHitCount(pkt);
+    lat = hitLatency;
+    blk = allocateBlock(pkt->getAddr(), writebacks);
+    tags->insertBlock(pkt, blk);
+    blk->status = BlkValid | BlkReadable;
+    satisfyCpuSideRequest(pkt, blk);
+    DPRINTF(Cache, "%s new state is %s\n", __func__, blk->print());
+    return true;
+  }
+
 5. build/X86/params/BaseCache.hh
 add bool is_perfect_cache;
 
+6. src/mem/cache/tags/Tags.py
+add: 
+is_perfect_cache = Param.Bool(Parent.is_perfect_cache, "Is this cache perfect (e.g. always hit)")
+
+7. src/mem/cache/tags/base.hh
+add:
+const bool isPerfectCache;
+
+8. src/mem/cache/blk.hh 
+add function:
+void setStatus(state input)
+{}
+
+sn: instruction sequence number (dynamic instruction id)
+src/cpu/base_dyn_inst.hh
+BaseDynInst:
+
+error msg: system.cpu.commit: Inst [sn:1] PC () has a fault. 
+=>src/cpu/o3/commit_impl.hh 
+Fault inst_fault = head_inst->getFault();
+
+error msg: system.cpu.iew.lsq.thread0: Load [sn:1] not executed from fault
+=>src/cpu/o3/lsq_unit_impl.hh
+load_fault = inst->initiateAcc()
+=>src/cpu/o3/dyn_inst.hh
+=>src/cpu/o3/dyn_inst_impl.hh
+
+src/arch/x86/isa/microops/ldstop.isa
+fault = readMemTiming()
+=>src/arch/x86/memhelpers.hh
+return xc->readMem()
+=>src/cpu/base_dyn_inst.hh
+
+=>src/cpu/checker/cpu.cc
+src/sim/fault_fwd.hh
+Fault: RefCountingPtr<FaultBase>
+RefCountingPtr=>src/base/refcnt.hh
+FaultBase=>src/sim/faults.hh
+
+faults:
+src/arch/x86/faults.hh
 
 
 Cache related debugging flags:

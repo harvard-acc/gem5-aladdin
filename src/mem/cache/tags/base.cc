@@ -56,7 +56,8 @@ using namespace std;
 
 BaseTags::BaseTags(const Params *p)
     : ClockedObject(p), blkSize(p->block_size), size(p->size),
-      hitLatency(p->hit_latency)
+      hitLatency(p->hit_latency), 
+      isPerfectCache(p->is_perfect_cache)
 {
 }
 

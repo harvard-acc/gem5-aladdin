@@ -165,6 +165,7 @@ Cache<TagStore>::satisfyCpuSideRequest(PacketPtr pkt, BlkType *blk,
         cmpAndSwap(blk, pkt);
     } else if (pkt->isWrite()) {
         if (blk->checkWrite(pkt)) {
+            DPRINTF(Cache, "pkt->writeDataToBllock(%d, %d)\n", (*blk->data),  blkSize);
             pkt->writeDataToBlock(blk->data, blkSize);
             blk->status |= BlkDirty;
         }
@@ -293,13 +294,7 @@ Cache<TagStore>::access(PacketPtr pkt, BlkType *&blk,
 {
     DPRINTF(Cache, "%s for %s address %x size %d\n", __func__,
             pkt->cmdString(), pkt->getAddr(), pkt->getSize());
-    if (isPerfectCache)
-    {
-      incHitCount(pkt);
-      lat = hitLatency;
-      return true;
-     //FIXME
-    }
+    
     if (pkt->req->isUncacheable()) {
         uncacheableFlush(pkt);
         blk = NULL;
@@ -322,6 +317,17 @@ Cache<TagStore>::access(PacketPtr pkt, BlkType *&blk,
             satisfyCpuSideRequest(pkt, blk);
             return true;
         }
+    }
+    if (isPerfectCache)
+    {
+      incHitCount(pkt);
+      lat = hitLatency;
+      blk = allocateBlock(pkt->getAddr(), writebacks);
+      tags->insertBlock(pkt, blk);
+      blk->status = BlkValid | BlkReadable;
+      satisfyCpuSideRequest(pkt, blk);
+      DPRINTF(Cache, "%s new state is %s\n", __func__, blk->print());
+      return true;
     }
 
     // Can't satisfy access normally... either no block (blk == NULL)
@@ -486,6 +492,8 @@ Cache<TagStore>::recvTimingReq(PacketPtr pkt)
     PacketList writebacks;
 
     bool satisfied = access(pkt, blk, lat, writebacks);
+    if (isPerfectCache)
+      assert(satisfied);
 
 #if 0
     /** @todo make the fast write alloc (wh64) work with coherence. */
@@ -1180,6 +1188,7 @@ typename Cache<TagStore>::BlkType*
 Cache<TagStore>::allocateBlock(Addr addr, PacketList &writebacks)
 {
     BlkType *blk = tags->findVictim(addr, writebacks);
+    DPRINTF(Cache, "allocateBlock: addr : %x with tag: %s\n", addr, blk->print());
 
     if (blk->isValid()) {
         Addr repl_addr = tags->regenerateBlkAddr(blk->tag, blk->set);

@@ -877,6 +877,8 @@ Fault
 BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
                            unsigned size, unsigned flags)
 {
+    fprintf(stderr, "enter base_dyn_inst.hh readmem\n");
+    
     instFlags[ReqMade] = true;
     Request *req = NULL;
     Request *sreqLow = NULL;

@@ -70,6 +70,8 @@ class BaseTags : public ClockedObject
     const unsigned size;
     /** The hit latency of the cache. */
     const Cycles hitLatency;
+    
+    const bool isPerfectCache;
 
     /** Pointer to the parent cache. */
     BaseCache *cache;
