@@ -325,8 +325,9 @@ Cache<TagStore>::access(PacketPtr pkt, BlkType *&blk,
       blk = allocateBlock(pkt->getAddr(), writebacks);
       tags->insertBlock(pkt, blk);
       blk->status = BlkValid | BlkReadable;
+      //std::memcpy(blk->data, pkt->getPtr<uint8_t>(), blkSize);
+      pkt->setDataFromBlock(blk->data, blkSize);
       satisfyCpuSideRequest(pkt, blk);
-      DPRINTF(Cache, "%s new state is %s\n", __func__, blk->print());
       return true;
     }
 

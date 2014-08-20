@@ -97,6 +97,8 @@ O3ThreadContext<Impl>::activate(Cycles delay)
 
     // status() == Suspended
     cpu->activateContext(thread->threadId(), delay);
+    DPRINTF(O3CPU, "End of Calling activate on Thread Context %d\n",
+            threadId());
 }
 
 template <class Impl>

@@ -1,5 +1,25 @@
 This file is to record things I try to figure out how gem5 works. 
 
+08-19-2014
+
+initVirtMem
+=>src/sim/process.hh/cc
+=>X86_64LiveProcess::initState()=>src/arch/x86/process.hh/cc
+==>Process::initState() => src/sim/process.cc
+===>tc->activate() => src/cpu/o3/thread_context_impl.hh
+====> activateContext() -> activateThread(): src/cpu/o3/cpu.cc
+==>initVirtmem.writeBlob()
+====>src/mem/se_translating_port_proxy.cc
+=====>(src/mem/port_proxy.cc/hh)
+=====>blobHelper()
+======>_port.sendFunctional(&pkt);
+
+
+
+
+
+
+bypassCaches()
 08-18-2014
 get compatible x86 assembily code:
 objdump -M intel intel-mnemonic -D aes > aes.s
@@ -23,6 +43,10 @@ else
   instToCommit(inst);
 }
 
+src/cpu/o3/lsq_unit_impl.hh
+executeLoad and executeStore
+=>inst->initiateAcc()
+
 executeLoad()
 => src/cpu/o3/lsq_unit_impl.hh
 load_fault = inst->initiateAcc() //initiate memory access
@@ -32,7 +56,8 @@ writeback()
 }
 =>src/cpu/o3/dyn_inst.hh
 =>src/cpu/o3/dyn_inst_impl.hh
-
+=>src/cpu/base_dyn_inst.hh
+=>src/cpu/static_inst.hh
 
 08-15-2014
 
@@ -110,6 +135,17 @@ fault = readMemTiming()
 =>src/arch/x86/memhelpers.hh
 return xc->readMem()
 =>src/cpu/base_dyn_inst.hh
+=>initiateTranslation(in the same file)
+==>cpu->dtb->translateTiming() 
+===>src/arch/x86/tlb.cc
+===>TLB:translate()
+=>fault = cpu->read()
+==>forwards read to LSQ (src/cpu/o3/cpu.hh)
+===>iew.ldstQueue.read()
+===>src/cpu/o3/lsq.hh =>lsq_unit.hh
+
+Request
+=>src/mem/request.hh
 
 =>src/cpu/checker/cpu.cc
 src/sim/fault_fwd.hh

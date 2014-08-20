@@ -161,6 +161,7 @@ X86LiveProcess::getDesc(int callnum)
 void
 X86_64LiveProcess::initState()
 {
+    fprintf(stderr, "X86_64LiveProcess::initState()\n");
     X86LiveProcess::initState();
 
     argsInit(sizeof(uint64_t), VMPageSize);
@@ -251,13 +252,14 @@ X86_64LiveProcess::initState()
 
         tc->setMiscReg(MISCREG_MXCSR, 0x1f80);
     }
+    fprintf(stderr, "End of X86_64LiveProcess::initState()\n");
 }
 
 void
 I386LiveProcess::initState()
 {
+    fprintf(stderr, "I386LiveProcess::initState()\n");
     X86LiveProcess::initState();
-
     argsInit(sizeof(uint32_t), VMPageSize);
 
     /* 
@@ -281,6 +283,7 @@ I386LiveProcess::initState()
         0x89, 0xe5, // mov %esp, %ebp
         0x0f, 0x34  // sysenter
     };
+    fprintf(stderr, "before initVirtmem.writeBlob()\n");
     initVirtMem.writeBlob(vsyscallPage.base + vsyscallPage.vsyscallOffset,
             vsyscallBlob, sizeof(vsyscallBlob));
 
@@ -377,6 +380,7 @@ void
 X86LiveProcess::argsInit(int pageSize,
         std::vector<AuxVector<IntType> > extraAuxvs)
 {
+    fprintf(stderr, "entering argsInit\n");
     int intSize = sizeof(IntType);
 
     typedef AuxVector<IntType> auxv_t;
@@ -390,9 +394,10 @@ X86LiveProcess::argsInit(int pageSize,
 
     //We want 16 byte alignment
     uint64_t align = 16;
-
+    fprintf(stderr, "before objFile->loadSections(initVirtMem)\n");
     // load object file into target memory
     objFile->loadSections(initVirtMem);
+    fprintf(stderr, "After objFile->loadSections(initVirtMem)\n");
 
     enum X86CpuFeature {
         X86_OnboardFPU = 1 << 0,
@@ -625,21 +630,26 @@ X86LiveProcess::argsInit(int pageSize,
     //Copy the aux stuff
     for(int x = 0; x < auxv.size(); x++)
     {
+        fprintf(stderr, "initVirtMem.writeBlob(auxv_array_base + x*2*intSize)\n");
         initVirtMem.writeBlob(auxv_array_base + x * 2 * intSize,
                 (uint8_t*)&(auxv[x].a_type), intSize);
+        fprintf(stderr, "initVirtMem.writeBlob(auxv_array_base + (x*2+1)*intSize)\n");
         initVirtMem.writeBlob(auxv_array_base + (x * 2 + 1) * intSize,
                 (uint8_t*)&(auxv[x].a_val), intSize);
     }
     //Write out the terminating zeroed auxilliary vector
     const uint64_t zero = 0;
+    fprintf(stderr, "initVirtMem.writeBlob(auxv_array_base + 2 * intSize * auxv.size()\n");
     initVirtMem.writeBlob(auxv_array_base + 2 * intSize * auxv.size(),
             (uint8_t*)&zero, 2 * intSize);
 
+    fprintf(stderr, "initVirtMem.writeString(aux_data_base, platform.c_str())\n");
     initVirtMem.writeString(aux_data_base, platform.c_str());
 
     copyStringArray(envp, envp_array_base, env_data_base, initVirtMem);
     copyStringArray(argv, argv_array_base, arg_data_base, initVirtMem);
 
+    fprintf(stderr, "initVirtMem.writeBlob(argc_base, (uint8_t*)&guestArgc, intSize);\n");
     initVirtMem.writeBlob(argc_base, (uint8_t*)&guestArgc, intSize);
 
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
@@ -654,6 +664,7 @@ X86LiveProcess::argsInit(int pageSize,
     stack_min = roundDown(stack_min, pageSize);
 
 //    num_processes++;
+    fprintf(stderr, "leaving argsInit\n");
 }
 
 void

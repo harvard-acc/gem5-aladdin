@@ -896,11 +896,16 @@ BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
         if (TheISA::HasUnalignedMemAcc) {
             splitRequest(req, sreqLow, sreqHigh);
         }
+        fprintf(stderr, "before initiateTranslation:addr:%lx, data:%d, size:%d\n", addr, *data, size);
         initiateTranslation(req, sreqLow, sreqHigh, NULL, BaseTLB::Read);
+        fprintf(stderr, "after initiateTranslation:addr:%lx, data:%d, size:%d\n", addr, *data, size);
     }
 
     if (translationCompleted()) {
+        fprintf(stderr, "Translation completed\n");
+        //fprintf(stderr, "fault: %s\n", fault.get()->name());
         if (fault == NoFault) {
+            fprintf(stderr, "Translation completed: No Fault\n");
             effAddr = req->getVaddr();
             effSize = size;
             instFlags[EffAddrValid] = true;
@@ -913,6 +918,7 @@ BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
             }
             fault = cpu->read(req, sreqLow, sreqHigh, data, lqIdx);
         } else {
+            fprintf(stderr, "Translation completed: Fault\n");
             // Commit will have to clean up whatever happened.  Set this
             // instruction as executed.
             this->setExecuted();
@@ -1002,6 +1008,7 @@ BaseDynInst<Impl>::initiateTranslation(RequestPtr req, RequestPtr sreqLow,
                                        RequestPtr sreqHigh, uint64_t *res,
                                        BaseTLB::Mode mode)
 {
+    fprintf(stderr, "entering initiateTranslation\n");
     translationStarted(true);
 
     if (!TheISA::HasUnalignedMemAcc || sreqLow == NULL) {
@@ -1052,6 +1059,7 @@ BaseDynInst<Impl>::initiateTranslation(RequestPtr req, RequestPtr sreqLow,
             savedSreqHigh = state->sreqHigh;
         }
     }
+    fprintf(stderr, "leaving initiateTranslation\n");
 }
 
 template<class Impl>

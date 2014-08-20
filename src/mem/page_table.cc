@@ -70,7 +70,7 @@ PageTable::map(Addr vaddr, Addr paddr, int64_t size, bool clobber)
     // starting address must be page aligned
     assert(pageOffset(vaddr) == 0);
 
-    DPRINTF(MMU, "Allocating Page: %#x-%#x\n", vaddr, vaddr+ size);
+    DPRINTF(MMU, "PageTabel: Allocating Page: %#x-%#x\n", vaddr, vaddr+ size);
 
     for (; size > 0; size -= pageSize, vaddr += pageSize, paddr += pageSize) {
         if (!clobber && (pTable.find(vaddr) != pTable.end())) {
@@ -168,11 +168,11 @@ PageTable::translate(Addr vaddr, Addr &paddr)
 {
     TheISA::TlbEntry entry;
     if (!lookup(vaddr, entry)) {
-        DPRINTF(MMU, "Couldn't Translate: %#x\n", vaddr);
+        DPRINTF(MMU, "PageTable Couldn't Translate: %#x\n", vaddr);
         return false;
     }
     paddr = pageOffset(vaddr) + entry.pageStart();
-    DPRINTF(MMU, "Translating: %#x->%#x\n", vaddr, paddr);
+    DPRINTF(MMU, "PageTable Translating: %#x->%#x\n", vaddr, paddr);
     return true;
 }
 
