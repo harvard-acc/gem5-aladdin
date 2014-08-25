@@ -158,9 +158,7 @@ CheckerCPU::readMem(Addr addr, uint8_t *data, unsigned size, unsigned flags)
         memReq->setVirt(0, addr, size, flags, masterId, thread->pcState().instAddr());
 
         // translate to physical address
-        fprintf(stderr, "before dtb->translateFunctional(), fault:%s\n", fault.get()->name());
         fault = dtb->translateFunctional(memReq, tc, BaseTLB::Read);
-        fprintf(stderr, "After dtb->translateFunctional(), fault:%s\n", fault.get()->name());
 
         if (!checked_flags && fault == NoFault && unverifiedReq) {
             flags_match = checkFlags(unverifiedReq, memReq->getVaddr(),

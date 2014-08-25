@@ -240,13 +240,10 @@ Process::initState()
 {
     if (contextIds.empty())
         fatal("Process %s is not associated with any HW contexts!\n", name());
-    fprintf(stderr, "src/sim/process.hh/cc initState()\n");
-    fprintf(stderr, "tc=system->getThreadContext(contextIds[0])\n");
     // first thread context for this process... initialize & enable
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
 
     // mark this context as active so it will start ticking.
-    fprintf(stderr, "tc->activate(Cycles(0))\n");
     tc->activate(Cycles(0));
 }
 

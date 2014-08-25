@@ -93,7 +93,6 @@ bool
 SETranslatingPortProxy::tryWriteBlob(Addr addr, uint8_t *p, int size) const
 {
     int prevSize = 0;
-    fprintf(stderr, "writing blob...");
     for (ChunkGenerator gen(addr, size, VMPageSize); !gen.done(); gen.next()) {
         Addr paddr;
 
@@ -109,7 +108,6 @@ SETranslatingPortProxy::tryWriteBlob(Addr addr, uint8_t *p, int size) const
             } else {
                 return false;
             }
-            fprintf(stderr, "getting address:%lx translated\n", addr);
             pTable->translate(gen.addr(), paddr);
         }
 
