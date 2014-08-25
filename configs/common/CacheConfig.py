@@ -84,7 +84,8 @@ def config_cache(options, system):
             icache = icache_class(size=options.l1i_size,
                                   assoc=options.l1i_assoc,
                                   hit_latency=options.l1i_hit_latency,
-                                  response_latency=options.l1i_hit_latency)
+                                  response_latency=options.l1i_hit_latency,
+                                  is_perfect_cache=options.is_perfect_cache)
             dcache = dcache_class(size=options.l1d_size,
                                   assoc=options.l1d_assoc,
                                   hit_latency=options.l1d_hit_latency,

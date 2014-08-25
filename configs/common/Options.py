@@ -93,6 +93,10 @@ def addCommonOptions(parser):
     parser.add_option("--mem-size", action="store", type="string",
                       default="512MB",
                       help="Specify the physical memory size (single memory)")
+    parser.add_option("--mem-latency", action="store", type="string",
+                      default="30ns",
+                      help="Specify the physical memory latency (simple_mem only)")
+    parser.add_option("--is_perfect_mem_bus", type="int", default=0)
 
     # Cache Options
     parser.add_option("--caches", action="store_true")

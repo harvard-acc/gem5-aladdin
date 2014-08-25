@@ -44,6 +44,7 @@
 
 #include "base/random.hh"
 #include "mem/simple_mem.hh"
+#include "debug/SimpleMem.hh"
 
 using namespace std;
 
@@ -137,6 +138,9 @@ SimpleMemory::recvTimingReq(PacketPtr pkt)
         // to avoid extra events being scheduled for (infinitely) fast
         // memories
         if (duration != 0) {
+            if (latency == 0)
+              duration = 0;
+            DPRINTF(SimpleMem, "schedule(event, curTick() + duration %lu\n", duration);
             schedule(releaseEvent, curTick() + duration);
             isBusy = true;
         }
@@ -156,7 +160,10 @@ SimpleMemory::recvTimingReq(PacketPtr pkt)
         // before the packet(s) before it
         packetQueue.push_back(DeferredPacket(pkt, curTick() + getLatency()));
         if (!retryResp && !dequeueEvent.scheduled())
+        {
+            DPRINTF(SimpleMem, "needResponse: schedule(event, packetQueue.back().tick %lu \n", packetQueue.back().tick);
             schedule(dequeueEvent, packetQueue.back().tick);
+        }
     } else {
         pendingDelete.push_back(pkt);
     }
@@ -203,6 +210,7 @@ SimpleMemory::dequeue()
 Tick
 SimpleMemory::getLatency() const
 {
+    DPRINTF(SimpleMem,  "SimpleMemory: latency: %lu, latency_var: %lu\n", latency, latency_var);
     return latency +
         (latency_var ? random_mt.random<Tick>(0, latency_var) : 0);
 }

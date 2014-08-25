@@ -250,7 +250,7 @@ if options.ruby:
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
-    system.membus = CoherentBus()
+    system.membus = CoherentBus(is_perfect_bus=options.is_perfect_mem_bus)
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)
     MemConfig.config_mem(options, system)

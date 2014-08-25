@@ -57,6 +57,7 @@
 BaseBus::BaseBus(const BaseBusParams *p)
     : MemObject(p),
       headerCycles(p->header_cycles), width(p->width),
+      isPerfectBus(p->is_perfect_bus),
       gotAddrRanges(p->port_default_connection_count +
                           p->port_master_connection_count, false),
       gotAllAddrRanges(false), defaultPortID(InvalidPortID),
@@ -108,6 +109,8 @@ BaseBus::getSlavePort(const std::string &if_name, PortID idx)
 void
 BaseBus::calcPacketTiming(PacketPtr pkt)
 {
+    if (isPerfectBus)
+      return;
     // the bus will be called at a time that is not necessarily
     // coinciding with its own clock, so start by determining how long
     // until the next clock edge (could be zero)

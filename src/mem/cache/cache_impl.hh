@@ -318,18 +318,6 @@ Cache<TagStore>::access(PacketPtr pkt, BlkType *&blk,
             return true;
         }
     }
-    if (isPerfectCache)
-    {
-      incHitCount(pkt);
-      lat = hitLatency;
-      blk = allocateBlock(pkt->getAddr(), writebacks);
-      tags->insertBlock(pkt, blk);
-      blk->status = BlkValid | BlkReadable;
-      //std::memcpy(blk->data, pkt->getPtr<uint8_t>(), blkSize);
-      pkt->setDataFromBlock(blk->data, blkSize);
-      satisfyCpuSideRequest(pkt, blk);
-      return true;
-    }
 
     // Can't satisfy access normally... either no block (blk == NULL)
     // or have block but need exclusive & only have shared.
@@ -443,7 +431,6 @@ Cache<TagStore>::recvTimingReq(PacketPtr pkt)
         memSidePort->sendTimingReq(pkt);
         return true;
     }
-
     if (pkt->memInhibitAsserted()) {
         DPRINTF(Cache, "mem inhibited on 0x%x: not responding\n",
                 pkt->getAddr());
@@ -493,8 +480,6 @@ Cache<TagStore>::recvTimingReq(PacketPtr pkt)
     PacketList writebacks;
 
     bool satisfied = access(pkt, blk, lat, writebacks);
-    if (isPerfectCache)
-      assert(satisfied);
 
 #if 0
     /** @todo make the fast write alloc (wh64) work with coherence. */
@@ -917,7 +902,7 @@ Cache<TagStore>::recvTimingResp(PacketPtr pkt)
 
     bool is_fill = !mshr->isForward &&
         (pkt->isRead() || pkt->cmd == MemCmd::UpgradeResp);
-
+    
     if (is_fill && !is_error) {
         DPRINTF(Cache, "Block for addr %x being updated in Cache\n",
                 pkt->getAddr());
@@ -1002,6 +987,11 @@ Cache<TagStore>::recvTimingResp(PacketPtr pkt)
             }
             // reset the bus additional time as it is now accounted for
             target->pkt->busFirstWordDelay = target->pkt->busLastWordDelay = 0;
+            
+            if (isPerfectCache)
+              completion_time = clockEdge();
+            
+            DPRINTF(Cache, "calling cpuSidePort->schedTimingResp: completion_time: %d\n", completion_time);
             cpuSidePort->schedTimingResp(target->pkt, completion_time);
             break;
 
@@ -1898,7 +1888,7 @@ Cache<TagStore>::MemSidePacketQueue::sendDeferredPacket()
                 // care about this packet and might override it before
                 // it gets retried
             } else {
-                cache.markInService(mshr, pkt);
+                  cache.markInService(mshr, pkt);
             }
         }
     }

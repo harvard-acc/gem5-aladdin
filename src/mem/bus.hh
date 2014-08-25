@@ -258,6 +258,8 @@ class BaseBus : public MemObject
     const Cycles headerCycles;
     /** the width of the bus in bytes */
     const uint32_t width;
+    /** Is this bus a perfect bus (e.g., no bandwidth constrain). */
+    const bool isPerfectBus;
 
     typedef AddrRangeMap<PortID>::iterator PortMapIter;
     typedef AddrRangeMap<PortID>::const_iterator PortMapConstIter;

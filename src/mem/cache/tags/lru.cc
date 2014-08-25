@@ -103,8 +103,6 @@ LRU::LRU(const Params *p)
 
             // invalidate new cache block
             blk->invalidate();
-            if (isPerfectCache)
-              blk->setStatus(BlkValid);
 
             //EGH Fix Me : do we need to initialize blk?
 
@@ -192,7 +190,7 @@ LRU::insertBlock(PacketPtr pkt, BlkType *blk)
     // stats for it. This can't be done in findBlock() because a
     // found block might not actually be replaced there if the
     // coherence protocol says it can't be.
-    if (blk->isValid() && (!isPerfectCache)) {
+    if (blk->isValid()) {
         replacements[0]++;
         totalRefs += blk->refCount;
         ++sampledRefs;

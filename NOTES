@@ -1,5 +1,14 @@
 This file is to record things I try to figure out how gem5 works. 
 
+08-25-2014
+
+Add debugging flag:
+If you find that events of interest are not being traced, feel free to add
+DPRINTFs yourself. You can add new debug flags simply by adding TraceFlag()
+command to any SConscript file (preferably the one nearest where you are using
+the new flag). If you use a debug flag in a C++ source file, you would need to
+include the header file "debug/<name of debug flag>.hh" in that file.
+
 08-19-2014
 
 initVirtMem
@@ -13,11 +22,6 @@ initVirtMem
 =====>(src/mem/port_proxy.cc/hh)
 =====>blobHelper()
 ======>_port.sendFunctional(&pkt);
-
-
-
-
-
 
 bypassCaches()
 08-18-2014

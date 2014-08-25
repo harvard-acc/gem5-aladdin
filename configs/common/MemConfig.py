@@ -155,6 +155,10 @@ def config_mem(options, system):
             # Create an instance so we can figure out the address
             # mapping and row-buffer size
             ctrl = cls()
+            # SS: expose memory latency as a parameter in the config file
+            # SS: Only applied to SimpleMemory for now
+            if issubclass(cls, m5.objects.SimpleMemory):
+                ctrl.latency = options.mem_latency
 
             # Only do this for DRAMs
             if issubclass(cls, m5.objects.SimpleDRAM):

@@ -165,6 +165,7 @@ CoherentBus::recvTimingReq(PacketPtr pkt, PortID slave_port_id)
     pkt->setSrc(slave_port_id);
 
     calcPacketTiming(pkt);
+    
     Tick packetFinishTime = pkt->busLastWordDelay + curTick();
 
     // uncacheable requests need never be snooped
@@ -258,8 +259,9 @@ CoherentBus::recvTimingResp(PacketPtr pkt, PortID master_port_id)
     // forwarding the packet
     unsigned int pkt_size = pkt->hasData() ? pkt->getSize() : 0;
     unsigned int pkt_cmd = pkt->cmdToIndex();
-
+    
     calcPacketTiming(pkt);
+    
     Tick packetFinishTime = pkt->busLastWordDelay + curTick();
 
     // the packet is a normal response to a request that we should
@@ -363,6 +365,7 @@ CoherentBus::recvTimingSnoopResp(PacketPtr pkt, PortID slave_port_id)
     assert(!pkt->isExpressSnoop());
 
     calcPacketTiming(pkt);
+    
     Tick packetFinishTime = pkt->busLastWordDelay + curTick();
 
     // forward it either as a snoop response or a normal response

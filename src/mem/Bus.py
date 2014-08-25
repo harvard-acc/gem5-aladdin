@@ -52,6 +52,7 @@ class BaseBus(MemObject):
     master = VectorMasterPort("vector port for connecting slaves")
     header_cycles = Param.Cycles(1, "cycles of overhead per transaction")
     width = Param.Unsigned(8, "bus width (bytes)")
+    is_perfect_bus = Param.Bool (False, "Is this bus perfect (e.g., no bandwidth constrain)")
 
     # The default port can be left unconnected, or be used to connect
     # a default slave port
