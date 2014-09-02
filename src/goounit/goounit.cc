@@ -1,5 +1,5 @@
 #include "debug/O3CPU.hh"
-#include "cpu/o3/goounit.hh"
+#include "goounit/goounit.hh"
 
 GooUnit::GooUnit (const Params *p) : 
   MemObject(p), nbCore(p->nbCore),

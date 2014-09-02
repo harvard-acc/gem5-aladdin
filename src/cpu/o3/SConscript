@@ -41,9 +41,7 @@ if 'O3CPU' in env['CPU_MODELS']:
     SimObject('FUPool.py')
     SimObject('FuncUnitConfig.py')
     SimObject('O3CPU.py')
-    SimObject('GooUnit.py')
 
-    Source('goounit.cc')
     Source('base_dyn_inst.cc')
     Source('commit.cc')
     Source('cpu.cc')

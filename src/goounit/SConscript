@@ -1,0 +1,7 @@
+import sys
+
+Import('*')
+
+SimObject('GooUnit.py')
+Source('goounit.cc')
+
