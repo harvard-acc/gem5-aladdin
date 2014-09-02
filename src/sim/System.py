@@ -57,6 +57,7 @@ class System(MemObject):
     memories = VectorParam.AbstractMemory(Self.all,
                                           "All memories in the system")
     mem_mode = Param.MemoryMode('atomic', "The mode the memory system is in")
+    goounit = Param.GooUnit(Self.all, "access to the goounit in the system");
 
     # The memory ranges are to be populated when creating the system
     # such that these can be passed from the I/O subsystem through an

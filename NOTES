@@ -1,5 +1,23 @@
 This file is to record things I try to figure out how gem5 works. 
 
+09-02-2014
+All the objects are instatiated in function instatiate() in
+src/python/m5/simulate.py
+*The structure is instantiated starting from the root instance and descending
+along the SimObject children
+
+Add GooUnit:
+
+1. Create a GooUnit.py in src/cpu/o3
+2. Create a goounit.cc in src/cpu/o3; with create() function
+3. Declare in goounit.hh file
+4. Instantiate a GooUnit object in configs/example/se.py
+   when initialize System
+5. Adapt src/cpu/o3/Sconscript
+6. Adapt src/sim/system.cc to get a reference on the new unit
+7. Adapt src/sim/system.hh
+8. Adapt src/sim/System.py
+
 08-25-2014
 
 Add debugging flag:

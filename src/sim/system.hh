@@ -183,7 +183,7 @@ class System : public MemObject
      * Get the cache line size of the system.
      */
     unsigned int cacheLineSize() const { return _cacheLineSize; }
-
+    
 #if THE_ISA != NULL_ISA
     PCEventQueue pcEventQueue;
 #endif
@@ -269,6 +269,8 @@ class System : public MemObject
     PhysicalMemory physmem;
 
     Enums::MemoryMode memoryMode;
+    
+    GooUnit *gooUnit;
 
     const unsigned int _cacheLineSize;
 
