@@ -272,6 +272,8 @@ class System : public MemObject
     
     GooUnit *gooUnit;
 
+    Datapath *datapath;
+
     const unsigned int _cacheLineSize;
 
     uint64_t workItemsBegin;

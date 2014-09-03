@@ -119,6 +119,17 @@ def addCommonOptions(parser):
     parser.add_option("--l2_hit_latency", type="int", default="20")
     parser.add_option("--cacheline_size", type="int", default=64)
 
+    # Aladdin Options
+    parser.add_option("--aladdin", action="store_true")
+    parser.add_option("--aladdin_bench_name", type="string", default=None,
+                        help="Bench Name for Aladdin")
+    parser.add_option("--aladdin_trace_file_name", type="string", default=None,
+                        help="Trace File Name for Aladdin")
+    parser.add_option("--aladdin_config_file_name", type="string", default=None,
+                        help="Config File Name for Aladdin")
+    parser.add_option("--aladdin_cycle_time", type="int", default="6",
+                        help="Cycle Time for Aladdin")
+    
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 

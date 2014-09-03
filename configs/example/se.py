@@ -160,11 +160,22 @@ if options.smt and options.num_cpus > 1:
     fatal("You cannot use SMT with multiple CPUs!")
 
 np = options.num_cpus
-system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
-                mem_mode = test_mem_mode,
-                goounit = GooUnit(nbCore = np),
-                mem_ranges = [AddrRange(options.mem_size)],
-                cache_line_size = options.cacheline_size)
+if options.aladdin:
+  system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
+                  mem_mode = test_mem_mode,
+                  goounit = GooUnit(nbCore = np),
+                  datapath = Datapath(benchName = options.aladdin_bench_name,
+                                      traceFileName = options.aladdin_trace_file_name,
+                                      configFileName = options.aladdin_config_file_name,
+                                      cycleTime = options.aladdin_cycle_time),
+                  mem_ranges = [AddrRange(options.mem_size)],
+                  cache_line_size = options.cacheline_size)
+else:
+  system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
+                  mem_mode = test_mem_mode,
+                  goounit = GooUnit(nbCore = np),
+                  mem_ranges = [AddrRange(options.mem_size)],
+                  cache_line_size = options.cacheline_size)
 
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
