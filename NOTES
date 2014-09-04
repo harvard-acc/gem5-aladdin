@@ -1,4 +1,10 @@
 This file is to record things I try to figure out how gem5 works. 
+09-03-2014
+
+Connect ports to CPU
+src/cpu/BaseCPU.py
+connectAllPorts
+addPrivateSplitL1Caches()
 
 09-02-2014
 All the objects are instatiated in function instatiate() in
