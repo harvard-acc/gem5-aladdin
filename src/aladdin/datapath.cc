@@ -646,7 +646,7 @@ void Datapath::loopPipelining()
       else
       {
         assert(is_branch_op(microop.at(*loop_bound_it)));
-        assert(!is_branch_op(node_id));
+        assert(!is_branch_op(microop.at(node_id)));
         first_non_isolated_node[*loop_bound_it] = node_id;
         node_id = *loop_bound_it;
         break;
