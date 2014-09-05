@@ -8,7 +8,6 @@ Datapath::Datapath (const Params *p):
   configFileName(p->configFileName),
   cycleTime(p->cycleTime),
   dddg(this),
-  scratchpad(this, 1),
   tickEvent(this)
 {
   if(dddg.build_initial_dddg())
@@ -70,8 +69,6 @@ void Datapath::globalOptimizationPass()
   removeInductionDependence();
   removePhiNodes();
   initBaseAddress();
-  completePartition();
-  scratchpadPartition();
   loopFlatten();
   loopUnrolling();
   removeSharedLoads();
@@ -376,28 +373,6 @@ void Datapath::loopFlatten()
   writeGraphWithIsolatedNodes(to_remove_nodes);
   cleanLeafNodes();
 }
-/*
- * Modify: graph, edgetype, edgelatency, baseAddress, microop
- * */
-void Datapath::completePartition()
-{
-  std::unordered_map<std::string, unsigned> comp_part_config;
-  if (!readCompletePartitionConfig(comp_part_config))
-    return;
-  
-  std::cerr << "-------------------------------" << std::endl;
-  std::cerr << "        Mem to Reg Conv        " << std::endl;
-  std::cerr << "-------------------------------" << std::endl;
-  
-  for (auto it = comp_part_config.begin(); it != comp_part_config.end(); ++it)
-  {
-    std::string base_addr = it->first;
-    unsigned size = it->second;
-
-    scratchpad.setCompScratchpad(base_addr, size);
-  }
-
-}
 void Datapath::cleanLeafNodes()
 {
   //set graph
@@ -493,80 +468,6 @@ void Datapath::removeInductionDependence()
   }
 }
 
-/*
- * Modify: benchName_membase.gz
- * */
-void Datapath::scratchpadPartition()
-{
-  //read the partition config file to get the address range
-  // <base addr, <type, part_factor> > 
-  std::unordered_map<std::string, partitionEntry> part_config;
-  if (!readPartitionConfig(part_config))
-    return;
-
-  std::cerr << "-------------------------------" << std::endl;
-  std::cerr << "      ScratchPad Partition     " << std::endl;
-  std::cerr << "-------------------------------" << std::endl;
-  std::string bn(benchName);
-  
-  std::string partition_file;
-  partition_file = bn + "_partition_config";
-
-  std::unordered_map<unsigned, pair<long long int, unsigned> > address;
-  initAddressAndSize(address);
-  //set scratchpad
-  for(auto it = part_config.begin(); it!= part_config.end(); ++it)
-  {
-    std::string base_addr = it->first;
-    unsigned size = it->second.array_size; //num of words
-    unsigned p_factor = it->second.part_factor;
-    unsigned per_size = ceil(size / p_factor);
-    
-    for ( unsigned i = 0; i < p_factor ; i++)
-    {
-      ostringstream oss;
-      oss << base_addr << "-" << i;
-      scratchpad.setScratchpad(oss.str(), per_size);
-    }
-  }
-  for(unsigned node_id = 0; node_id < numTotalNodes; node_id++)
-  {
-    int node_microop = microop.at(node_id);
-    if (!is_memory_op(node_microop))
-      continue;
-    
-    if (baseAddress.find(node_id) == baseAddress.end())
-      continue;
-    std::string base_label  = baseAddress[node_id].first;
-    long long int base_addr = baseAddress[node_id].second;
-    
-    auto part_it = part_config.find(base_label);
-    if (part_it != part_config.end())
-    {
-      std::string p_type = part_it->second.type;
-      assert((!p_type.compare("block")) || (!p_type.compare("cyclic")));
-      
-      unsigned num_of_elements = part_it->second.array_size;
-      unsigned p_factor        = part_it->second.part_factor;
-      long long int abs_addr        = address[node_id].first;
-      unsigned data_size       = address[node_id].second / 8; //in bytes
-      unsigned rel_addr        = (abs_addr - base_addr ) / data_size; 
-      if (!p_type.compare("block"))  //block partition
-      {
-        ostringstream oss;
-        unsigned num_of_elements_in_2 = next_power_of_two(num_of_elements);
-        oss << base_label << "-" << (int) (rel_addr / ceil (num_of_elements_in_2  / p_factor)) ;
-        baseAddress[node_id].first = oss.str();
-      }
-      else // (!p_type.compare("cyclic")), cyclic partition
-      {
-        ostringstream oss;
-        oss << base_label << "-" << (rel_addr) % p_factor;
-        baseAddress[node_id].first = oss.str();
-      }
-    }
-  }
-}
 //called in the end of the whole flow
 void Datapath::dumpStats()
 {
@@ -1559,31 +1460,12 @@ void Datapath::writePerCycleActivity()
   std::unordered_map< std::string, std::vector<int> > mul_activity;
   std::unordered_map< std::string, std::vector<int> > add_activity;
   std::unordered_map< std::string, std::vector<int> > bit_activity;
-  std::unordered_map< std::string, std::vector<int> > ld_activity;
-  std::unordered_map< std::string, std::vector<int> > st_activity;
   
   std::vector<std::string> partition_names;
   std::vector<std::string> comp_partition_names;
-  scratchpad.partitionNames(partition_names);
-  scratchpad.compPartitionNames(comp_partition_names);
 
-  float avg_power, avg_fu_power, avg_mem_power, total_area, fu_area, mem_area;
-  mem_area = 0;
+  float avg_power, avg_fu_power, total_area, fu_area;
   fu_area = 0;
-  for (auto it = partition_names.begin(); it != partition_names.end() ; ++it)
-  {
-    std::string p_name = *it;
-    ld_activity.insert({p_name, make_vector(cycle)});
-    st_activity.insert({p_name, make_vector(cycle)});
-    mem_area += scratchpad.area(*it);
-  }
-  for (auto it = comp_partition_names.begin(); it != comp_partition_names.end() ; ++it)
-  {
-    std::string p_name = *it;
-    ld_activity.insert({p_name, make_vector(cycle)});
-    st_activity.insert({p_name, make_vector(cycle)});
-    fu_area += scratchpad.area(*it);
-  }
   for (auto it = functionNames.begin(); it != functionNames.end() ; ++it)
   {
     std::string p_name = *it;
@@ -1607,16 +1489,6 @@ void Datapath::writePerCycleActivity()
       add_activity[func_id].at(tmp_level) +=1;
     else if (is_bit_op(node_microop))
       bit_activity[func_id].at(tmp_level) +=1;
-    else if (is_load_op(node_microop))
-    {
-      std::string base_addr = baseAddress[node_id].first;
-      ld_activity[base_addr].at(tmp_level) += 1;
-    }
-    else if (is_store_op(node_microop))
-    {
-      std::string base_addr = baseAddress[node_id].first;
-      st_activity[base_addr].at(tmp_level) += 1;
-    }
   }
   ofstream stats, power_stats;
   std::string tmp_name = bn + "_stats";
@@ -1658,19 +1530,13 @@ void Datapath::writePerCycleActivity()
   float reg_leakage_per_cycle = REG_leak_power * 32 * max_reg;
 
   fu_area += ADD_area * max_add + MUL_area * max_mul + REG_area * 32 * max_reg;
-  total_area = mem_area + fu_area;
+  total_area = fu_area;
   
-  for (auto it = partition_names.begin(); it != partition_names.end() ; ++it)
-  {
-    stats << *it << "," ;
-    power_stats << *it << "," ;
-  }
   stats << "reg" << std::endl;
   power_stats << "reg" << std::endl;
 
   avg_power = 0;
   avg_fu_power = 0;
-  avg_mem_power = 0;
   
   for (unsigned tmp_level = 0; ((int)tmp_level) < cycle ; ++tmp_level)
   {
@@ -1685,28 +1551,10 @@ void Datapath::writePerCycleActivity()
       avg_fu_power += tmp_mul_power + tmp_add_power;
       power_stats  << tmp_mul_power << "," << tmp_add_power << ",0," ;
     }
-    //For memory
-    for (auto it = partition_names.begin(); it != partition_names.end() ; ++it)
-    {
-      stats << ld_activity.at(*it).at(tmp_level) << "," << st_activity.at(*it).at(tmp_level) << "," ;
-      float tmp_mem_power = scratchpad.readPower(*it) * ld_activity.at(*it).at(tmp_level) + 
-                            scratchpad.writePower(*it) * st_activity.at(*it).at(tmp_level) + 
-                            scratchpad.leakPower(*it);
-      avg_mem_power += tmp_mem_power;
-      power_stats << tmp_mem_power << "," ;
-    }
     //For regs
     int curr_reg_reads = regStats.at(tmp_level).reads;
     int curr_reg_writes = regStats.at(tmp_level).writes;
     float tmp_reg_power = (REG_int_power + REG_sw_power) *(regStats.at(tmp_level).reads + regStats.at(tmp_level).writes) * 32  + reg_leakage_per_cycle;
-    for (auto it = comp_partition_names.begin(); it != comp_partition_names.end() ; ++it)
-    {
-      curr_reg_reads     += ld_activity.at(*it).at(tmp_level);
-      curr_reg_writes    += st_activity.at(*it).at(tmp_level);
-      tmp_reg_power      += scratchpad.readPower(*it) * ld_activity.at(*it).at(tmp_level) + 
-                            scratchpad.writePower(*it) * st_activity.at(*it).at(tmp_level) + 
-                            scratchpad.leakPower(*it);
-    }
     avg_fu_power += tmp_reg_power;
     
     stats << curr_reg_reads << "," << curr_reg_writes <<std::endl;
@@ -1716,8 +1564,7 @@ void Datapath::writePerCycleActivity()
   power_stats.close();
   
   avg_fu_power /= cycle;
-  avg_mem_power /= cycle;
-  avg_power = avg_fu_power + avg_mem_power;
+  avg_power = avg_fu_power;
   //Summary output:
   //Cycle, Avg Power, Avg FU Power, Avg MEM Power, Total Area, FU Area, MEM Area
   std::cerr << "===============================" << std::endl;
@@ -1727,10 +1574,8 @@ void Datapath::writePerCycleActivity()
   std::cerr << "Cycle : " << cycle << " cycle" << std::endl;
   std::cerr << "Avg Power: " << avg_power << " mW" << std::endl;
   std::cerr << "Avg FU Power: " << avg_fu_power << " mW" << std::endl;
-  std::cerr << "Avg MEM Power: " << avg_mem_power << " mW" << std::endl;
   std::cerr << "Total Area: " << total_area << " uM^2" << std::endl;
   std::cerr << "FU Area: " << fu_area << " uM^2" << std::endl;
-  std::cerr << "MEM Area: " << mem_area << " uM^2" << std::endl;
   std::cerr << "===============================" << std::endl;
   std::cerr << "        Aladdin Results        " << std::endl;
   std::cerr << "===============================" << std::endl;
@@ -1745,10 +1590,8 @@ void Datapath::writePerCycleActivity()
   summary << "Cycle : " << cycle << " cycle" << std::endl;
   summary << "Avg Power: " << avg_power << " mW" << std::endl;
   summary << "Avg FU Power: " << avg_fu_power << " mW" << std::endl;
-  summary << "Avg MEM Power: " << avg_mem_power << " mW" << std::endl;
   summary << "Total Area: " << total_area << " uM^2" << std::endl;
   summary << "FU Area: " << fu_area << " uM^2" << std::endl;
-  summary << "MEM Area: " << mem_area << " uM^2" << std::endl;
   summary << "===============================" << std::endl;
   summary << "        Aladdin Results        " << std::endl;
   summary << "===============================" << std::endl;
@@ -2087,7 +1930,6 @@ void Datapath::step()
   //FIXME: exit condition
   if (executedNodes < totalConnectedNodes)
   {
-    scratchpad.step();
     schedule(tickEvent, clockEdge(Cycles(1)));
   }
   else
@@ -2104,6 +1946,15 @@ void Datapath::stepExecutingQueue()
     if (is_memory_op(microop.at(node_id)))
     {
       std::string node_part = baseAddress[node_id].first;
+      executedNodes++;
+      newLevel.at(node_id) = cycle;
+      executingQueue.erase(it);
+      updateChildren(node_id);
+      it = executingQueue.begin();
+      std::advance(it, index);
+
+      /*
+      //FIXME
       if(scratchpad.canServicePartition(node_part))
       {
         assert(scratchpad.addressRequest(node_part));
@@ -2114,11 +1965,13 @@ void Datapath::stepExecutingQueue()
         it = executingQueue.begin();
         std::advance(it, index);
       }
+      //FIXME
       else
       {
         ++it;
         ++index;
       }
+      */
     }
     else
     {

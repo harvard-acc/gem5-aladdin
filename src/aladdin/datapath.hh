@@ -27,7 +27,6 @@
 #include "opcode_func.h"
 #include "generic_func.h"
 
-#include "scratchpad.hh"
 #include "dddg.hh"
 
 #define CONTROL_EDGE 11
@@ -95,7 +94,6 @@ class Datapath: public MemObject
     float cycleTime;
     
     DDDG dddg;
-    Scratchpad scratchpad;
     
     //gem5 tick
     void step();
@@ -121,7 +119,6 @@ class Datapath: public MemObject
     void globalOptimizationPass();
     void initBaseAddress();
     void cleanLeafNodes();
-    void completePartition();
     void removeInductionDependence();
     void removePhiNodes();
     void memoryAmbiguation();
@@ -135,7 +132,6 @@ class Datapath: public MemObject
     void storeBuffer();
     void removeRepeatedStores();
     void treeHeightReduction();
-    void scratchpadPartition();
     void findMinRankNodes(unsigned &node1, unsigned &node2, std::map<unsigned, unsigned> &rank_map);
 
     bool readPipeliningConfig();
