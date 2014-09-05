@@ -270,7 +270,7 @@ class System : public MemObject
 
     Enums::MemoryMode memoryMode;
     
-    GooUnit *gooUnit;
+    //GooUnit *gooUnit;
 
     Datapath *datapath;
 

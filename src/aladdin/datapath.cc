@@ -2090,6 +2090,8 @@ void Datapath::step()
     scratchpad.step();
     schedule(tickEvent, clockEdge(Cycles(1)));
   }
+  else
+    dumpStats();
 }
 
 void Datapath::stepExecutingQueue()

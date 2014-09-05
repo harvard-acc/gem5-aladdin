@@ -82,7 +82,7 @@ System::System(Params *p)
       nextPID(0),
       physmem(name() + ".physmem", p->memories),
       memoryMode(p->mem_mode),
-      gooUnit(p->goounit),
+      //gooUnit(p->goounit),
       datapath(p->datapath),
       _cacheLineSize(p->cache_line_size),
       workItemsBegin(0),

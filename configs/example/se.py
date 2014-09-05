@@ -163,7 +163,7 @@ np = options.num_cpus
 if options.aladdin:
   system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
                   mem_mode = test_mem_mode,
-                  goounit = GooUnit(nbCore = np),
+                  #goounit = GooUnit(nbCore = np),
                   datapath = Datapath(benchName = options.aladdin_bench_name,
                                       traceFileName = options.aladdin_trace_file_name,
                                       configFileName = options.aladdin_config_file_name,
@@ -173,7 +173,7 @@ if options.aladdin:
 else:
   system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
                   mem_mode = test_mem_mode,
-                  goounit = GooUnit(nbCore = np),
+                  #goounit = GooUnit(nbCore = np),
                   mem_ranges = [AddrRange(options.mem_size)],
                   cache_line_size = options.cacheline_size)
 
