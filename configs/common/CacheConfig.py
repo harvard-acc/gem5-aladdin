@@ -101,6 +101,7 @@ def config_cache(options, system):
             else:
                 system.cpu[i].addPrivateSplitL1Caches(icache, dcache)
         system.cpu[i].createInterruptController()
+        
         if options.l2cache:
             system.cpu[i].connectAllPorts(system.tol2bus, system.membus)
         else:

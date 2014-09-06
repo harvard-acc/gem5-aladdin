@@ -141,6 +141,7 @@ def config_mem(options, system):
     if 2 ** intlv_bits != nbr_mem_ctrls:
         fatal("Number of memory channels must be a power of 2")
     cls = get(options.mem_type)
+    
     mem_ctrls = []
 
     # The default behaviour is to interleave on cache line granularity
@@ -193,3 +194,34 @@ def config_mem(options, system):
     # Connect the controllers to the membus
     for i in xrange(nbr_mem_ctrls):
         system.mem_ctrls[i].port = system.membus.master
+    
+    # Aladdin memory configuration
+    if options.aladdin:
+      aladdin_cls = get(options.mem_type)
+      aladdin_mem_ctrls = []
+
+      # The default behaviour is to interleave on cache line granularity
+      cache_line_bit = int(math.log(system.cache_line_size.value, 2)) - 1
+      intlv_low_bit = cache_line_bit
+
+      # For every range (most systems will only have one), create an
+      # array of controllers and set their parameters to match their
+      # address mapping in the case of a DRAM
+      for r in system.mem_ranges:
+          for i in xrange(nbr_mem_ctrls):
+              # Create an instance so we can figure out the address
+              # mapping and row-buffer size
+              aladdin_ctrl = aladdin_cls()
+              # SS: expose memory latency as a parameter in the config file
+              # SS: Only applied to SimpleMemory for now
+              if issubclass(aladdin_cls, m5.objects.SimpleMemory):
+                  aladdin_ctrl.latency = options.mem_latency
+
+              aladdin_mem_ctrls.append(aladdin_ctrl)
+
+      system.aladdin_mem_ctrls = aladdin_mem_ctrls
+
+      # Connect the controllers to the membus
+      for i in xrange(nbr_mem_ctrls):
+          system.aladdin_mem_ctrls[i].port = system.aladdin_membus.master
+

@@ -1,4 +1,26 @@
 This file is to record things I try to figure out how gem5 works. 
+09-05-2014
+how are ports from different objects connected?1
+in CacheConfig.py
+connectAllPorts() in src/cpu/BaseCPU.py
+
+:def connectAllPorts(self, cached_bus, uncached_bus = None)
+
+if options.l2cache:
+    system.cpu[i].connectAllPorts(system.tol2bus, system.membus)
+else:
+    system.cpu[i].connectAllPorts(system.membus)
+
+def connectCachedPorts(self, bus):
+    for p in self._cached_ports:
+        exec('self.%s = bus.slave' % p)
+
+def connectUncachedPorts(self, bus):
+    for p in self._uncached_slave_ports:
+        exec('self.%s = bus.master' % p)
+    for p in self._uncached_master_ports:
+        exec('self.%s = bus.slave' % p)
+
 09-03-2014
 
 Connect ports to CPU
