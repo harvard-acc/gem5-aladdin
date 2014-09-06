@@ -86,7 +86,6 @@ class Datapath: public MemObject
       bool operator() (const RQEntry& left, const RQEntry &right) const  
       { return left.node_id < right.node_id; }
     };
-  public:
     typedef DatapathParams Params;
     std::string benchName;
     std::string traceFileName;
@@ -94,6 +93,27 @@ class Datapath: public MemObject
     float cycleTime;
     
     DDDG dddg;
+    const unsigned int _cacheLineSize;
+    
+    class DcachePort : public MasterPort
+    {
+      public: 
+      //FIXME
+        DcachePort (Datapath * _datapath) 
+          : MasterPort(_datapath->name() + ".dcache_port", _datapath) {}
+      protected: 
+        bool recvTimingResp(PacketPtr pkt);
+        void recvTimingSnoopReq(packetPtr pkt);
+        void recvRetry();
+        bool isSnooping() const {return true;}
+    };
+
+    void completeDataAccess(PacketPtr pkt);
+    
+    MasterID _dataMasterId;
+    DcachePort dcachePort;
+
+  public:
     
     //gem5 tick
     void step();
@@ -102,6 +122,9 @@ class Datapath: public MemObject
     Datapath(const Params *p);
     ~Datapath();
     
+    MasterPort &getDataPort(){return dcachePort;};
+    MasterID dataMasterId() {return _dataMasterId};
+
     void parse_config();
     bool fileExists (const string file_name)
     {

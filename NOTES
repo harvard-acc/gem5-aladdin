@@ -1,4 +1,228 @@
 This file is to record things I try to figure out how gem5 works. 
+09-06-2014
+How load is executed:
+1. src/cpu/o3/iew_impl.hh
+executeInsts()
+{
+  if (inst->isLoad()) 
+    fault = ldstQueue.executeLoad(inst);
+}
+2. src/cpu/o3/lsq_impl.hh
+executeLoad(inst)
+{
+  ThreadID tid = inst->threadNumber;
+  return thread[tid].executeLoad(inst);
+}
+3. src/cpu/o3/lsq_unit_impl.hh
+executeLoad(inst)
+{
+  load_fault = inst->initiateAcc();
+}
+4. src/arch/x86/isa/microops/ldstop.isa
+//for load inst
+def template MicroLoadInitiateAcc {{
+    Fault %(class_name)s::initiateAcc(%(CPU_exec_context)s * xc,
+            Trace::InstRecord * traceData) const
+    {
+        Fault fault = NoFault;
+        Addr EA;
+        %(op_decl)s;
+        %(op_rd)s;
+        %(ea_code)s;
+        DPRINTF(X86, "%s : %s: The address is %#x\n", instMnem, mnemonic, EA);
+        fault = readMemTiming(xc, traceData, EA, Mem, dataSize, memFlags);
+        return fault;
+    }
+}};
+def template MicroLoadCompleteAcc {{
+    Fault %(class_name)s::completeAcc(PacketPtr pkt,
+            %(CPU_exec_context)s * xc,
+            Trace::InstRecord * traceData) const
+    {
+        Fault fault = NoFault;
+        %(op_decl)s;
+        %(op_rd)s;
+        Mem = getMem(pkt, dataSize, traceData);
+        %(code)s;
+        if(fault == NoFault)
+            %(op_wb)s;
+        return fault;
+    }
+}};
+template <class MemT>
+void
+getMem(PacketPtr pkt, MemT &mem, Trace::InstRecord *traceData)
+{
+    mem = pkt->get<MemT>();
+    if (traceData)
+        traceData->setData(mem);
+}
+def defineMicroLoadOp(mnemonic, code, bigCode='',
+                      mem_flags="0", big=True):
+dataSize="env.dataSize",
+
+//for store inst
+def template MicroStoreInitiateAcc {{
+  Fault %(class_name)s::initiateAcc(%(CPU_exec_context)s * xc,
+          Trace::InstRecord * traceData) const
+  {
+      Fault fault = NoFault;
+      Addr EA;
+      %(op_decl)s;
+      %(op_rd)s;
+      %(ea_code)s;
+      DPRINTF(X86, "%s : %s: The address is %#x\n", instMnem, mnemonic, EA);
+      %(code)s;
+      if(fault == NoFault)
+      {
+          fault = writeMemTiming(xc, traceData, Mem, dataSize, EA,
+                  memFlags, NULL);
+      }
+      return fault;
+  }
+}};
+def template MicroStoreCompleteAcc {{
+    Fault %(class_name)s::completeAcc(PacketPtr pkt,
+            %(CPU_exec_context)s * xc, Trace::InstRecord * traceData) const
+    {
+        %(op_decl)s;
+        %(op_rd)s;
+        %(complete_code)s;
+        %(op_wb)s;
+        return NoFault;
+    }
+}};
+5. src/arch/generic/memhelpers.hh
+Fault readMemTiming(XC *xc, Trace::InstRecord *traceData, Addr addr,
+        MemT &mem, unsigned flags)
+{
+    return xc->readMem(addr, (uint8_t *)&mem, sizeof(MemT), flags);
+}
+Fault writeMemTiming(XC *xc, Trace::InstRecord *traceData, MemT mem, Addr addr,
+        unsigned flags, uint64_t *res)
+{
+    if (traceData) {
+        traceData->setData(mem);
+    }
+    mem = TheISA::htog(mem);
+    return xc->writeMem((uint8_t *)&mem, sizeof(MemT), addr, flags, res);
+}
+
+6. src/cpu/base_dyn_inst.hh
+Fault BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
+                           unsigned size, unsigned flags)
+{
+  //form request
+  Request *req = NULL;
+  Request *sreqLow = NULL;
+  Request *sreqHigh = NULL;
+  req = new Request(asid, addr, size, flags, masterId(), this->pc.instAddr(),
+                    thread->contextId(), threadNumber);
+  initiateTranslation(req, sreqLow, sreqHigh, NULL, BaseTLB::Read);
+  if (translationCompleted()) {
+    fault = cpu->read(req, sreqLow, sreqHigh, data, lqIdx);
+  }
+}
+BaseDynInst<Impl>::writeMem(uint8_t *data, unsigned size,
+                            Addr addr, unsigned flags, uint64_t *res)
+{
+
+  fault = cpu->write(req, sreqLow, sreqHigh, data, sqIdx);
+}
+
+class BaseDynInst : public RefCounted
+{
+    /** Sets the ASID. */
+    void setASID(short addr_space_id) { asid = addr_space_id; }
+    /** Read this CPU's data requestor ID */
+    MasterID masterId() { return cpu->dataMasterId(); }
+    /** Store queue index. */
+    int16_t sqIdx;
+};
+7. src/cpu/o3/cpu.hh
+/** CPU read function, forwards read to LSQ. */
+Fault read(RequestPtr &req, RequestPtr &sreqLow, RequestPtr &sreqHigh,
+           uint8_t *data, int load_idx)
+{
+    return this->iew.ldstQueue.read(req, sreqLow, sreqHigh,
+                                    data, load_idx);
+}
+Fault write(RequestPtr &req, RequestPtr &sreqLow, RequestPtr &sreqHigh,
+            uint8_t *data, int store_idx)
+{
+    return this->iew.ldstQueue.write(req, sreqLow, sreqHigh,
+                                     data, store_idx);
+}
+8. src/cpu/o3/lsq.hh
+template <class Impl>
+Fault LSQ<Impl>::read(RequestPtr req, RequestPtr sreqLow, RequestPtr sreqHigh,
+                uint8_t *data, int load_idx)
+{
+    ThreadID tid = req->threadId();
+    return thread[tid].read(req, sreqLow, sreqHigh, data, load_idx);
+}
+template <class Impl>
+Fault
+LSQ<Impl>::write(RequestPtr req, RequestPtr sreqLow, RequestPtr sreqHigh,
+                 uint8_t *data, int store_idx)
+{
+    ThreadID tid = req->threadId();
+    return thread[tid].write(req, sreqLow, sreqHigh, data, store_idx);
+}
+9. src/cpu/o3/lsq_unit.hh
+template <class Impl>
+Fault
+LSQUnit<Impl>::read(Request *req, Request *sreqLow, Request *sreqHigh,
+                    uint8_t *data, int load_idx)
+{
+    // If there's no forwarding case, then go access memory
+    DPRINTF(LSQUnit, "Doing memory access for inst [sn:%lli] PC %s\n",
+            load_inst->seqNum, load_inst->pcState());
+    
+    MemCmd command =
+        req->isLLSC() ? MemCmd::LoadLockedReq : MemCmd::ReadReq;
+    
+    PacketPtr data_pkt = new Packet(req, command);
+    data_pkt->dataStatic(load_inst->memData);
+    
+    LSQSenderState *state = new LSQSenderState;
+    state->isLoad = true;
+    state->idx = load_idx;
+    state->inst = load_inst;
+    data_pkt->senderState = state;
+    
+    fst_data_pkt = data_pkt;
+    if (!dcachePort->sendTimingReq(fst_data_pkt)) {
+
+}
+LSQUnit<Impl>::write(Request *req, Request *sreqLow, Request *sreqHigh,
+                     uint8_t *data, int store_idx)
+{
+  memcpy(storeQueue[store_idx].data, data, size);
+}
+LSQUnit<Impl>::writebackStores()
+{
+  PacketPtr data_pkt;
+  LSQSenderState *state = new LSQSenderState;
+  state->isLoad = false;
+  state->idx = storeWBIdx;
+  state->inst = inst;
+  data_pkt = new Packet(req, command);
+  
+  inst->memData = new uint8_t[64];
+  memcpy(inst->memData, storeQueue[storeWBIdx].data, req->getSize());
+  data_pkt->dataStatic(inst->memData);
+  data_pkt->senderState = state;
+  
+  } else if (!sendStore(data_pkt)) {
+
+}
+LSQUnit<Impl>::sendStore(PacketPtr data_pkt)
+{
+  if (!dcachePort->sendTimingReq(data_pkt)) {
+
+}
+
 09-05-2014
 how are ports from different objects connected?1
 in CacheConfig.py
