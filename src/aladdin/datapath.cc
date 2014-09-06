@@ -8,6 +8,9 @@ Datapath::Datapath (const Params *p):
   configFileName(p->configFileName),
   cycleTime(p->cycleTime),
   dddg(this),
+  _dataMasterId(p->system->getmasterId(name() + ".data")),
+  _cacheLineSize(p->system->cacheLineSize()),
+  dcachePort(this),
   tickEvent(this)
 {
   if(dddg.build_initial_dddg())
@@ -49,6 +52,22 @@ Datapath::Datapath (const Params *p):
 
 Datapath::~Datapath()
 {}
+
+//dcachePort interface
+bool
+Datapath::recvTimingResp(PacketPtr pkt)
+{
+  if (pkt->isError())
+    DPRINTF(Datapath, "Got error packet back for address: %#X\n", pkt->getAddr());
+  completeDataAccess(pkt);
+  return true;
+}
+
+void
+Datapath::completeDataAccess(PacketPtr pkt)
+{
+
+}
 
 //optimizationFunctions
 void Datapath::setGlobalGraph()
