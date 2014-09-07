@@ -8,11 +8,13 @@ Datapath::Datapath (const Params *p):
   configFileName(p->configFileName),
   cycleTime(p->cycleTime),
   dddg(this),
-  _dataMasterId(p->system->getmasterId(name() + ".data")),
+  _dataMasterId(p->system->getMasterId(name() + ".data")),
   _cacheLineSize(p->system->cacheLineSize()),
   dcachePort(this),
-  tickEvent(this)
+  tickEvent(this),
+  retryPkt(NULL)
 {
+  
   if(dddg.build_initial_dddg())
   {
     std::cerr << "-------------------------------" << std::endl;
@@ -41,7 +43,7 @@ Datapath::Datapath (const Params *p):
     if (functionNames.find(func_id) == functionNames.end())
       functionNames.insert(func_id);
   }
-
+  initActualAddress();
   setGlobalGraph();
   globalOptimizationPass();
   clearGlobalGraph();
@@ -55,18 +57,79 @@ Datapath::~Datapath()
 
 //dcachePort interface
 bool
-Datapath::recvTimingResp(PacketPtr pkt)
+Datapath::DcachePort::recvTimingResp(PacketPtr pkt)
 {
   if (pkt->isError())
     DPRINTF(Datapath, "Got error packet back for address: %#X\n", pkt->getAddr());
-  completeDataAccess(pkt);
+  datapath->completeDataAccess(pkt);
   return true;
+}
+void
+Datapath::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
+{
+  DPRINTF(Datapath, "received pkt for addr:%#x %s\n", pkt->getAddr(), pkt->cmdString());
+  if (pkt->isInvalidate())
+  {
+    DPRINTF(Datapath, "received invalidation for addr:%#x\n", pkt->getAddr());
+  }
+}
+void
+Datapath::DcachePort::recvRetry()
+{
+  assert(datapath->retryPkt != NULL);
+  if (datapath->dcachePort.sendTimingReq(datapath->retryPkt))
+  {
+    datapath->retryPkt = NULL;
+  }
+  //else
+    //still blocked
 }
 
 void
 Datapath::completeDataAccess(PacketPtr pkt)
 {
+  DatapathSenderState *state = dynamic_cast<DatapathSenderState *> (pkt->senderState);
 
+  //Mark nodes ready to fire
+  unsigned node_id = state->node_id;
+  assert(executingQueue.find(node_id) != executingQueue.end());
+  assert(executingQueue[node_id] == Issued);
+  executingQueue[node_id] = Returned;
+  delete state;
+  delete pkt->req;
+  delete pkt;
+}
+
+void 
+Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
+{
+  //form request
+  Request *req = NULL;
+  //physical request
+  typedef uint32_t FlagsType;
+  Flags<FlagsType> flags;
+  flags = 0;
+  req = new Request (addr, size, flags, dataMasterId());
+
+  MemCmd command;
+  if (isLoad)
+    command = MemCmd::ReadReq;
+  else
+    command = MemCmd::WriteReq;
+  PacketPtr data_pkt = new Packet(req, command);
+  
+  uint8_t *data = new uint8_t[64];
+  data_pkt->dataStatic<uint8_t>(data);
+  
+  DatapathSenderState *state = new DatapathSenderState(node_id);
+  data_pkt->senderState = state;
+  
+  if(!dcachePort.sendTimingReq(data_pkt))
+  {
+    //blocked, retry
+    assert(retryPkt == NULL);
+    retryPkt = data_pkt;
+  }
 }
 
 //optimizationFunctions
@@ -1798,6 +1861,26 @@ void Datapath::initGetElementPtr(std::unordered_map<unsigned, pair<std::string, 
   }
   gzclose(gzip_file);
 }
+void Datapath::initActualAddress()
+{
+  ostringstream file_name;
+  file_name << benchName << "_memaddr.gz";
+  gzFile gzip_file;
+  gzip_file = gzopen(file_name.str().c_str(), "r");
+  while (!gzeof(gzip_file))
+  {
+    char buffer[256];
+    if (gzgets(gzip_file, buffer, 256) == NULL)
+      break;
+    unsigned node_id;
+    long long int address;
+    int size;
+    sscanf(buffer, "%d,%lld,%d\n", &node_id, &address, &size);
+    actualAddress[node_id] = make_pair(address, size);
+  }
+  gzclose(gzip_file);
+
+}
 void Datapath::initEdgeParID(std::vector<int> &parid)
 {
   std::string file_name(graphName);
@@ -1936,7 +2019,7 @@ void Datapath::copyToExecutingQueue()
   auto it = readyToExecuteQueue.begin(); 
   while (it != readyToExecuteQueue.end())
   {
-    executingQueue.push_back(*it);
+    executingQueue[*it] = Ready;
     it = readyToExecuteQueue.erase(it);
   }
 }
@@ -1961,22 +2044,24 @@ void Datapath::stepExecutingQueue()
   int index = 0;
   while (it != executingQueue.end())
   {
-    unsigned node_id = *it;
+    unsigned node_id = it->first;
     if (is_memory_op(microop.at(node_id)))
     {
-      std::string node_part = baseAddress[node_id].first;
-      executedNodes++;
-      newLevel.at(node_id) = cycle;
-      executingQueue.erase(it);
-      updateChildren(node_id);
-      it = executingQueue.begin();
-      std::advance(it, index);
-
-      /*
-      //FIXME
-      if(scratchpad.canServicePartition(node_part))
+      
+      MemAccessStatus status = it->second;
+      if (status == Ready)
       {
-        assert(scratchpad.addressRequest(node_part));
+        //first time see, do access
+        Addr addr = actualAddress[node_id].first;
+        int size = actualAddress[node_id].second;
+        bool isLoad = is_load_op(microop.at(node_id));
+        accessRequest(addr, size, isLoad, node_id);
+        it->second = Issued;
+        ++it;
+        ++index;
+      }
+      else if (status == Returned)
+      {
         executedNodes++;
         newLevel.at(node_id) = cycle;
         executingQueue.erase(it);
@@ -1984,13 +2069,11 @@ void Datapath::stepExecutingQueue()
         it = executingQueue.begin();
         std::advance(it, index);
       }
-      //FIXME
       else
       {
         ++it;
         ++index;
       }
-      */
     }
     else
     {
@@ -2019,7 +2102,7 @@ void Datapath::updateChildren(unsigned node_id)
         unsigned child_microop = microop.at(child_id);
         if ( (node_latency(child_microop) == 0 || node_latency(microop.at(node_id))== 0)
              && edgeParid[edge_id] != CONTROL_EDGE )
-          executingQueue.push_back(child_id);
+          executingQueue[child_id] = Ready;
         else
           readyToExecuteQueue.push_back(child_id);
         numParents[child_id] = -1;
@@ -2033,7 +2116,7 @@ void Datapath::initExecutingQueue()
   for(unsigned i = 0; i < numTotalNodes; i++)
   {
     if (numParents[i] == 0 && finalIsolated[i] != 1)
-      executingQueue.push_back(i);
+      executingQueue[i] = Ready;
   }
 }
 

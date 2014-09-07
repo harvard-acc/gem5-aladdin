@@ -543,7 +543,8 @@ if main['GCC'] or main['CLANG']:
     main.Append(CCFLAGS=['-fno-strict-aliasing'])
     # Enable -Wall and then disable the few warnings that we
     # consistently violate
-    main.Append(CCFLAGS=['-Wall', '-Wno-sign-compare', '-Wundef'])
+    #main.Append(CCFLAGS=['-Wall', '-Wno-sign-compare', '-Wundef'])
+    main.Append(CCFLAGS=['-Wall', '-Wno-sign-compare', '-Wundef', '-Wno-unused-local-typedefs', '-Wno-undef'])
     # We always compile using C++11, but only gcc >= 4.7 and clang 3.1
     # actually use that name, so we stick with c++0x
     main.Append(CXXFLAGS=['-std=c++0x'])

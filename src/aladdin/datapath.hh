@@ -4,7 +4,11 @@
 //gem5 Headers
 #include "base/types.hh"
 #include "base/trace.hh"
+#include "base/flags.hh"
+#include "mem/request.hh"
+#include "mem/packet.hh"
 #include "mem/mem_object.hh"
+#include "sim/system.hh"
 #include "sim/clocked_object.hh"
 #include "params/Datapath.hh"
 
@@ -87,43 +91,67 @@ class Datapath: public MemObject
       { return left.node_id < right.node_id; }
     };
     typedef DatapathParams Params;
+    
     std::string benchName;
     std::string traceFileName;
     std::string configFileName;
     float cycleTime;
     
     DDDG dddg;
-    const unsigned int _cacheLineSize;
-    
+
+
+    class Node
+    {
+      public:
+        Node (unsigned _node_id) : node_id(_node_id){};
+        ~Node();
+      private:
+        unsigned node_id;
+    };
+
     class DcachePort : public MasterPort
     {
       public: 
-      //FIXME
         DcachePort (Datapath * _datapath) 
-          : MasterPort(_datapath->name() + ".dcache_port", _datapath) {}
+          : MasterPort(_datapath->name() + ".dcache_port", _datapath),
+            datapath(_datapath) {}
       protected: 
         bool recvTimingResp(PacketPtr pkt);
-        void recvTimingSnoopReq(packetPtr pkt);
+        void recvTimingSnoopReq(PacketPtr pkt);
         void recvRetry();
         bool isSnooping() const {return true;}
+        Datapath *datapath;
     };
 
     void completeDataAccess(PacketPtr pkt);
     
     MasterID _dataMasterId;
+    
+    const unsigned int _cacheLineSize;
+    
     DcachePort dcachePort;
-
-  public:
     
     //gem5 tick
     void step();
     EventWrapper<Datapath, &Datapath::step> tickEvent;
+  
+    class DatapathSenderState : public Packet::SenderState
+    {
+      public:
+        DatapathSenderState(unsigned _node_id) : node_id(_node_id) {}
+        unsigned node_id;
+    };
+    PacketPtr retryPkt;
+    void accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
+
+  public:
+    
     
     Datapath(const Params *p);
     ~Datapath();
     
     MasterPort &getDataPort(){return dcachePort;};
-    MasterID dataMasterId() {return _dataMasterId};
+    MasterID dataMasterId() {return _dataMasterId;};
 
     void parse_config();
     bool fileExists (const string file_name)
@@ -184,6 +212,7 @@ class Datapath: public MemObject
     void initLineNum(std::vector<int> &lineNum);
     void initEdgeParID(std::vector<int> &parid);
     void initGetElementPtr(std::unordered_map<unsigned, pair<std::string, long long int> > &get_element_ptr);
+    void initActualAddress();
 
     int writeGraphWithIsolatedEdges(std::vector<bool> &to_remove_edges);
     int writeGraphWithNewEdges(std::vector<newEdge> &to_add_edges, int curr_num_of_edges);
@@ -204,14 +233,14 @@ class Datapath: public MemObject
     int clearGraph();
 
   private:
-    
-    
+    typedef enum {Ready,Issued,Returned} MemAccessStatus;
     
     //global/whole datapath variables
     std::vector<int> newLevel;
     std::vector<regEntry> regStats;
     std::vector<int> microop;
     std::unordered_map<unsigned, pair<std::string, long long int> > baseAddress;
+    std::unordered_map<unsigned, pair<Addr, int> > actualAddress;
 
     unsigned numTotalNodes;
     unsigned numTotalEdges;
@@ -243,7 +272,8 @@ class Datapath: public MemObject
     unsigned totalConnectedNodes;
     unsigned executedNodes;
     
-    std::vector<unsigned> executingQueue;
+    //std::vector<unsigned> executingQueue;
+    std::map<unsigned, MemAccessStatus> executingQueue;
     std::vector<unsigned> readyToExecuteQueue;
 
 };
