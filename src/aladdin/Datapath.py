@@ -10,6 +10,7 @@ class Datapath(MemObject):
   configFileName = Param.String("Aladdin Config File")
   cycleTime = Param.Unsigned(6, "Clock Period: 6ns default")
   
+  system = Param.System(Parent.any, "system object")
   dcache_port = MasterPort("Datapath Data Port")
   _cached_ports = ['dcache_port']
   _uncached_slave_ports = []
