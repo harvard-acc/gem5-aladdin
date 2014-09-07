@@ -1,5 +1,6 @@
 This file is to record things I try to figure out how gem5 works. 
-09-06-2014
+
+09-06/07-2014
 How load is executed:
 1. src/cpu/o3/iew_impl.hh
 executeInsts()
@@ -139,6 +140,181 @@ class BaseDynInst : public RefCounted
     /** Store queue index. */
     int16_t sqIdx;
 };
+6.1 translation: initiateTranslation(req, sreqLow, sreqHigh, NULL, BaseTLB::Read);
+src/cpu/base_dyn_inst.hh
+template<class Impl>
+inline void
+BaseDynInst<Impl>::initiateTranslation(RequestPtr req, RequestPtr sreqLow,
+                                       RequestPtr sreqHigh, uint64_t *res,
+                                       BaseTLB::Mode mode)
+{
+  translationStarted(true);
+  //src/cpu/translation.hh
+  WholeTranslationState *state =
+      new WholeTranslationState(req, NULL, res, mode);
+
+  // One translation if the request isn't split.
+  DataTranslation<BaseDynInstPtr> *trans =
+      new DataTranslation<BaseDynInstPtr>(this, state);
+
+  cpu->dtb->translateTiming(req, thread->getTC(), trans, mode);
+
+  if (!translationCompleted()) {
+      // The translation isn't yet complete, so we can't possibly have a
+      // fault. Overwrite any existing fault we might have from a previous
+      // execution of this instruction (e.g. an uncachable load that
+      // couldn't execute because it wasn't at the head of the ROB).
+      fault = NoFault;
+
+      // Save memory requests.
+      savedReq = state->mainReq;
+      savedSreqLow = state->sreqLow;
+      savedSreqHigh = state->sreqHigh;
+  }
+}
+6.2 translateTiming: src/arch/x86/tlb.cc
+void
+TLB::translateTiming(RequestPtr req, ThreadContext *tc,
+        Translation *translation, Mode mode)
+{
+    bool delayedResponse;
+    assert(translation);
+    Fault fault =
+        TLB::translate(req, tc, translation, mode, delayedResponse, true);
+    if (!delayedResponse)
+        translation->finish(fault, req, tc, mode);
+}
+6.2 translate() : src/arch/x86/tlb.cc
+Fault
+TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
+        Mode mode, bool &delayedResponse, bool timing)
+{
+  uint32_t flags = req->getFlags();
+  //arch/x86/insts/microldstop.hh:    const Request::FlagsType SegmentFlagMask
+  //= mask(4);
+  int seg = flags & SegmentFlagMask;
+  bool storeCheck = flags & (StoreCheck << FlagShift);
+  //LongMode: src/arch/x86/types.hh
+  //enum X86Mode {
+   // LongMode,
+    //LegacyMode
+  //};
+  delayedResponse = false;
+  
+  Addr vaddr = req->getVaddr();
+  DPRINTF(TLB, "Translating vaddr %#x.\n", vaddr);
+  //MISCREG_M5_REG: src/arch/x86/regs/misc.hh
+  HandyM5Reg m5Reg = tc->readMiscRegNoEffect(MISCREG_M5_REG);
+  if (m5Reg.prot) {
+    DPRINTF(TLB, "In protected mode.\n");
+    // If paging is enabled, do the translation.
+    if (m5Reg.paging) {
+      DPRINTF(TLB, "Paging enabled.\n");
+      // The vaddr already has the segment base applied.
+      TlbEntry *entry = lookup(vaddr);
+      if (!entry) {
+        DPRINTF(TLB, "Handling a TLB miss for "
+                "address %#x at pc %#x.\n",
+                vaddr, tc->instAddr());
+
+        Process *p = tc->getProcessPtr();
+        TlbEntry newEntry;
+        bool success = p->pTable->lookup(vaddr, newEntry);
+        if (!success && mode != Execute) {
+            // Check if we just need to grow the stack.
+            // src/sim/process.cc
+            if (p->fixupStackFault(vaddr)) {
+                // If we did, lookup the entry for the new page.
+                success = p->pTable->lookup(vaddr, newEntry);
+            }
+        }
+        if (!success) {
+            return new PageFault(vaddr, true, mode, true, false);
+        } 
+        else {
+        //success!
+            Addr alignedVaddr = p->pTable->pageAlign(vaddr);
+            DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
+                    newEntry.pageStart());
+            entry = insert(alignedVaddr, newEntry);
+        }
+        DPRINTF(TLB, "Miss was serviced.\n");
+      }
+      Addr paddr = entry->paddr | (vaddr & mask(entry->logBytes));
+      DPRINTF(TLB, "Translated %#x -> %#x.\n", vaddr, paddr);
+      req->setPaddr(paddr);
+      if (entry->uncacheable)
+          req->setFlags(Request::UNCACHEABLE);
+    }
+  }
+  return finalizePhysical(req, tc, mode);
+}
+
+6.3 finalizePhysical: src/arch/x86/tlb.cc
+Fault
+TLB::finalizePhysical(RequestPtr req, ThreadContext *tc, Mode mode) const
+{
+  Addr paddr = req->getPaddr();
+  return NoFault;
+}
+
+6.4 translation->finish: src/cpu/translatin.hh
+class DataTranslation : public BaseTLB::Translation
+{
+  void
+  finish(Fault fault, RequestPtr req, ThreadContext *tc,
+         BaseTLB::Mode mode)
+  {
+      assert(state);
+      assert(mode == state->mode);
+      if (state->finish(fault, index)) {
+          xc->finishTranslation(state);
+      }
+      delete this;
+  }
+}
+class WholeTranslationState
+{
+bool
+finish(Fault fault, int index)
+{
+    assert(outstanding);
+    faults[index] = fault;
+    outstanding--;
+    if (isSplit && outstanding == 0) {
+        // For ease later, we copy some state to the main request.
+        if (faults[0] == NoFault) {
+            mainReq->setPaddr(sreqLow->getPaddr());
+        }
+        mainReq->setFlags(sreqLow->getFlags());
+        mainReq->setFlags(sreqHigh->getFlags());
+    }
+    return outstanding == 0;
+}
+};
+
+6.5 finishTranslation(): src/cpu/base_dyn_inst.hh
+template<class Impl>
+inline void
+BaseDynInst<Impl>::finishTranslation(WholeTranslationState *state)
+{
+    fault = state->getFault();
+    instFlags[IsUncacheable] = state->isUncacheable();
+    if (fault == NoFault) {
+        physEffAddr = state->getPaddr();
+        memReqFlags = state->getFlags();
+        if (state->mainReq->isCondSwap()) {
+            assert(state->res);
+            state->mainReq->setExtraData(*state->res);
+        }
+    } else {
+        state->deleteReqs();
+    }
+    delete state;
+    translationCompleted(true);
+}
+
+
 7. src/cpu/o3/cpu.hh
 /** CPU read function, forwards read to LSQ. */
 Fault read(RequestPtr &req, RequestPtr &sreqLow, RequestPtr &sreqHigh,
