@@ -270,8 +270,6 @@ class System : public MemObject
 
     Enums::MemoryMode memoryMode;
 
-    Datapath *datapath;
-
     const unsigned int _cacheLineSize;
 
     uint64_t workItemsBegin;

@@ -176,8 +176,13 @@ BaseBus::Layer<SrcType,DstType>::tryTiming(SrcType* src_port)
     // for a retry from the peer
     if (state == BUSY || waitingForPeer != NULL) {
         // the port should not be waiting already
-        assert(std::find(waitingForLayer.begin(), waitingForLayer.end(),
-                         src_port) == waitingForLayer.end());
+        DPRINTF(BaseBus, "tryTiming() src_port:%s\n", src_port->name());
+        //assert(std::find(waitingForLayer.begin(), waitingForLayer.end(),
+                         //src_port) == waitingForLayer.end());
+        if(std::find(waitingForLayer.begin(), waitingForLayer.end(),
+                         src_port) == waitingForLayer.end())
+          return false; 
+        DPRINTF(BaseBus, "Pass assersion: tryTiming() src_port:%s\n", src_port->name());
 
         // put the port at the end of the retry list waiting for the
         // layer to be freed up (and in the case of a busy peer, for

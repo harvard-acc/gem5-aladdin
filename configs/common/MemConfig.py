@@ -36,7 +36,10 @@
 # Authors: Andreas Sandberg
 #          Andreas Hansson
 
+import m5
+from m5.defines import buildEnv
 import m5.objects
+from m5.util import addToPath, fatal
 import inspect
 import sys
 from textwrap import  TextWrapper
@@ -153,7 +156,9 @@ def config_mem(options, system):
     # For every range (most systems will only have one), create an
     # array of controllers and set their parameters to match their
     # address mapping in the case of a DRAM
+    #for r in [m5.objects.AddrRange(0x00000000, size='32MB')]:
     for r in system.mem_ranges:
+        print "mem ctrl"
         for i in xrange(nbr_mem_ctrls):
             # Create an instance so we can figure out the address
             # mapping and row-buffer size
@@ -193,33 +198,35 @@ def config_mem(options, system):
     for i in xrange(nbr_mem_ctrls):
         system.mem_ctrls[i].port = system.membus.master
     
-    # Aladdin memory configuration
-    if options.aladdin:
-      aladdin_cls = get(options.mem_type)
-      aladdin_mem_ctrls = []
+    ## Aladdin memory configuration
+    #if options.aladdin:
+      #aladdin_cls = get(options.mem_type)
+      #aladdin_mem_ctrls = []
 
-      # The default behaviour is to interleave on cache line granularity
-      cache_line_bit = int(math.log(system.cache_line_size.value, 2)) - 1
-      intlv_low_bit = cache_line_bit
+      ## The default behaviour is to interleave on cache line granularity
+      #cache_line_bit = int(math.log(system.cache_line_size.value, 2)) - 1
+      #intlv_low_bit = cache_line_bit
 
-      # For every range (most systems will only have one), create an
-      # array of controllers and set their parameters to match their
-      # address mapping in the case of a DRAM
-      for r in system.mem_ranges:
-          for i in xrange(nbr_mem_ctrls):
-              # Create an instance so we can figure out the address
-              # mapping and row-buffer size
-              aladdin_ctrl = aladdin_cls()
-              # SS: expose memory latency as a parameter in the config file
-              # SS: Only applied to SimpleMemory for now
-              if issubclass(aladdin_cls, m5.objects.SimpleMemory):
-                  aladdin_ctrl.latency = options.mem_latency
+      ## For every range (most systems will only have one), create an
+      ## array of controllers and set their parameters to match their
+      ## address mapping in the case of a DRAM
+      ##for r in system.aladdin_mem_ranges:
+      #for r in [m5.objects.AddrRange(0x8C000000, size='256MB')]:
+          #print "aladdin mem ctrl"
+          #for i in xrange(nbr_mem_ctrls):
+              ## Create an instance so we can figure out the address
+              ## mapping and row-buffer size
+              #aladdin_ctrl = aladdin_cls()
+              ## SS: expose memory latency as a parameter in the config file
+              ## SS: Only applied to SimpleMemory for now
+              #if issubclass(aladdin_cls, m5.objects.SimpleMemory):
+                  #aladdin_ctrl.latency = options.mem_latency
 
-              aladdin_mem_ctrls.append(aladdin_ctrl)
+              #aladdin_mem_ctrls.append(aladdin_ctrl)
 
-      system.aladdin_mem_ctrls = aladdin_mem_ctrls
+      #system.aladdin_mem_ctrls = aladdin_mem_ctrls
 
-      # Connect the controllers to the membus
-      for i in xrange(nbr_mem_ctrls):
-          system.aladdin_mem_ctrls[i].port = system.aladdin_membus.master
+      ## Connect the controllers to the membus
+      #for i in xrange(nbr_mem_ctrls):
+          #system.aladdin_mem_ctrls[i].port = system.aladdin_membus.master
 

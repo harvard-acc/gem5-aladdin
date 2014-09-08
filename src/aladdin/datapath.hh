@@ -116,10 +116,12 @@ class Datapath: public MemObject
           : MasterPort(_datapath->name() + ".dcache_port", _datapath),
             datapath(_datapath) {}
       protected: 
-        bool recvTimingResp(PacketPtr pkt);
-        void recvTimingSnoopReq(PacketPtr pkt);
-        void recvRetry();
-        bool isSnooping() const {return true;}
+        virtual bool recvTimingResp(PacketPtr pkt);
+        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual void recvFunctionalSnoop(PacketPtr pkt){}
+        virtual Tick recvAtomicSnoop(PacketPtr pkt) {return 0;}
+        virtual void recvRetry();
+        virtual bool isSnooping() const {return true;}
         Datapath *datapath;
     };
 
@@ -127,9 +129,11 @@ class Datapath: public MemObject
     
     MasterID _dataMasterId;
     
-    const unsigned int _cacheLineSize;
+
+    //const unsigned int _cacheLineSize;
     
     DcachePort dcachePort;
+    
     
     //gem5 tick
     void step();
@@ -142,7 +146,10 @@ class Datapath: public MemObject
         unsigned node_id;
     };
     PacketPtr retryPkt;
+    
     void accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
+    
+    System *system;
 
   public:
     
@@ -150,8 +157,21 @@ class Datapath: public MemObject
     Datapath(const Params *p);
     ~Datapath();
     
-    MasterPort &getDataPort(){return dcachePort;};
+    virtual MasterPort &getDataPort(){return dcachePort;};
     MasterID dataMasterId() {return _dataMasterId;};
+    
+    /**
+     * Get a master port on this CPU. All CPUs have a data and
+     * instruction port, and this method uses getDataPort and
+     * getInstPort of the subclasses to resolve the two ports.
+     *
+     * @param if_name the port name
+     * @param idx ignored index
+     *
+     * @return a reference to the port with the given name
+     */
+    BaseMasterPort &getMasterPort(const std::string &if_name, 
+                                          PortID idx = InvalidPortID);
 
     void parse_config();
     bool fileExists (const string file_name)
