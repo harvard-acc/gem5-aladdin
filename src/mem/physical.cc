@@ -75,6 +75,7 @@ PhysicalMemory::PhysicalMemory(const string& _name,
 
             // add the range to our interval tree and make sure it does not
             // intersect an existing range
+            fprintf(stderr, "size = %lu\n", size);
             if (addrMap.insert((*m)->getAddrRange(), *m) == addrMap.end())
                 fatal("Memory address range for %s is overlapping\n",
                       (*m)->name());

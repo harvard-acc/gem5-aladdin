@@ -1005,6 +1005,8 @@ class SimObject(object):
         cc_params = cc_params_struct()
         cc_params.pyobj = self
         cc_params.name = str(self)
+        
+        print cc_params.name 
 
         param_names = self._params.keys()
         param_names.sort()

@@ -272,7 +272,7 @@ class System : public MemObject
     
     //GooUnit *gooUnit;
 
-    Datapath *datapath;
+    //Datapath *datapath;
 
     const unsigned int _cacheLineSize;
 

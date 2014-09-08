@@ -9,10 +9,11 @@ Datapath::Datapath (const Params *p):
   cycleTime(p->cycleTime),
   dddg(this),
   _dataMasterId(p->system->getMasterId(name() + ".data")),
-  _cacheLineSize(p->system->cacheLineSize()),
   dcachePort(this),
   tickEvent(this),
-  retryPkt(NULL)
+  retryPkt(NULL),
+  system(p->system)
+  //_cacheLineSize(p->system->cacheLineSize()),
 {
   
   if(dddg.build_initial_dddg())
@@ -54,6 +55,20 @@ Datapath::Datapath (const Params *p):
 
 Datapath::~Datapath()
 {}
+
+BaseMasterPort &
+Datapath::getMasterPort(const string &if_name,
+                                          PortID idx)
+{
+    // Get the right port based on name. This applies to all the
+    // subclasses of the base CPU and relies on their implementation
+    // of getDataPort and getInstPort. In all cases there methods
+    // return a MasterPort pointer.
+    if (if_name == "dcache_port")
+        return getDataPort();
+    else
+        return MemObject::getMasterPort(if_name);
+}
 
 //dcachePort interface
 bool
@@ -151,12 +166,12 @@ void Datapath::globalOptimizationPass()
   removeInductionDependence();
   removePhiNodes();
   initBaseAddress();
-  loopFlatten();
+  //loopFlatten();
   loopUnrolling();
-  removeSharedLoads();
-  storeBuffer();
-  removeRepeatedStores();
-  treeHeightReduction();
+  //removeSharedLoads();
+  //storeBuffer();
+  //removeRepeatedStores();
+  //treeHeightReduction();
   loopPipelining();
 }
 
