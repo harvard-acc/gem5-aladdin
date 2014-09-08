@@ -250,6 +250,152 @@ TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
   return finalizePhysical(req, tc, mode);
 }
 
+6.2.1 PageTable (pTable)
+a. Initialized with Process ? pagetable per process?
+src/sim/process.hh
+Process::Process(ProcessParams * params)
+    : SimObject(params), system(params->system),
+      max_stack_size(params->max_stack_size),
+      M5_pid(system->allocatePID()),
+      pTable(new PageTable(name(), M5_pid)),
+      initVirtMem(system->getSystemPort(), this,
+                  SETranslatingPortProxy::Always)
+{
+}
+PageTable* pTable;
+protected:
+  /// Memory proxy for initialization (image loading)
+  SETranslatingPortProxy initVirtMem;
+
+b. Class definitiaion at src/mem/page_table.hh
+c. allocateMem: src/sim/process.cc
+void
+Process::allocateMem(Addr vaddr, int64_t size, bool clobber)
+{
+    int npages = divCeil(size, (int64_t)VMPageSize);
+    Addr paddr = system->allocPhysPages(npages);
+    pTable->map(vaddr, paddr, size, clobber);
+}
+
+d. allocateMem was called:
+1) src/memse_translating_port_proxy.cc
+bool 
+SETranslatingPortProxy::tryMemsetBlob(Addr addr, uint8_t val, int size) const
+{
+    for (ChunkGenerator gen(addr, size, VMPageSize); !gen.done(); gen.next()) {
+        Addr paddr;
+        if (!pTable->translate(gen.addr(), paddr)) {
+            if (allocating == Always) {
+                process->allocateMem(roundDown(gen.addr(), VMPageSize),
+                                     VMPageSize);
+                pTable->translate(gen.addr(), paddr);
+            } else {
+                return false;
+            }
+        }
+        PortProxy::memsetBlob(paddr, val, gen.size());
+    }
+    return true;
+}
+bool
+SETranslatingPortProxy::tryWriteBlob(Addr addr, uint8_t *p, int size) const
+{
+    int prevSize = 0;
+    for (ChunkGenerator gen(addr, size, VMPageSize); !gen.done(); gen.next()) {
+        Addr paddr;
+
+        if (!pTable->translate(gen.addr(), paddr)) {
+            if (allocating == Always) {
+                process->allocateMem(roundDown(gen.addr(), VMPageSize),
+                                     VMPageSize);
+            } else if (allocating == NextPage) {
+                // check if we've accessed the next page on the stack
+                if (!process->fixupStackFault(gen.addr()))
+                    panic("Page table fault when accessing virtual address %#x "
+                            "during functional write\n", gen.addr());
+            } else {
+                return false;
+            }
+            pTable->translate(gen.addr(), paddr);
+        }
+        PortProxy::writeBlob(paddr, p + prevSize, gen.size());
+        prevSize += gen.size();
+    }
+    return true;
+}
+2)src/sim/syscall_emul.hh
+SyscallReturn
+mremapFunc(SyscallDesc *desc, int callnum, LiveProcess *process, ThreadContext *tc)
+SyscallReturn
+mmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
+
+3)src/arch/x86/process.cc
+void
+X86_64LiveProcess::initState()
+{
+    X86LiveProcess::initState();
+
+    argsInit(sizeof(uint64_t), VMPageSize);
+
+       // Set up the vsyscall page for this process.
+    allocateMem(vsyscallPage.base, vsyscallPage.size);
+
+}
+initState() -> src/sim/process.cc
+void
+Process::initState()
+{
+    if (contextIds.empty())
+        fatal("Process %s is not associated with any HW contexts!\n", name());
+    // first thread context for this process... initialize & enable
+    ThreadContext *tc = system->getThreadContext(contextIds[0]);
+
+    // mark this context as active so it will start ticking.
+    tc->activate(Cycles(0));
+}
+
+template<class IntType>
+void
+X86LiveProcess::argsInit(int pageSize,
+        std::vector<AuxVector<IntType> > extraAuxvs)
+{
+  // load object file into target memory
+  objFile->loadSections(initVirtMem);
+  //....
+  // map memory
+  allocateMem(roundDown(stack_min, pageSize), roundUp(stack_size, pageSize));
+  //....
+  //Write out the sentry void *
+  IntType sentry_NULL = 0;
+  initVirtMem.writeBlob(sentry_base,
+          (uint8_t*)&sentry_NULL, sentry_size);
+
+  //Write the file name
+  initVirtMem.writeString(file_name_base, filename.c_str());
+  //....
+  // There doesn't need to be any segment base added in since we're dealing
+  // with the flat segmentation model.
+  tc->pcState(objFile->entryPoint());
+}
+
+6.2.2 How a Process is initialized
+a. configs/example/se.py
+multiprocesses = []
+numThreads = 1
+
+exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
+multiprocesses.append(workload.makeLiveProcess())
+
+elif len(multiprocesses) == 1:
+    system.cpu[i].workload = multiprocesses[0]
+
+b. src/cpu/BaseCPU.py
+
+workload = VectorParam.Process([], "processes to run")
+
+c. src/cpu/o3/cpu.cc 
+FullO3CPU: Class Constructor
+
 6.3 finalizePhysical: src/arch/x86/tlb.cc
 Fault
 TLB::finalizePhysical(RequestPtr req, ThreadContext *tc, Mode mode) const
