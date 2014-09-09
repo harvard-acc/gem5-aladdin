@@ -147,7 +147,7 @@ class Datapath: public MemObject
     };
     PacketPtr retryPkt;
     
-    void accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
+    bool accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
     
     System *system;
 
