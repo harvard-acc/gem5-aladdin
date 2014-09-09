@@ -115,9 +115,11 @@ Datapath::completeDataAccess(PacketPtr pkt)
   delete pkt;
 }
 
-void 
+bool
 Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
 {
+  if (retryPkt != NULL) //already someone waiting
+    return false;
   //form request
   Request *req = NULL;
   //physical request
@@ -144,7 +146,9 @@ Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
     //blocked, retry
     assert(retryPkt == NULL);
     retryPkt = data_pkt;
+    return false;
   }
+  return true;
 }
 
 //optimizationFunctions
@@ -2070,8 +2074,9 @@ void Datapath::stepExecutingQueue()
         Addr addr = actualAddress[node_id].first;
         int size = actualAddress[node_id].second;
         bool isLoad = is_load_op(microop.at(node_id));
-        accessRequest(addr, size, isLoad, node_id);
-        it->second = Issued;
+        bool isIssued = accessRequest(addr, size, isLoad, node_id);
+        if (isIssued)
+          it->second = Issued;
         ++it;
         ++index;
       }
