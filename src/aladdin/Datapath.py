@@ -35,7 +35,7 @@ class Datapath(MemObject):
       #uncached_bus = cached_bus
     #self.connectUncachedPorts(uncached_bus)
 
-  def addPrivateSplitL1Caches(self, dc, dwc = None) :
+  def addPrivateL1Dcache(self, dc, dwc = None) :
     self.dcache = dc
     self.dcache_port = dc.cpu_side
     self._cached_ports = ['dcache.mem_side']

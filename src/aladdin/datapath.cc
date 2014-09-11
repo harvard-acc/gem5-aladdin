@@ -12,6 +12,7 @@ Datapath::Datapath (const Params *p):
   dcachePort(this),
   tickEvent(this),
   retryPkt(NULL),
+  isCacheBlocked(false),
   system(p->system)
   //_cacheLineSize(p->system->cacheLineSize()),
 {
@@ -74,15 +75,16 @@ Datapath::getMasterPort(const string &if_name,
 bool
 Datapath::DcachePort::recvTimingResp(PacketPtr pkt)
 {
+  DPRINTF(Datapath, "recvTimingResp for address: %#x %s\n", pkt->getAddr(), pkt->cmdString());
   if (pkt->isError())
-    DPRINTF(Datapath, "Got error packet back for address: %#X\n", pkt->getAddr());
+    DPRINTF(Datapath, "Got error packet back for address: %#x\n", pkt->getAddr());
   datapath->completeDataAccess(pkt);
   return true;
 }
 void
 Datapath::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
 {
-  DPRINTF(Datapath, "received pkt for addr:%#x %s\n", pkt->getAddr(), pkt->cmdString());
+  DPRINTF(Datapath, "recvTimingSnoopReq for addr:%#x %s\n", pkt->getAddr(), pkt->cmdString());
   if (pkt->isInvalidate())
   {
     DPRINTF(Datapath, "received invalidation for addr:%#x\n", pkt->getAddr());
@@ -91,18 +93,23 @@ Datapath::DcachePort::recvTimingSnoopReq(PacketPtr pkt)
 void
 Datapath::DcachePort::recvRetry()
 {
-  assert(datapath->retryPkt != NULL);
+  DPRINTF(Datapath, "recvRetry for addr:");
+  assert(datapath->isCacheBlocked && datapath->retryPkt != NULL );
+  DPRINTF(Datapath, "%#x \n", datapath->retryPkt->getAddr());
   if (datapath->dcachePort.sendTimingReq(datapath->retryPkt))
   {
+    DPRINTF(Datapath, "Retry pass!\n");
     datapath->retryPkt = NULL;
+    datapath->isCacheBlocked = false;
   }
-  //else
-    //still blocked
+  else
+    DPRINTF(Datapath, "Still blocked!\n");
 }
 
 void
 Datapath::completeDataAccess(PacketPtr pkt)
 {
+  DPRINTF(Datapath, "completeDataAccess for addr:%#x %s\n", pkt->getAddr(), pkt->cmdString());
   DatapathSenderState *state = dynamic_cast<DatapathSenderState *> (pkt->senderState);
 
   //Mark nodes ready to fire
@@ -110,6 +117,7 @@ Datapath::completeDataAccess(PacketPtr pkt)
   assert(executingQueue.find(node_id) != executingQueue.end());
   assert(executingQueue[node_id] == Issued);
   executingQueue[node_id] = Returned;
+  DPRINTF(Datapath, "node:%d mem access is returned\n", node_id);
   delete state;
   delete pkt->req;
   delete pkt;
@@ -118,8 +126,12 @@ Datapath::completeDataAccess(PacketPtr pkt)
 bool
 Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
 {
-  if (retryPkt != NULL) //already someone waiting
+  DPRINTF(Datapath, "accessRequest for addr:%#x\n", addr);
+  if (isCacheBlocked)
+  {//already someone waiting
+    DPRINTF(Datapath, "cache blocked...\n");
     return false;
+  }
   //form request
   Request *req = NULL;
   //physical request
@@ -146,8 +158,11 @@ Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
     //blocked, retry
     assert(retryPkt == NULL);
     retryPkt = data_pkt;
-    return false;
+    isCacheBlocked = true;
+    DPRINTF(Datapath, "retry later...\n");
   }
+  else
+    DPRINTF(Datapath, "issued to dcache!\n");
   return true;
 }
 
@@ -2072,11 +2087,14 @@ void Datapath::stepExecutingQueue()
       {
         //first time see, do access
         Addr addr = actualAddress[node_id].first;
-        int size = actualAddress[node_id].second;
+        int size = actualAddress[node_id].second / 16;
         bool isLoad = is_load_op(microop.at(node_id));
         bool isIssued = accessRequest(addr, size, isLoad, node_id);
         if (isIssued)
+        {
           it->second = Issued;
+          DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
+        }
         ++it;
         ++index;
       }
@@ -2108,6 +2126,7 @@ void Datapath::stepExecutingQueue()
 }
 void Datapath::updateChildren(unsigned node_id)
 {
+  DPRINTF(Datapath, "updating children of node:%d\n", node_id);
   Vertex node = nameToVertex[node_id];
   out_edge_iter out_edge_it, out_edge_end;
   for (tie(out_edge_it, out_edge_end) = out_edges(node, graph_); out_edge_it != out_edge_end; ++out_edge_it)
@@ -2122,9 +2141,15 @@ void Datapath::updateChildren(unsigned node_id)
         unsigned child_microop = microop.at(child_id);
         if ( (node_latency(child_microop) == 0 || node_latency(microop.at(node_id))== 0)
              && edgeParid[edge_id] != CONTROL_EDGE )
+        {
+          DPRINTF(Datapath, "child node:%d is ready, added to executingQueue\n", child_id);
           executingQueue[child_id] = Ready;
+        }
         else
+        {
+          DPRINTF(Datapath, "child node:%d is ready, added to readyToExecuteQueue\n", child_id);
           readyToExecuteQueue.push_back(child_id);
+        }
         numParents[child_id] = -1;
       }
     }

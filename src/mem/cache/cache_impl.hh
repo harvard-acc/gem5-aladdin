@@ -157,6 +157,8 @@ Cache<TagStore>::satisfyCpuSideRequest(PacketPtr pkt, BlkType *blk,
     // Read requester(s) to have buffered the ReadEx snoop and to
     // invalidate their blocks after receiving them.
     // assert(!pkt->needsExclusive() || blk->isWritable());
+    //DPRINTF(Cache, "pkt->getOffset(blkSize): %d + pkt->getSize(): %d <= blkSize: %d\n", 
+               //pkt->getOffset(blkSize), pkt->getSize(), blkSize);
     assert(pkt->getOffset(blkSize) + pkt->getSize() <= blkSize);
 
     // Check RMW operations first since both isRead() and
