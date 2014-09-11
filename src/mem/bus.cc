@@ -183,7 +183,7 @@ BaseBus::Layer<SrcType,DstType>::tryTiming(SrcType* src_port)
         //assert(std::find(waitingForLayer.begin(), waitingForLayer.end(),
                          //src_port) == waitingForLayer.end());
         if(std::find(waitingForLayer.begin(), waitingForLayer.end(),
-                         src_port) == waitingForLayer.end())
+                         src_port) != waitingForLayer.end())
           return false; 
         DPRINTF(BaseBus, "Pass assersion: tryTiming() src_port:%s\n", src_port->name());
 
