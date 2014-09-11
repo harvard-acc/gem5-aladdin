@@ -14,8 +14,8 @@ class Datapath(MemObject):
   
   dcache_port = MasterPort("Datapath Data Port")
   _cached_ports = ['dcache_port']
-  #_uncached_slave_ports = []
-  #_uncached_master_ports = []
+  _uncached_slave_ports = []
+  _uncached_master_ports = []
   
   #dtb = Param.X86TLB(X86TLB(), "Data TLB")
   
@@ -31,9 +31,9 @@ class Datapath(MemObject):
 
   def connectAllPorts(self, cached_bus, uncached_bus = None) :
     self.connectCachedPorts(cached_bus)
-    #if not uncached_bus:
-      #uncached_bus = cached_bus
-    #self.connectUncachedPorts(uncached_bus)
+    if not uncached_bus:
+      uncached_bus = cached_bus
+    self.connectUncachedPorts(uncached_bus)
 
   def addPrivateL1Dcache(self, dc, dwc = None) :
     self.dcache = dc
