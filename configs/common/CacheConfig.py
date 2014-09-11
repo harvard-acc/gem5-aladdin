@@ -58,7 +58,7 @@ def config_cache(options, system):
     else:
         dcache_class, icache_class, l2_cache_class = \
             L1Cache, L1Cache, L2Cache
-
+    
     # Set the cache line size of the system
     system.cache_line_size = options.cacheline_size
 
@@ -105,4 +105,11 @@ def config_cache(options, system):
         else:
             system.cpu[i].connectAllPorts(system.membus)
 
+    if options.aladdin:
+      aladdin_dcache = dcache_class(size=options.l1d_size,
+                            assoc=options.l1d_assoc,
+                            hit_latency=options.l1d_hit_latency,
+                            response_latency=options.l1d_hit_latency)
+      system.datapath.addPrivateL1Dcache(aladdin_dcache)
+      system.datapath.connectAllPorts(system.membus)
     return system
