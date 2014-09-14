@@ -219,6 +219,7 @@ class Datapath: public MemObject
     void writeFinalLevel();
     void writeGlobalIsolated();
     void writePerCycleActivity();
+    void writeTLBStats();
     void writeBaseAddress();
     void writeMicroop(std::vector<int> &microop);
     

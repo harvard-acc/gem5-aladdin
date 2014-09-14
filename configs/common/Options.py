@@ -139,7 +139,8 @@ def addCommonOptions(parser):
                         help="Miss Latency for Aladdin's TLB")
     parser.add_option("--aladdin_tlb_pagesize", type="int", default="4096",
                         help="PageSize for Aladdin's TLB")
-    
+    parser.add_option("--is_aladdin_tlb_perfect", type="int", default=0,
+                        help="Whether Aladdin's TLB is perfect")
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 

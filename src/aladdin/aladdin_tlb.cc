@@ -2,13 +2,14 @@
 #include "datapath.hh"
 #include "debug/Datapath.hh"
 
-AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr _page_bytes) : 
+AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr _page_bytes, bool _is_perfect) : 
   datapath(_datapath),
   numEntries(_num_entries), 
   assoc(_assoc),
   hitLatency(_hit_latency), 
   missLatency(_miss_latency), 
-  pageBytes(_page_bytes)
+  pageBytes(_page_bytes),
+  isPerfectTLB(_is_perfect)
 {
   if (numEntries > 0)
     tlbMemory = new TLBMemory (_num_entries, _assoc, _page_bytes);
@@ -16,7 +17,6 @@ AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _ass
     tlbMemory = new InfiniteTLBMemory();
   hits = 0;
   misses = 0;
-  hitRate = 0;
 }
 
 AladdinTLB::~AladdinTLB()
@@ -74,7 +74,7 @@ AladdinTLB::translateTiming(PacketPtr pkt)
   Addr vpn = vaddr - offset;
   Addr ppn;
   
-  if (tlbMemory->lookup(vpn, ppn)) 
+  if (isPerfectTLB || tlbMemory->lookup(vpn, ppn)) 
   {
       DPRINTF(Datapath, "TLB hit. Phys addr %#x.\n", ppn + offset);
       hits++;
@@ -158,6 +158,7 @@ TLBMemory::insert(Addr vpn, Addr ppn)
     entry->free = false;
     entry->setMRU();
 }
+/*
 void
 AladdinTLB::regStats()
 {
@@ -176,3 +177,4 @@ AladdinTLB::regStats()
 
     hitRate = hits / (hits + misses);
 }
+*/

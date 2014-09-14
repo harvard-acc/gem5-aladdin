@@ -104,7 +104,8 @@ class AladdinTLB
     Cycles hitLatency;
     Cycles missLatency;
     Addr pageBytes;
-    
+    bool isPerfectTLB;
+
     BaseTLBMemory *tlbMemory;
     
 
@@ -141,7 +142,7 @@ class AladdinTLB
     std::unordered_multimap<Addr, PacketPtr> missQueue;
     
   public:
-    AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr pageBytes);
+    AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr pageBytes, bool _is_perfect);
     ~AladdinTLB();
 
     std::string name() const;
@@ -150,10 +151,14 @@ class AladdinTLB
     
     void insert(Addr vpn, Addr ppn);
     
-    void regStats();
+    //void regStats();
+    /*
     Stats::Scalar hits;
     Stats::Scalar misses;
     Stats::Formula hitRate;
+    */
+    unsigned hits;
+    unsigned misses;
 };
 
 #endif
