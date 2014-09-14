@@ -169,8 +169,12 @@ if options.aladdin:
   system.datapath = Datapath(benchName = options.aladdin_bench_name,
                             traceFileName = options.aladdin_trace_file_name,
                             configFileName = options.aladdin_config_file_name,
-                            cycleTime = options.aladdin_cycle_time)
-  #system.aladdin_mem_ranges = [AddrRange(0x1C000000, size='256MB')]
+                            cycleTime = options.aladdin_cycle_time,
+                            tlbEntries = options.aladdin_tlb_entries,
+                            tlbAssoc = options.aladdin_tlb_assoc,
+                            tlbHitLatency = options.aladdin_tlb_hit_latency,
+                            tlbMissLatency = options.aladdin_tlb_miss_latency,
+                            tlbPageBytes = options.aladdin_tlb_pagesize)
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
 

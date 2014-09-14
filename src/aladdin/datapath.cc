@@ -13,8 +13,8 @@ Datapath::Datapath (const Params *p):
   tickEvent(this),
   retryPkt(NULL),
   isCacheBlocked(false),
-  system(p->system),
-  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes)
+  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes),
+  system(p->system)
   //_cacheLineSize(p->system->cacheLineSize()),
 {
   
@@ -2105,9 +2105,11 @@ void Datapath::stepExecutingQueue()
         Addr addr = actualAddress[node_id].first;
         int size = actualAddress[node_id].second / 16;
         bool isLoad = is_load_op(microop.at(node_id));
-        accessRequest(addr, size, isLoad, node_id);
-        it->second = Issued;
-        DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
+        if (accessRequest(addr, size, isLoad, node_id))
+        {
+          it->second = Issued;
+          DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
+        }
         ++it;
         ++index;
       }
