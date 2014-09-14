@@ -8,20 +8,67 @@ AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _ass
   assoc(_assoc),
   hitLatency(_hit_latency), 
   missLatency(_miss_latency), 
-  pageBytes(_page_bytes),
-  deHitQueueEvent(this),
-  deMissQueueEvent(this)
+  pageBytes(_page_bytes)
 {
   if (numEntries > 0)
     tlbMemory = new TLBMemory (_num_entries, _assoc, _page_bytes);
   else
     tlbMemory = new InfiniteTLBMemory();
+  hits = 0;
+  misses = 0;
+  hitRate = 0;
 }
+
+AladdinTLB::~AladdinTLB()
+{
+  delete tlbMemory;
+}
+
+AladdinTLB::deHitQueueEvent::deHitQueueEvent(AladdinTLB *_tlb)
+   : Event(Default_Pri, AutoDelete),
+     tlb(_tlb) {}
+void
+AladdinTLB::deHitQueueEvent::process()
+{
+  assert(!tlb->hitQueue.empty());
+  tlb->datapath->finishTranslation(tlb->hitQueue.front());
+  tlb->hitQueue.pop_front();
+}
+const char *
+AladdinTLB::deHitQueueEvent::description() const
+{
+  return "TLB Hit";
+}
+
+AladdinTLB::outStandingWalkReturnEvent::outStandingWalkReturnEvent(AladdinTLB *_tlb)
+   : Event(Default_Pri, AutoDelete),
+     tlb(_tlb) {}
+void
+AladdinTLB::outStandingWalkReturnEvent::process()
+{
+  assert(!tlb->missQueue.empty());
+  Addr vpn = tlb->outStandingWalks.front();
+  //insert TLB entry; for now, vpn == ppn
+  tlb->insert(vpn, vpn);
+  
+  auto range = tlb->missQueue.equal_range(vpn);
+  for(auto it = range.first; it!= range.second; ++it)
+    tlb->datapath->finishTranslation(it->second);
+  
+  tlb->missQueue.erase(vpn);
+  tlb->outStandingWalks.pop_front();
+}
+const char *
+AladdinTLB::outStandingWalkReturnEvent::description() const
+{
+  return "TLB Miss";
+}
+
 
 void
 AladdinTLB::translateTiming(PacketPtr pkt)
 {
-  Addr vaddr = pkt->req->getVaddr();
+  Addr vaddr = pkt->req->getPaddr();
   DPRINTF(Datapath, "Translating vaddr %#x.\n", vaddr);
   Addr offset = vaddr % pageBytes;
   Addr vpn = vaddr - offset;
@@ -32,7 +79,8 @@ AladdinTLB::translateTiming(PacketPtr pkt)
       DPRINTF(Datapath, "TLB hit. Phys addr %#x.\n", ppn + offset);
       hits++;
       hitQueue.push_back(pkt);
-      datapath->schedule(deHitQueueEvent, datapath->clockEdge(hitLatency));
+      deHitQueueEvent *hq = new deHitQueueEvent(this);
+      datapath->schedule(hq, datapath->clockEdge(hitLatency));
   } 
   else 
   {
@@ -40,25 +88,15 @@ AladdinTLB::translateTiming(PacketPtr pkt)
       DPRINTF(Datapath, "TLB miss for addr %#x\n", vaddr);
       misses++;
          
-      //insert TLB entry; for now, vpn == ppn
-      insert(vpn, vpn);
-      missQueue.push_back(pkt);
-      datapath->schedule(deMissQueueEvent, datapath->clockEdge(missLatency));
+      if (missQueue.find(vpn) == missQueue.end())
+      {
+        outStandingWalks.push_back(vpn);
+        outStandingWalkReturnEvent *mq = new outStandingWalkReturnEvent(this);
+        datapath->schedule(mq, datapath->clockEdge(missLatency));
+      }
+      missQueue.insert({vpn, pkt});
+
   }
-}
-void 
-AladdinTLB::deHitQueue()
-{
-  assert(!hitQueue.empty());
-  datapath->finishTranslation(hitQueue.front());
-  hitQueue.pop_front();
-}
-void 
-AladdinTLB::deMissQueue()
-{
-  assert(!missQueue.empty());
-  datapath->finishTranslation(missQueue.front());
-  missQueue.pop_front();
 }
 
 void

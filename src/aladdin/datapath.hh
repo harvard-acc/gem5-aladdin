@@ -147,10 +147,10 @@ class Datapath: public MemObject
     bool isCacheBlocked;
 
     bool accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
-    
-    System *system;
 
     AladdinTLB dtb;
+    
+    System *system;
   public:
     
     

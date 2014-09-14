@@ -124,6 +124,16 @@ def addCommonOptions(parser):
                         help="Config File Name for Aladdin")
     parser.add_option("--aladdin_cycle_time", type="int", default="6",
                         help="Cycle Time for Aladdin")
+    parser.add_option("--aladdin_tlb_entries", type="int", default="0",
+                        help="Number of Entries for Aladdin's TLB")
+    parser.add_option("--aladdin_tlb_assoc", type="int", default="4",
+                        help="Associativity for Aladdin's TLB")
+    parser.add_option("--aladdin_tlb_hit_latency", type="int", default="0",
+                        help="Hit Latency for Aladdin's TLB")
+    parser.add_option("--aladdin_tlb_miss_latency", type="int", default="10",
+                        help="Miss Latency for Aladdin's TLB")
+    parser.add_option("--aladdin_tlb_pagesize", type="int", default="4096",
+                        help="PageSize for Aladdin's TLB")
     
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")

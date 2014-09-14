@@ -10,18 +10,19 @@ class Datapath(MemObject):
   configFileName = Param.String("Aladdin Config File")
   cycleTime = Param.Unsigned(6, "Clock Period: 6ns default")
   
-  system = Param.System(Parent.any, "system object")
   
   tlbEntries = Param.Int(0, "number entries in TLB (0 implies infinite)")
 
   tlbAssoc = Param.Int(4, "Number of sets in the TLB")
 
-  tlbHitLatency = Param.Cycles(1, "number of cycles for a hit")
+  tlbHitLatency = Param.Cycles(0, "number of cycles for a hit")
   
   tlbMissLatency = Param.Cycles(10, "number of cycles for a miss")
 
   tlbPageBytes = Param.Int(4096, "Page Size")
 
+  system = Param.System(Parent.any, "system object")
+  
   dcache_port = MasterPort("Datapath Data Port")
   _cached_ports = ['dcache_port']
   _uncached_slave_ports = []

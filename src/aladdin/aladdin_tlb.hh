@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <deque>
+#include <unordered_map>
 
 #include "base/statistics.hh"
 //#include "params/AladdinTLB.hh"
@@ -26,7 +27,9 @@ class AladdinTLBEntry
 };
 
 class BaseTLBMemory {
+
 public:
+    virtual ~BaseTLBMemory(){}
     virtual bool lookup(Addr vpn, Addr& ppn, bool set_mru=true) = 0;
     virtual void insert(Addr vpn, Addr ppn) = 0;
 };
@@ -101,22 +104,46 @@ class AladdinTLB
     Cycles hitLatency;
     Cycles missLatency;
     Addr pageBytes;
-
-    void deHitQueue();
-    EventWrapper<AladdinTLB, &AladdinTLB::deHitQueue> deHitQueueEvent;
-
-    void deMissQueue();
-    EventWrapper<AladdinTLB, &AladdinTLB::deMissQueue> deMissQueueEvent;
     
     BaseTLBMemory *tlbMemory;
     
+
+    class deHitQueueEvent : public Event 
+    {
+      public: 
+        /*Constructs a deHitQueueEvent*/
+        deHitQueueEvent(AladdinTLB *_tlb);
+        /*Processes the event*/
+        void process();
+        /*Returns the description of this event*/
+        const char *description() const;
+      private: 
+        /* The pointer the to AladdinTLB unit*/
+        AladdinTLB *tlb;
+    };
+    
+    class outStandingWalkReturnEvent : public Event 
+    {
+      public: 
+        /*Constructs a outStandingWalkReturnEvent*/
+        outStandingWalkReturnEvent(AladdinTLB *_tlb);
+        /*Processes the event*/
+        void process();
+        /*Returns the description of this event*/
+        const char *description() const;
+      private: 
+        /* The pointer the to AladdinTLB unit*/
+        AladdinTLB *tlb;
+    };
+
     std::deque<PacketPtr> hitQueue;
-    std::deque<PacketPtr> missQueue;
-
-
+    std::deque<Addr> outStandingWalks;
+    std::unordered_multimap<Addr, PacketPtr> missQueue;
+    
   public:
     AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr pageBytes);
-    
+    ~AladdinTLB();
+
     std::string name() const;
 
     void translateTiming(PacketPtr pkt);
