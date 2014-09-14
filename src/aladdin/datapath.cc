@@ -2097,7 +2097,13 @@ void Datapath::step()
     schedule(tickEvent, clockEdge(Cycles(1)));
   }
   else
+  {
     dumpStats();
+    if (system->totalNumInsts == 0) //no cpu
+    {
+      exitSimLoop("Aladdin called exit()");
+    }
+  }
 }
 
 void Datapath::stepExecutingQueue()
