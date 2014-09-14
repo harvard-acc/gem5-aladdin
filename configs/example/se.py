@@ -172,7 +172,8 @@ if options.aladdin:
                             tlbAssoc = options.aladdin_tlb_assoc,
                             tlbHitLatency = options.aladdin_tlb_hit_latency,
                             tlbMissLatency = options.aladdin_tlb_miss_latency,
-                            tlbPageBytes = options.aladdin_tlb_pagesize)
+                            tlbPageBytes = options.aladdin_tlb_pagesize,
+                            isPerfectTLB = options.is_aladdin_tlb_perfect)
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
 

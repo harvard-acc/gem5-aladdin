@@ -13,7 +13,7 @@ Datapath::Datapath (const Params *p):
   tickEvent(this),
   retryPkt(NULL),
   isCacheBlocked(false),
-  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes),
+  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes, p->isPerfectTLB),
   system(p->system)
   //_cacheLineSize(p->system->cacheLineSize()),
 {
@@ -603,6 +603,7 @@ void Datapath::removeInductionDependence()
 //called in the end of the whole flow
 void Datapath::dumpStats()
 {
+  writeTLBStats();
   writeMicroop(microop);
   writeFinalLevel();
   writeGlobalIsolated();
@@ -1580,7 +1581,18 @@ void Datapath::readGraph(Graph &tmp_graph)
   boost::read_graphviz(fin, tmp_graph, dp, "n_id");
 
 }
-
+void Datapath::writeTLBStats()
+{
+  std::string bn(benchName);
+  
+  ofstream tlb_stats;
+  std::string tmp_name = bn + "_tlb_stats";
+  tlb_stats.open(tmp_name.c_str());
+  tlb_stats << "system.datapath.tlb.hits " << dtb.hits << " # number of TLB hits" << std::endl;
+  tlb_stats << "system.datapath.tlb.misses " << dtb.misses << " # number of TLB misses" << std::endl;
+  tlb_stats << "system.datapath.tlb.hitRate " << dtb.hits * 1.0 / (dtb.hits + dtb.misses) << " # hit rate for Aladdin TLB" << std::endl;
+  tlb_stats.close();
+}
 //initFunctions
 void Datapath::writePerCycleActivity()
 {

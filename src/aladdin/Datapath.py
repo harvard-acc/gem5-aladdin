@@ -20,6 +20,9 @@ class Datapath(MemObject):
   tlbMissLatency = Param.Cycles(10, "number of cycles for a miss")
 
   tlbPageBytes = Param.Int(4096, "Page Size")
+  
+  isPerfectTLB = Param.Bool(False, "Is this TLB perfect (e.g. always hit)")
+
 
   system = Param.System(Parent.any, "system object")
   
