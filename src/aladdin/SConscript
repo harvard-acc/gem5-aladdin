@@ -6,9 +6,9 @@ SimObject('Datapath.py')
 
 Source('datapath.cc')
 Source('dddg.cc')
-#Source('scratchpad.cc')
 Source('file_func.cpp')
 Source('generic_func.cpp')
 Source('opcode_func.cpp')
+Source('aladdin_tlb.cc')
 
 DebugFlag('Datapath')

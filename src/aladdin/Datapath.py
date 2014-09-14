@@ -12,12 +12,20 @@ class Datapath(MemObject):
   
   system = Param.System(Parent.any, "system object")
   
+  tlbEntries = Param.Int(0, "number entries in TLB (0 implies infinite)")
+
+  tlbAssoc = Param.Int(4, "Number of sets in the TLB")
+
+  tlbHitLatency = Param.Cycles(1, "number of cycles for a hit")
+  
+  tlbMissLatency = Param.Cycles(10, "number of cycles for a miss")
+
+  tlbPageBytes = Param.Int(4096, "Page Size")
+
   dcache_port = MasterPort("Datapath Data Port")
   _cached_ports = ['dcache_port']
   _uncached_slave_ports = []
   _uncached_master_ports = []
-  
-  #dtb = Param.X86TLB(X86TLB(), "Data TLB")
   
   def connectCachedPorts(self, bus):
       for p in self._cached_ports:

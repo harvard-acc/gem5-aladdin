@@ -11,7 +11,6 @@
 #include "sim/system.hh"
 #include "sim/clocked_object.hh"
 #include "params/Datapath.hh"
-
 //ALaddin Headers
 #include <boost/graph/graphviz.hpp>
 #include <boost/config.hpp>
@@ -32,6 +31,7 @@
 #include "generic_func.h"
 
 #include "dddg.hh"
+#include "aladdin_tlb.hh"
 
 #define CONTROL_EDGE 11
 #define PIPE_EDGE 12
@@ -129,11 +129,8 @@ class Datapath: public MemObject
     
     MasterID _dataMasterId;
     
-
     //const unsigned int _cacheLineSize;
-    
     DcachePort dcachePort;
-    
     
     //gem5 tick
     void step();
@@ -153,6 +150,7 @@ class Datapath: public MemObject
     
     System *system;
 
+    AladdinTLB dtb;
   public:
     
     
@@ -175,6 +173,8 @@ class Datapath: public MemObject
     BaseMasterPort &getMasterPort(const std::string &if_name, 
                                           PortID idx = InvalidPortID);
 
+    void finishTranslation(PacketPtr pkt);
+    
     void parse_config();
     bool fileExists (const string file_name)
     {
@@ -255,7 +255,7 @@ class Datapath: public MemObject
     int clearGraph();
 
   private:
-    typedef enum {Ready,Issued,Returned} MemAccessStatus;
+    typedef enum {Ready,Translated,Issued,Returned} MemAccessStatus;
     
     //global/whole datapath variables
     std::vector<int> newLevel;

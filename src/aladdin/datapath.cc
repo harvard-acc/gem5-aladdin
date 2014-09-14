@@ -13,7 +13,8 @@ Datapath::Datapath (const Params *p):
   tickEvent(this),
   retryPkt(NULL),
   isCacheBlocked(false),
-  system(p->system)
+  system(p->system),
+  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes)
   //_cacheLineSize(p->system->cacheLineSize()),
 {
   
@@ -115,7 +116,7 @@ Datapath::completeDataAccess(PacketPtr pkt)
   //Mark nodes ready to fire
   unsigned node_id = state->node_id;
   assert(executingQueue.find(node_id) != executingQueue.end());
-  assert(executingQueue[node_id] == Issued);
+  assert(executingQueue[node_id] == Translated);
   executingQueue[node_id] = Returned;
   DPRINTF(Datapath, "node:%d mem access is returned\n", node_id);
   delete state;
@@ -123,6 +124,28 @@ Datapath::completeDataAccess(PacketPtr pkt)
   delete pkt;
 }
 
+void
+Datapath::finishTranslation(PacketPtr pkt)
+{
+  DPRINTF(Datapath, "finishTranslation for addr:%#x %s\n", pkt->getAddr(), pkt->cmdString());
+  DatapathSenderState *state = dynamic_cast<DatapathSenderState *> (pkt->senderState);
+  unsigned node_id = state->node_id;
+  assert(executingQueue.find(node_id) != executingQueue.end());
+  assert(executingQueue[node_id] == Issued);
+  executingQueue[node_id] = Translated;
+  DPRINTF(Datapath, "node:%d mem access is translated\n", node_id);
+  
+  if(!dcachePort.sendTimingReq(pkt))
+  {
+    //blocked, retry
+    assert(retryPkt == NULL);
+    retryPkt = pkt;
+    isCacheBlocked = true;
+    DPRINTF(Datapath, "retry later...\n");
+  }
+  else
+    DPRINTF(Datapath, "issued to dcache!\n");
+}
 bool
 Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
 {
@@ -138,6 +161,7 @@ Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
   typedef uint32_t FlagsType;
   Flags<FlagsType> flags;
   flags = 0;
+  //constructor for physical request only
   req = new Request (addr, size, flags, dataMasterId());
 
   MemCmd command;
@@ -153,16 +177,8 @@ Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
   DatapathSenderState *state = new DatapathSenderState(node_id);
   data_pkt->senderState = state;
   
-  if(!dcachePort.sendTimingReq(data_pkt))
-  {
-    //blocked, retry
-    assert(retryPkt == NULL);
-    retryPkt = data_pkt;
-    isCacheBlocked = true;
-    DPRINTF(Datapath, "retry later...\n");
-  }
-  else
-    DPRINTF(Datapath, "issued to dcache!\n");
+  //TLB access
+  dtb.translateTiming(data_pkt);
   return true;
 }
 
@@ -2089,12 +2105,9 @@ void Datapath::stepExecutingQueue()
         Addr addr = actualAddress[node_id].first;
         int size = actualAddress[node_id].second / 16;
         bool isLoad = is_load_op(microop.at(node_id));
-        bool isIssued = accessRequest(addr, size, isLoad, node_id);
-        if (isIssued)
-        {
-          it->second = Issued;
-          DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
-        }
+        accessRequest(addr, size, isLoad, node_id);
+        it->second = Issued;
+        DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
         ++it;
         ++index;
       }
