@@ -126,27 +126,29 @@ if args:
 multiprocesses = []
 numThreads = 1
 
-if options.bench:
-    apps = options.bench.split("-")
-    if len(apps) != options.num_cpus:
-        print "number of benchmarks not equal to set num_cpus!"
-        sys.exit(1)
+np = options.num_cpus
+if np > 0:
+  if options.bench:
+      apps = options.bench.split("-")
+      if len(apps) != options.num_cpus:
+          print "number of benchmarks not equal to set num_cpus!"
+          sys.exit(1)
 
-    for app in apps:
-        try:
-            if buildEnv['TARGET_ISA'] == 'alpha':
-                exec("workload = %s('alpha', 'tru64', 'ref')" % app)
-            else:
-                exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
-            multiprocesses.append(workload.makeLiveProcess())
-        except:
-            print >>sys.stderr, "Unable to find workload for %s: %s" % (buildEnv['TARGET_ISA'], app)
-            sys.exit(1)
-elif options.cmd:
-    multiprocesses, numThreads = get_processes(options)
-else:
-    print >> sys.stderr, "No workload specified. Exiting!\n"
-    sys.exit(1)
+      for app in apps:
+          try:
+              if buildEnv['TARGET_ISA'] == 'alpha':
+                  exec("workload = %s('alpha', 'tru64', 'ref')" % app)
+              else:
+                  exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
+              multiprocesses.append(workload.makeLiveProcess())
+          except:
+              print >>sys.stderr, "Unable to find workload for %s: %s" % (buildEnv['TARGET_ISA'], app)
+              sys.exit(1)
+  elif options.cmd:
+      multiprocesses, numThreads = get_processes(options)
+  else:
+      print >> sys.stderr, "No workload specified. Exiting!\n"
+      sys.exit(1)
 
 
 (CPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(options)
@@ -158,9 +160,9 @@ MemClass = Simulation.setMemClass(options)
 if options.smt and options.num_cpus > 1:
     fatal("You cannot use SMT with multiple CPUs!")
 
-np = options.num_cpus
-system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
-                mem_mode = test_mem_mode,
+if np > 0:
+  system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
+system = System(mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
 if options.aladdin:
@@ -191,8 +193,9 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
 
 # All cpus belong to a common cpu_clk_domain, therefore running at a common
 # frequency.
-for cpu in system.cpu:
-    cpu.clk_domain = system.cpu_clk_domain
+if np > 0:
+  for cpu in system.cpu:
+      cpu.clk_domain = system.cpu_clk_domain
 
 # Sanity check
 if options.fastmem:

@@ -9,6 +9,7 @@
 #include "mem/packet.hh"
 #include "mem/mem_object.hh"
 #include "sim/system.hh"
+#include "sim/sim_exit.hh"
 #include "sim/clocked_object.hh"
 #include "params/Datapath.hh"
 //ALaddin Headers
