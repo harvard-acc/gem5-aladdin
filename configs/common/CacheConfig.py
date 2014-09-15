@@ -71,10 +71,12 @@ def config_cache(options, system):
                                    size=options.l2_size,
                                    assoc=options.l2_assoc,
                                    hit_latency=options.l2_hit_latency,
-                                   response_latency=options.l2_hit_latency)
+                                   response_latency=options.l2_hit_latency,
+                                   is_perfect_cache=options.is_perfect_cache)
 
         system.tol2bus = CoherentBus(clk_domain = system.cpu_clk_domain,
-                                     width = 32)
+                                     width = 32,
+                                     is_perfect_bus = options.is_perfect_bus)
 
         system.l2.cpu_side = system.tol2bus.master
         system.l2.mem_side = system.membus.slave

@@ -161,11 +161,11 @@ MemClass = Simulation.setMemClass(options)
 if options.smt and options.num_cpus > 1:
     fatal("You cannot use SMT with multiple CPUs!")
 
-if np > 0:
-  system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
 system = System(mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
+if np > 0:
+  system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
 if options.aladdin:
   system.datapath = Datapath(benchName = options.aladdin_bench_name,
                             traceFileName = options.aladdin_trace_file_name,
@@ -263,7 +263,7 @@ if options.ruby:
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
-    system.membus = CoherentBus(is_perfect_bus=options.is_perfect_mem_bus)
+    system.membus = CoherentBus(is_perfect_bus=options.is_perfect_bus)
     #if options.aladdin:
       #system.aladdin_membus = CoherentBus(is_perfect_bus=options.is_perfect_mem_bus)
       #system.datapath.connectAllPorts(system.aladdin_membus)

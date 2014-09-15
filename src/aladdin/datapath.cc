@@ -14,6 +14,7 @@ Datapath::Datapath (const Params *p):
   retryPkt(NULL),
   isCacheBlocked(false),
   dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes, p->isPerfectTLB),
+  inFlightNodes(0),
   system(p->system)
   //_cacheLineSize(p->system->cacheLineSize()),
 {
@@ -116,7 +117,7 @@ Datapath::completeDataAccess(PacketPtr pkt)
   //Mark nodes ready to fire
   unsigned node_id = state->node_id;
   assert(executingQueue.find(node_id) != executingQueue.end());
-  assert(executingQueue[node_id] == Translated);
+  assert(executingQueue[node_id] == WaitingFromCache);
   executingQueue[node_id] = Returned;
   DPRINTF(Datapath, "node:%d mem access is returned\n", node_id);
   delete state;
@@ -131,25 +132,47 @@ Datapath::finishTranslation(PacketPtr pkt)
   DatapathSenderState *state = dynamic_cast<DatapathSenderState *> (pkt->senderState);
   unsigned node_id = state->node_id;
   assert(executingQueue.find(node_id) != executingQueue.end());
-  assert(executingQueue[node_id] == Issued);
+  assert(executingQueue[node_id] == Translating);
   executingQueue[node_id] = Translated;
   DPRINTF(Datapath, "node:%d mem access is translated\n", node_id);
-  
-  if(!dcachePort.sendTimingReq(pkt))
-  {
-    //blocked, retry
-    assert(retryPkt == NULL);
-    retryPkt = pkt;
-    isCacheBlocked = true;
-    DPRINTF(Datapath, "retry later...\n");
-  }
-  else
-    DPRINTF(Datapath, "issued to dcache!\n");
+  delete state;
+  delete pkt->req;
+  delete pkt;
 }
 bool
-Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
+Datapath::accessTLB (Addr addr, unsigned size, bool isLoad, int node_id)
 {
-  DPRINTF(Datapath, "accessRequest for addr:%#x\n", addr);
+  DPRINTF(Datapath, "accessTLB for addr:%#x\n", addr);
+  //form request
+  Request *req = NULL;
+  //physical request
+  typedef uint32_t FlagsType;
+  Flags<FlagsType> flags;
+  flags = 0;
+  //constructor for physical request only
+  req = new Request (addr, size, flags, dataMasterId());
+
+  MemCmd command;
+  if (isLoad)
+    command = MemCmd::ReadReq;
+  else
+    command = MemCmd::WriteReq;
+  PacketPtr data_pkt = new Packet(req, command);
+  
+  uint8_t *data = new uint8_t[64];
+  data_pkt->dataStatic<uint8_t>(data);
+  
+  DatapathSenderState *state = new DatapathSenderState(node_id);
+  data_pkt->senderState = state;
+  
+  //TLB access
+  dtb.translateTiming(data_pkt);
+  return true;
+}
+bool
+Datapath::accessCache (Addr addr, unsigned size, bool isLoad, int node_id)
+{
+  DPRINTF(Datapath, "accessCache for addr:%#x\n", addr);
   if (isCacheBlocked)
   {//already someone waiting
     DPRINTF(Datapath, "cache blocked...\n");
@@ -177,11 +200,19 @@ Datapath::accessRequest(Addr addr, unsigned size, bool isLoad, int node_id)
   DatapathSenderState *state = new DatapathSenderState(node_id);
   data_pkt->senderState = state;
   
-  //TLB access
-  dtb.translateTiming(data_pkt);
+  if(!dcachePort.sendTimingReq(data_pkt))
+  {
+    //blocked, retry
+    assert(retryPkt == NULL);
+    retryPkt = data_pkt;
+    isCacheBlocked = true;
+    DPRINTF(Datapath, "retry later...\n");
+  }
+  else
+    DPRINTF(Datapath, "issued to dcache!\n");
+  
   return true;
 }
-
 //optimizationFunctions
 void Datapath::setGlobalGraph()
 {
@@ -201,12 +232,12 @@ void Datapath::globalOptimizationPass()
   removeInductionDependence();
   removePhiNodes();
   initBaseAddress();
-  //loopFlatten();
+  loopFlatten();
   loopUnrolling();
-  //removeSharedLoads();
-  //storeBuffer();
-  //removeRepeatedStores();
-  //treeHeightReduction();
+  removeSharedLoads();
+  storeBuffer();
+  removeRepeatedStores();
+  treeHeightReduction();
   loopPipelining();
 }
 
@@ -1938,7 +1969,8 @@ void Datapath::initActualAddress()
     long long int address;
     int size;
     sscanf(buffer, "%d,%lld,%d\n", &node_id, &address, &size);
-    actualAddress[node_id] = make_pair(address, size);
+    
+    actualAddress[node_id] = make_pair(address && MASK, size);
   }
   gzclose(gzip_file);
 
@@ -2117,16 +2149,28 @@ void Datapath::stepExecutingQueue()
     {
       
       MemAccessStatus status = it->second;
-      if (status == Ready)
+      if (status == Ready && inFlightNodes < MAX_INFLIGHT_NODES)
       {
         //first time see, do access
         Addr addr = actualAddress[node_id].first;
         int size = actualAddress[node_id].second / 16;
         bool isLoad = is_load_op(microop.at(node_id));
-        if (accessRequest(addr, size, isLoad, node_id))
+        accessTLB(addr, size, isLoad, node_id);
+        it->second = Translating;
+        DPRINTF(Datapath, "node:%d mem access is translating\n", node_id);
+        ++it;
+        ++index;
+        inFlightNodes++;
+      }
+      else if (status == Translated)
+      {
+        Addr addr = actualAddress[node_id].first;
+        int size = actualAddress[node_id].second / 16;
+        bool isLoad = is_load_op(microop.at(node_id));
+        if (accessCache(addr, size, isLoad, node_id))
         {
-          it->second = Issued;
-          DPRINTF(Datapath, "node:%d mem access is issued\n", node_id);
+          it->second = WaitingFromCache;
+          DPRINTF(Datapath, "node:%d mem access is accessing cache\n", node_id);
         }
         ++it;
         ++index;
@@ -2139,6 +2183,7 @@ void Datapath::stepExecutingQueue()
         updateChildren(node_id);
         it = executingQueue.begin();
         std::advance(it, index);
+        inFlightNodes--;
       }
       else
       {
