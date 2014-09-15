@@ -36,6 +36,8 @@
 
 #define CONTROL_EDGE 11
 #define PIPE_EDGE 12
+#define MASK 2147483647
+#define MAX_INFLIGHT_NODES 100
 
 using namespace std;
 typedef boost::property < boost::vertex_name_t, int> VertexProperty;
@@ -147,10 +149,13 @@ class Datapath: public MemObject
     
     bool isCacheBlocked;
 
-    bool accessRequest(Addr addr, unsigned size, bool isLoad, int node_id);
+    bool accessTLB(Addr addr, unsigned size, bool isLoad, int node_id);
+    bool accessCache(Addr addr, unsigned size, bool isLoad, int node_id);
 
     AladdinTLB dtb;
     
+    unsigned inFlightNodes;
+
     System *system;
   public:
     
@@ -257,7 +262,7 @@ class Datapath: public MemObject
     int clearGraph();
 
   private:
-    typedef enum {Ready,Translated,Issued,Returned} MemAccessStatus;
+    typedef enum {Ready,Translating,Translated,WaitingFromCache,Returned} MemAccessStatus;
     
     //global/whole datapath variables
     std::vector<int> newLevel;
