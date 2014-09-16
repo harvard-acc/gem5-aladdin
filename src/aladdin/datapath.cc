@@ -13,7 +13,7 @@ Datapath::Datapath (const Params *p):
   tickEvent(this),
   retryPkt(NULL),
   isCacheBlocked(false),
-  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes, p->isPerfectTLB),
+  dtb(this, p->tlbEntries, p->tlbAssoc, p->tlbHitLatency, p->tlbMissLatency, p->tlbPageBytes, p->isPerfectTLB, p->numOutStandingWalks),
   inFlightNodes(0),
   system(p->system)
   //_cacheLineSize(p->system->cacheLineSize()),
@@ -166,8 +166,15 @@ Datapath::accessTLB (Addr addr, unsigned size, bool isLoad, int node_id)
   data_pkt->senderState = state;
   
   //TLB access
-  dtb.translateTiming(data_pkt);
-  return true;
+  if (dtb.translateTiming(data_pkt))
+    return true;
+  else
+  {
+    delete state;
+    delete data_pkt->req;
+    delete data_pkt;
+    return false;
+  }
 }
 bool
 Datapath::accessCache (Addr addr, unsigned size, bool isLoad, int node_id)
@@ -2155,12 +2162,14 @@ void Datapath::stepExecutingQueue()
         Addr addr = actualAddress[node_id].first;
         int size = actualAddress[node_id].second / 16;
         bool isLoad = is_load_op(microop.at(node_id));
-        accessTLB(addr, size, isLoad, node_id);
-        it->second = Translating;
-        DPRINTF(Datapath, "node:%d mem access is translating\n", node_id);
+        if (accessTLB(addr, size, isLoad, node_id))
+        {
+          it->second = Translating;
+          DPRINTF(Datapath, "node:%d mem access is translating\n", node_id);
+          inFlightNodes++;
+        }
         ++it;
         ++index;
-        inFlightNodes++;
       }
       else if (status == Translated)
       {

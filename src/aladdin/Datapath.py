@@ -22,7 +22,8 @@ class Datapath(MemObject):
   tlbPageBytes = Param.Int(4096, "Page Size")
   
   isPerfectTLB = Param.Bool(False, "Is this TLB perfect (e.g. always hit)")
-
+  
+  numOutStandingWalks = Param.Int(4, "num of outstanding page walks")
 
   system = Param.System(Parent.any, "system object")
   

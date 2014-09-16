@@ -105,6 +105,7 @@ class AladdinTLB
     Cycles missLatency;
     Addr pageBytes;
     bool isPerfectTLB;
+    unsigned numOutStandingWalks;
 
     BaseTLBMemory *tlbMemory;
     

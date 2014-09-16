@@ -2,14 +2,15 @@
 #include "datapath.hh"
 #include "debug/Datapath.hh"
 
-AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr _page_bytes, bool _is_perfect) : 
+AladdinTLB::AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr _page_bytes, bool _is_perfect, unsigned _num_walks) : 
   datapath(_datapath),
   numEntries(_num_entries), 
   assoc(_assoc),
   hitLatency(_hit_latency), 
   missLatency(_miss_latency), 
   pageBytes(_page_bytes),
-  isPerfectTLB(_is_perfect)
+  isPerfectTLB(_is_perfect),
+  numOutStandingWalks(_num_walks)
 {
   if (numEntries > 0)
     tlbMemory = new TLBMemory (_num_entries, _assoc, _page_bytes);
@@ -65,7 +66,7 @@ AladdinTLB::outStandingWalkReturnEvent::description() const
 }
 
 
-void
+bool
 AladdinTLB::translateTiming(PacketPtr pkt)
 {
   Addr vaddr = pkt->req->getPaddr();
@@ -81,11 +82,14 @@ AladdinTLB::translateTiming(PacketPtr pkt)
       hitQueue.push_back(pkt);
       deHitQueueEvent *hq = new deHitQueueEvent(this);
       datapath->schedule(hq, datapath->clockEdge(hitLatency));
+      return true;
   } 
   else 
   {
       // TLB miss! Let the TLB handle the walk, etc
       DPRINTF(Datapath, "TLB miss for addr %#x\n", vaddr);
+      if (outStandingWalks.size() > numOutStandingWalks)
+        return false;
       misses++;
          
       if (missQueue.find(vpn) == missQueue.end())
@@ -95,7 +99,7 @@ AladdinTLB::translateTiming(PacketPtr pkt)
         datapath->schedule(mq, datapath->clockEdge(missLatency));
       }
       missQueue.insert({vpn, pkt});
-
+      return true;
   }
 }
 
