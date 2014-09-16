@@ -143,12 +143,12 @@ class AladdinTLB
     std::unordered_multimap<Addr, PacketPtr> missQueue;
     
   public:
-    AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr pageBytes, bool _is_perfect);
+    AladdinTLB(Datapath *_datapath, unsigned _num_entries, unsigned _assoc, Cycles _hit_latency, Cycles _miss_latency, Addr pageBytes, bool _is_perfect, unsigned _num_walks);
     ~AladdinTLB();
 
     std::string name() const;
 
-    void translateTiming(PacketPtr pkt);
+    bool translateTiming(PacketPtr pkt);
     
     void insert(Addr vpn, Addr ppn);
     

@@ -88,16 +88,16 @@ AladdinTLB::translateTiming(PacketPtr pkt)
   {
       // TLB miss! Let the TLB handle the walk, etc
       DPRINTF(Datapath, "TLB miss for addr %#x\n", vaddr);
-      if (outStandingWalks.size() > numOutStandingWalks)
-        return false;
-      misses++;
          
       if (missQueue.find(vpn) == missQueue.end())
       {
+        if (numOutStandingWalks != 0 && outStandingWalks.size() >= numOutStandingWalks)
+          return false;
         outStandingWalks.push_back(vpn);
         outStandingWalkReturnEvent *mq = new outStandingWalkReturnEvent(this);
         datapath->schedule(mq, datapath->clockEdge(missLatency));
       }
+      misses++;
       missQueue.insert({vpn, pkt});
       return true;
   }
@@ -147,7 +147,7 @@ TLBMemory::insert(Addr vpn, Addr ppn)
         if (entries[way][i].free) {
             entry = &entries[way][i];
             break;
-        } else if (entries[way][i].mruTick < minTick) {
+        } else if (entries[way][i].mruTick <= minTick) {
             minTick = entries[way][i].mruTick;
             entry = &entries[way][i];
         }

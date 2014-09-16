@@ -36,7 +36,7 @@
 
 #define CONTROL_EDGE 11
 #define PIPE_EDGE 12
-#define MASK 2147483647
+#define MASK 0x7fffffff
 #define MAX_INFLIGHT_NODES 100
 
 using namespace std;
