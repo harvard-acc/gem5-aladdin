@@ -1977,7 +1977,7 @@ void Datapath::initActualAddress()
     int size;
     sscanf(buffer, "%d,%lld,%d\n", &node_id, &address, &size);
     
-    actualAddress[node_id] = make_pair(address && MASK, size);
+    actualAddress[node_id] = make_pair(address & MASK, size/8);
   }
   gzclose(gzip_file);
 
