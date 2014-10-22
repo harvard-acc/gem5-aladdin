@@ -194,7 +194,7 @@ termcap = get_termcap(GetOption('use_colors'))
 # export TERM so that clang reports errors in color
 use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
                  'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PYTHONPATH',
-                 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT' ])
+                 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT'])
 
 use_prefixes = [
     "M5",           # M5 configuration (e.g., path to kernels)
@@ -548,6 +548,7 @@ if main['GCC'] or main['CLANG']:
     # We always compile using C++11, but only gcc >= 4.7 and clang 3.1
     # actually use that name, so we stick with c++0x
     main.Append(CXXFLAGS=['-std=c++0x'])
+    main.Append(CXXFLAGS=['-DNTHREADS=8'])
     # Add selected sanity checks from -Wextra
     main.Append(CXXFLAGS=['-Wmissing-field-initializers',
                           '-Woverloaded-virtual'])
