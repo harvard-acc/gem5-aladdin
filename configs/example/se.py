@@ -167,7 +167,7 @@ system = System(mem_mode = test_mem_mode,
 if np > 0:
   system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
 if options.aladdin:
-  system.datapath = Datapath(benchName = options.aladdin_bench_name,
+  system.datapath = CacheDatapath(benchName = options.aladdin_bench_name,
                             traceFileName = options.aladdin_trace_file_name,
                             configFileName = options.aladdin_config_file_name,
                             cycleTime = options.aladdin_cycle_time,
