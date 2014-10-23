@@ -38,10 +38,11 @@
 #
 # Authors: Steve Reinhardt
 
-# Simple test script
+# This is a system emulation script with Aladdin accelerators.
 #
 # "m5 test.py"
 
+import ConfigParser
 import optparse
 import sys
 import os
@@ -126,30 +127,33 @@ if args:
 multiprocesses = []
 numThreads = 1
 
-if options.bench:
-    apps = options.bench.split("-")
-    if len(apps) != options.num_cpus:
-        print "number of benchmarks not equal to set num_cpus!"
-        sys.exit(1)
+np = options.num_cpus
+if np > 0:
+  if options.bench:
+      apps = options.bench.split("-")
+      if len(apps) != options.num_cpus:
+          print "number of benchmarks not equal to set num_cpus!"
+          sys.exit(1)
 
-    for app in apps:
-        try:
-            if buildEnv['TARGET_ISA'] == 'alpha':
-                exec("workload = %s('alpha', 'tru64', 'ref')" % app)
-            else:
-                exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
-            multiprocesses.append(workload.makeLiveProcess())
-        except:
-            print >>sys.stderr, "Unable to find workload for %s: %s" % (buildEnv['TARGET_ISA'], app)
-            sys.exit(1)
-elif options.cmd:
-    multiprocesses, numThreads = get_processes(options)
-else:
-    print >> sys.stderr, "No workload specified. Exiting!\n"
-    sys.exit(1)
+      for app in apps:
+          try:
+              if buildEnv['TARGET_ISA'] == 'alpha':
+                  exec("workload = %s('alpha', 'tru64', 'ref')" % app)
+              else:
+                  exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
+              multiprocesses.append(workload.makeLiveProcess())
+          except:
+              print >>sys.stderr, "Unable to find workload for %s: %s" % (buildEnv['TARGET_ISA'], app)
+              sys.exit(1)
+  elif options.cmd:
+      multiprocesses, numThreads = get_processes(options)
+  else:
+      print >> sys.stderr, "No workload specified. Exiting!\n"
+      sys.exit(1)
 
 
 (CPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(options)
+#print "CPUClass:%s, test_mem_mode:%s, FutureClass:%s" % (CPUClass, test_mem_mode, FutureClass)
 CPUClass.numThreads = numThreads
 
 MemClass = Simulation.setMemClass(options)
@@ -158,11 +162,39 @@ MemClass = Simulation.setMemClass(options)
 if options.smt and options.num_cpus > 1:
     fatal("You cannot use SMT with multiple CPUs!")
 
-np = options.num_cpus
-system = System(cpu = [CPUClass(cpu_id=i) for i in xrange(np)],
-                mem_mode = test_mem_mode,
+system = System(mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
+if np > 0:
+  system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
+if options.aladdin_cfg_file:
+  config = ConfigParser.SafeConfigParser()
+  config.read(options.aladdin_cfg_file)
+  accels = config.sections()
+  if not accels:
+    fatal("No accelerators were specified!")
+  datapaths = []
+  for accel in accels:
+    memory_type = config.get(accel, 'memory_type').lower()
+    if memory_type == "cache":
+      datapaths.append(CacheDatapath(
+          benchName = config.get(accel, "bench_name"),
+          traceFileName = config.get(accel, "trace_file_name"),
+          configFileName = config.get(accel, "config_file_name"),
+          cycleTime = config.getint(accel, "cycle_time"),
+          tlbEntries = config.getint(accel, "tlb_entries"),
+          tlbAssoc = config.getint(accel, "tlb_assoc"),
+          tlbHitLatency = config.getint(accel, "tlb_hit_latency"),
+          tlbMissLatency = config.getint(accel, "tlb_miss_latency"),
+          tlbPageBytes = config.getint(accel, "tlb_page_size"),
+          isPerfectTLB = config.getboolean(accel, "is_perfect_tlb"),
+          numOutStandingWalks = config.getint(accel, "tlb_max_outstanding_walks")))
+    elif memory_type == "spad":
+      fatal("Scratchpad memory type is not yet supported for accelerator %s.")
+    else:
+      fatal("Aladdin configuration file specified invalid memory type %s for "
+            "accelerator %s." % (memory_type, accel))
+  system.datapaths = datapaths
 
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
@@ -181,8 +213,9 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
 
 # All cpus belong to a common cpu_clk_domain, therefore running at a common
 # frequency.
-for cpu in system.cpu:
-    cpu.clk_domain = system.cpu_clk_domain
+if np > 0:
+  for cpu in system.cpu:
+      cpu.clk_domain = system.cpu_clk_domain
 
 # Sanity check
 if options.fastmem:
@@ -249,7 +282,11 @@ if options.ruby:
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
-    system.membus = CoherentBus()
+    system.membus = CoherentBus(is_perfect_bus=options.is_perfect_bus)
+    #if options.aladdin:
+      #system.aladdin_membus = CoherentBus(is_perfect_bus=options.is_perfect_mem_bus)
+      #system.datapath.connectAllPorts(system.aladdin_membus)
+
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)
     MemConfig.config_mem(options, system)

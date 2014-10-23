@@ -120,27 +120,8 @@ def addCommonOptions(parser):
     parser.add_option("--cacheline_size", type="int", default=64)
 
     # Aladdin Options
-    parser.add_option("--aladdin", action="store_true")
-    parser.add_option("--aladdin_bench_name", type="string", default=None,
-                        help="Bench Name for Aladdin")
-    parser.add_option("--aladdin_trace_file_name", type="string", default=None,
-                        help="Trace File Name for Aladdin")
-    parser.add_option("--aladdin_config_file_name", type="string", default=None,
-                        help="Config File Name for Aladdin")
-    parser.add_option("--aladdin_cycle_time", type="int", default="6",
-                        help="Cycle Time for Aladdin")
-    parser.add_option("--aladdin_tlb_entries", type="int", default="0",
-                        help="Number of Entries for Aladdin's TLB")
-    parser.add_option("--aladdin_tlb_assoc", type="int", default="4",
-                        help="Associativity for Aladdin's TLB")
-    parser.add_option("--aladdin_tlb_hit_latency", type="int", default="0",
-                        help="Hit Latency for Aladdin's TLB")
-    parser.add_option("--aladdin_tlb_miss_latency", type="int", default="10",
-                        help="Miss Latency for Aladdin's TLB")
-    parser.add_option("--aladdin_tlb_pagesize", type="int", default="4096",
-                        help="PageSize for Aladdin's TLB")
-    parser.add_option("--is_aladdin_tlb_perfect", type="int", default=0,
-                        help="Whether Aladdin's TLB is perfect")
+    parser.add_option("--aladdin_cfg_file", default=None,
+                      help="Aladdin simulation configuration file.")
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 

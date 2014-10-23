@@ -190,6 +190,7 @@ class System : public MemObject
 
     std::vector<ThreadContext *> threadContexts;
     int _numContexts;
+    int _numRunningAccelerators;
 
     ThreadContext *getThreadContext(ThreadID tid)
     {
@@ -201,6 +202,17 @@ class System : public MemObject
         assert(_numContexts == (int)threadContexts.size());
         return _numContexts;
     }
+
+    /* Returns the number of accelerators that are currently running in the
+     * system.
+     */
+    int numRunningAccelerators() { return _numRunningAccelerators; }
+
+    /**
+     * Update the number of running accelerators when one starts or exits.
+     */
+    void registerAcceleratorStart() { _numRunningAccelerators ++; }
+    void registerAcceleratorExit() { _numRunningAccelerators --; }
 
     /** Return number of running (non-halted) thread contexts in
      * system.  These threads could be Active or Suspended. */
