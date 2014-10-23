@@ -1,3 +1,6 @@
 [submodule "aladdin"]
 	path = src/aladdin
 	url = ssh://samxi@chips.seas.harvard.edu:29418/aladdin
+[submodule "src/aladdin"]
+	path = src/aladdin
+	url = ssh://samxi@chips.seas.harvard.edu:29418/aladdin
