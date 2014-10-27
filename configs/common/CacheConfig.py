@@ -107,12 +107,13 @@ def config_cache(options, system):
 
     if options.aladdin_cfg_file:
       for datapath in system.datapaths:
-        aladdin_dcache = dcache_class(size=options.l1d_size,
-                              assoc=options.l1d_assoc,
-                              hit_latency=options.l1d_hit_latency,
-                              response_latency=options.l1d_hit_latency,
-                              is_perfect_cache=options.is_perfect_cache)
-        datapath.addPrivateL1Dcache(aladdin_dcache)
+        if isinstance(datapath, CacheDatapath):
+          aladdin_dcache = dcache_class(size=options.l1d_size,
+                                assoc=options.l1d_assoc,
+                                hit_latency=options.l1d_hit_latency,
+                                response_latency=options.l1d_hit_latency,
+                                is_perfect_cache=options.is_perfect_cache)
+          datapath.addPrivateL1Dcache(aladdin_dcache)
         if options.l2cache:
           datapath.connectAllPorts(system.tol2bus, system.membus)
         else:

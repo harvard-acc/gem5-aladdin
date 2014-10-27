@@ -188,9 +188,15 @@ if options.aladdin_cfg_file:
           tlbMissLatency = config.getint(accel, "tlb_miss_latency"),
           tlbPageBytes = config.getint(accel, "tlb_page_size"),
           isPerfectTLB = config.getboolean(accel, "is_perfect_tlb"),
-          numOutStandingWalks = config.getint(accel, "tlb_max_outstanding_walks")))
+          numOutStandingWalks = config.getint(
+              accel, "tlb_max_outstanding_walks")))
     elif memory_type == "spad":
-      fatal("Scratchpad memory type is not yet supported for accelerator %s.")
+      datapaths.append(DmaScratchpadDatapath(
+          benchName = config.get(accel, "bench_name"),
+          traceFileName = config.get(accel, "trace_file_name"),
+          configFileName = config.get(accel, "config_file_name"),
+          cycleTime = config.getint(accel, "cycle_time"),
+          spadPorts = config.getint(accel, "spad_ports")))
     else:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
