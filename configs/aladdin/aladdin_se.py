@@ -189,7 +189,12 @@ if options.aladdin_cfg_file:
           tlbPageBytes = config.getint(accel, "tlb_page_size"),
           isPerfectTLB = config.getboolean(accel, "is_perfect_tlb"),
           numOutStandingWalks = config.getint(
-              accel, "tlb_max_outstanding_walks")))
+              accel, "tlb_max_outstanding_walks"),
+          loadQueueSize = config.getint(accel, "load_queue_size"),
+          loadBandwidth = config.getint(accel, "load_bandwidth"),
+          storeQueueSize = config.getint(accel, "store_queue_size"),
+          storeBandwidth = config.getint(accel, "store_bandwidth"),
+          tlbBandwidth = config.getint(accel, "tlb_bandwidth")))
     elif memory_type == "spad":
       datapaths.append(DmaScratchpadDatapath(
           benchName = config.get(accel, "bench_name"),

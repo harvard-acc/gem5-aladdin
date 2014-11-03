@@ -542,6 +542,7 @@ Cache<TagStore>::recvTimingReq(PacketPtr pkt)
             /// @note writebacks will be checked in getNextMSHR()
             /// for any conflicting requests to the same block
 
+            DPRINTF(Cache, "MSHR hit for blk addr %#x.\n", blk_addr);
             //@todo remove hw_pf here
             assert(pkt->req->masterId() < system->maxMasters());
             mshr_hits[pkt->cmdToIndex()][pkt->req->masterId()]++;
@@ -561,6 +562,7 @@ Cache<TagStore>::recvTimingReq(PacketPtr pkt)
             // no MSHR
             assert(pkt->req->masterId() < system->maxMasters());
             mshr_misses[pkt->cmdToIndex()][pkt->req->masterId()]++;
+            DPRINTF(Cache, "MSHR miss. Allocating buffer for blk_addr %#x.\n", blk_addr);
             // always mark as cache fill for now... if we implement
             // no-write-allocate or bypass accesses this will have to
             // be changed.
@@ -1891,6 +1893,8 @@ Cache<TagStore>::MemSidePacketQueue::sendDeferredPacket()
                 // it gets retried
             } else {
                   cache.markInService(mshr, pkt);
+                  DPRINTF(Cache, "Completed MSHR request for addr %#x.\n",
+                          pkt->getAddr());
             }
         }
     }
