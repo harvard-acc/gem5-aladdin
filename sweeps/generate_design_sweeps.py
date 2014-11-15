@@ -8,14 +8,13 @@ import sys
 
 from sweep_config import *
 
-CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d_tlb_%d_bw_%d_ht_%d"
 GEM5_CFG = "gem5.cfg"
 ALADDIN_CFG = "aladdin.cfg"
 CACTI_CFG = "cacti.cfg"
 
 # Taken from the template cfg file in <gem5_home>/configs/aladdin.
 GEM5_DEFAULTS = {
-  "cycle_time": 6,
+  "cycle_time": 1,
   "memory_type": "cache",
   "spad_ports": 1,
   "tlb_hit_latency": 0,
@@ -32,7 +31,8 @@ GEM5_DEFAULTS = {
   "store_bandwidth": 1,
   "store_queue_size": 16,
   "tlb_bandwidth": 1,
-  "tlb_queue_size": 1
+  "tlb_queue_size": 1,
+  "dma_setup_latency" : 1,
 }
 
 def generate_aladdin_config(benchmark, config_name, params):
@@ -49,26 +49,27 @@ def generate_aladdin_config(benchmark, config_name, params):
   if "pipelining" in params:
     config_file.write("pipelining,%d\n" % params["pipelining"])
 
-  for array in benchmark.arrays:
-    if array.partition_type == PARTITION_CYCLIC:
-      config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
-                        (array.name,
-                         array.size*array.word_size,
-                         array.word_size,
-                         params["partition"]))
-    elif array.partition_type == PARTITION_BLOCK:
-      config_file.write("partition,block,%s,%d,%d,%d\n" %
-                        (array.name,
-                         array.size*array.word_size,
-                         array.word_size,
-                         params["partition"]))
-    elif array.partition_type == PARTITION_COMPLETE:
-      config_file.write("partition,complete,%s,%d\n" %
-                        (array.name, array.size*array.word_size))
-    else:
-      print("Invalid array partitioning configuration for array %s." %
-            array.name)
-      exit(1)
+  if "partition" in params:
+    for array in benchmark.arrays:
+      if array.partition_type == PARTITION_CYCLIC:
+        config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
+                          (array.name,
+                           array.size*array.word_size,
+                           array.word_size,
+                           params["partition"]))
+      elif array.partition_type == PARTITION_BLOCK:
+        config_file.write("partition,block,%s,%d,%d,%d\n" %
+                          (array.name,
+                           array.size*array.word_size,
+                           array.word_size,
+                           params["partition"]))
+      elif array.partition_type == PARTITION_COMPLETE:
+        config_file.write("partition,complete,%s,%d\n" %
+                          (array.name, array.size*array.word_size))
+      else:
+        print("Invalid array partitioning configuration for array %s." %
+              array.name)
+        exit(1)
 
   for loop in benchmark.loops:
     if (loop.trip_count == UNROLL_FLATTEN):
@@ -181,9 +182,14 @@ def generate_gem5_config(benchmark_name, config_name, params):
              "%s/inputs/dynamic_trace" % benchmark_top_dir)
   config.set(benchmark_name, "config_file_name",
              "%%(input_dir)s/%s" % ALADDIN_CFG)
-  # Cache size in GEM5 is specified like 64kB, rather than 65536.
-  cache_size_str = "%dkB" % (16384/1024)
-  config.set(benchmark_name, "cache_size", cache_size_str)
+  if params["memory_type"] == 'cache':
+    # Cache size in GEM5 is specified like 64kB, rather than 65536.
+    cache_size_str = "%dkB" % (int(params["cache_size"])/1024)
+    config.set(benchmark_name, "cache_size", cache_size_str)
+
+    # Use the same size and bandwidth for load and store queues.
+    config.set(benchmark_name, "store_bandwidth", str(params["load_bandwidth"]))
+    config.set(benchmark_name, "store_queue_size", str(params["load_queue_size"]))
   for key in GEM5_DEFAULTS.iterkeys():
     if key in params:
       config.set(benchmark_name, key, str(params[key]))
@@ -233,33 +239,44 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
 
     # The config will use load_bandwidth as "bandwidth" in the naming since it's
     # probable that even memory-bound accelerators are read-bound and not write-bound.
-    config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
-                                        set_params["unrolling"],
-                                        set_params["partition"],
-                                        set_params["tlb_entries"],
-                                        set_params["load_bandwidth"],
-                                        set_params["cache_hit_latency"])
+    if set_params["memory_type"] == 'spad' or set_params["memory_type"] == 'dma':
+      CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d"
+      config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
+                                          set_params["unrolling"],
+                                          set_params["partition"])
+
+    elif set_params["memory_type"] == 'cache':
+      CONFIG_NAME_FORMAT = "unr_%d_tlb_%d_ldbw_%d_ldq_%d_ht_%d"
+      config_name = CONFIG_NAME_FORMAT % (set_params["unrolling"],
+                                          set_params["tlb_entries"],
+                                          set_params["load_bandwidth"],
+                                          set_params["load_queue_size"],
+                                          set_params["cache_hit_latency"])
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
-    generate_gem5_config(benchmark.name, config_name, set_params)
     generate_aladdin_config(benchmark, config_name, set_params)
-    generate_cacti_config(benchmark.name, config_name, set_params)
+    generate_gem5_config(benchmark.name, config_name, set_params)
+    if set_params["memory_type"] == 'cache':
+      generate_cacti_config(benchmark.name, config_name, set_params)
 
 def generate_all_configs(benchmark, memory_type):
   """ Generates all the possible configurations for the design sweep. """
-  all_sweep_params = [pipelining,
-                      unrolling,
-                      partition,
-                      tlb_entries,
-                      tlb_max_outstanding_walks,
-                      load_bandwidth,
-                      load_queue_size,
-                      store_bandwidth,
-                      store_queue_size,
-                      cache_hit_latency,
-                      cache_size,
-                      cache_assoc]
+  if memory_type == 'spad' or memory_type == 'dma':
+    all_sweep_params = [pipelining,
+                        unrolling,
+                        partition]
+  elif memory_type == 'cache':
+    all_sweep_params = [unrolling,
+                        tlb_entries,
+                        tlb_max_outstanding_walks,
+                        load_bandwidth,
+                        load_queue_size,
+                        store_bandwidth,
+                        store_queue_size,
+                        cache_hit_latency,
+                        cache_size,
+                        cache_assoc]
   # This dict stores a single configuration.
   params = {"memory_type": memory_type}
   # Recursively generate all possible configurations.
@@ -288,12 +305,15 @@ def run_sweeps(workload, output_dir, dry_run=False):
     output_dir: Top-level directory of the configuration files.
     dry_run: True for a dry run.
   """
+  cwd = os.getcwd()
+  gem5_home = cwd.split('sweeps')[0]
+  print gem5_home
   # Turning on debug outputs for CacheDatapath can incur a huge amount of disk
   # space, most of which is redundant, so we leave that out of the command here.
-  run_cmd = ("./build/X86/gem5.opt --debug-file=%s/debug.out "
-             "./configs/aladdin/aladdin_se.py --num-cpus=0 --mem-size=2GB "
+  run_cmd = ("%s/build/X86/gem5.opt --debug-flags=DmaScratchpadDatapath,DMA --debug-file=%s/debug.out "
+             "%s/configs/aladdin/aladdin_se.py --num-cpus=0 --mem-size=2GB "
+             "--cpu-type=timing --caches "
              "--aladdin_cfg_file=%s > %s/stdout 2> %s/stderr")
-  cwd = os.getcwd()
   os.chdir("..")
   for benchmark in workload:
     print "------------------------------------"
@@ -306,23 +326,20 @@ def run_sweeps(workload, output_dir, dry_run=False):
       if not os.path.exists(abs_cfg_path):
         continue
       abs_output_path = "%s/%s/outputs" % (bmk_dir, config)
-      cmd = run_cmd % (abs_output_path, abs_cfg_path,
+      cmd = run_cmd % (gem5_home, abs_output_path, gem5_home, abs_cfg_path,
                        abs_output_path, abs_output_path)
       # Create a run.sh convenience script in this directory so that we can
       # quickly run a single config.
       run_script = open("%s/%s/run.sh" % (bmk_dir, config), "wb")
       run_script.write("#!/usr/bin/env bash\n"
-                       "temp=`pwd`\n"
-                       "cd ../../../..\n"
-                       "%s\n"
-                       "cd $temp\n" % cmd)
+                       "%s\n" % cmd)
       run_script.close()
       print "     %s" % config
       if not dry_run:
         os.system(cmd)
   os.chdir(cwd)
 
-def generate_traces(workload, output_dir, source_dir):
+def generate_traces(workload, output_dir, source_dir, memory_type):
   """ Generates dynamic traces for each workload.
 
   The traces are placed into <output_dir>/<benchmark>/inputs. This compilation
@@ -356,9 +373,13 @@ def generate_traces(workload, output_dir, source_dir):
     executable = output_file_prefix + "-instrumented"
     os.environ["WORKLOAD"]=",".join(benchmark.kernels)
     all_objs = [opt_obj]
-
+    
+    defines = " "
+    if memory_type == "dma":
+      defines += "-DDMA_MODE "
     # Compile the source file.
     os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
+              "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
               "-fno-unroll-loops -fno-inline -emit-llvm -o " + obj +
               " "  + source_file)
     # Compile the test harness if applicable.
@@ -399,7 +420,8 @@ def generate_condor_scripts(workload, output_dir, username):
       'Requirements    = (OpSys == "LINUX") && (Arch == "X86_64") && ( TotalMemory > 128000)',
       '# Change the email address to suit yourself',
       'Notify_User     = %s@eecs.harvard.edu' % username,
-      'Notification    = Error']
+      'Notification    = Error',
+      'Executable = /bin/bash']
 
   f = open('%s/submit.con' % cwd, 'w')
   for b in basicCondor:
@@ -413,7 +435,6 @@ def generate_condor_scripts(workload, output_dir, username):
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
       if not os.path.exists(abs_cfg_path):
         continue
-      f.write('Executable = /bin/bash\n')
       f.write('InitialDir = %s/%s/\n' % (bmk_dir, config))
       f.write('Arguments = %s/%s/run.sh\n' % (bmk_dir, config))
       f.write('Queue\n\n')
@@ -432,8 +453,8 @@ def main():
       "included in \"all\".")
   parser.add_argument("--output_dir", required=True, help="Config output "
                       "directory. Required for all modes.")
-  parser.add_argument("--memory_type",  help="\"cache\" or \"spad\". Required "
-                      "for config mode.")
+  parser.add_argument("--memory_type", help="\"cache\" or \"spad\" or \"dma\". "
+                      "Required for config mode.")
   parser.add_argument("--benchmark_suite", help="SHOC or MachSuite. Required "
                       "for config and trace modes.")
   parser.add_argument("--source_dir", help="Path to the benchmark suite "
@@ -475,7 +496,7 @@ def main():
     if not args.source_dir:
       print "Need to specify the benchmark suite source directory!"
       exit(1)
-    generate_traces(workload, args.output_dir, args.source_dir)
+    generate_traces(workload, args.output_dir, args.source_dir, args.memory_type)
 
   if args.mode == "run" or args.mode == "all":
     if not args.benchmark_suite:
