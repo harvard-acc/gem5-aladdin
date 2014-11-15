@@ -204,7 +204,8 @@ if options.aladdin_cfg_file:
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
           cycleTime = config.getint(accel, "cycle_time"),
-          spadPorts = config.getint(accel, "spad_ports")))
+          spadPorts = config.getint(accel, "spad_ports"),
+          dmaSetupLatency = config.getint(accel, "dma_setup_latency")))
     else:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
