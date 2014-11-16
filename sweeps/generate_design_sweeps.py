@@ -10,7 +10,10 @@ from sweep_config import *
 
 GEM5_CFG = "gem5.cfg"
 ALADDIN_CFG = "aladdin.cfg"
-CACTI_CFG = "cacti.cfg"
+CACTI_CACHE_CFG = "cacti_cache.cfg"
+CACTI_TLB_CFG = "cacti_tlb.cfg"
+CACTI_LQ_CFG = "cacti_lq.cfg"
+CACTI_SQ_CFG = "cacti_sq.cfg"
 
 # Taken from the template cfg file in <gem5_home>/configs/aladdin.
 GEM5_DEFAULTS = {
@@ -40,7 +43,7 @@ def generate_aladdin_config(benchmark, config_name, params):
 
   Args:
     benchmark: A benchmark description object.
-    config_name: Config name formatted as CONFIG_NAME_FORMAT.
+    config_name: Name of the configuration.
     params: Configuration parameters. Must include the keys partition,
         unrolling, and pipelining.
   """
@@ -87,28 +90,26 @@ def generate_aladdin_config(benchmark, config_name, params):
   config_file.close()
   os.chdir("..")
 
-def generate_cacti_config(benchmark_name, config_name, params):
-  """ Writes a CACTI 6.5+ configuration file. """
-  os.chdir(config_name)
-  config_file = open(CACTI_CFG, "wb")
+def write_cacti_config(config_file, config_name, params):
+  """ Writes CACTI 6.5+ config files to the provided file handle. """
   config_file.write("// Config: %s\n" % config_name)  # File comment
   config_file.write("-size (bytes) %d\n" % params["cache_size"])
   config_file.write("-associativity %d\n" % params["cache_assoc"])
-  config_file.write("-read-write port %d\n" % max(params["load_bandwidth"],
-                                                  params["store_bandwidth"]))
-  config_file.write("-cache type \"cache\"\n")
-  config_file.write("-block size (bytes) 64\n")  # GEM5 parameter...
+  config_file.write("-read-write port %d\n" % params["rw_ports"])
+  config_file.write("-cache type \"%s\"\n" % params["cache_type"])
+  config_file.write("-block size (bytes) %d\n" % params["line_size"])
+  config_file.write("-search port %d\n" % params["search_ports"])
+  config_file.write("-output/input bus width %d\n" % params["io_bus_width"])
+  config_file.write("-exclusive write port %d\n" % params["exw_ports"])
 
   # Default parameters
   config_file.write(
-      "-Power Gating - \"true\"\n"
+      "-Power Gating - \"false\"\n"
       "-Power Gating Performance Loss 0.01\n"
       "-exclusive read port 0\n"
-      "-exclusive write port 0\n"
       "-single ended read ports 0\n"
-      "-search port 1\n"
       "-UCA bank count 1\n"
-      "-technology (u) 0.040\n"
+      "-technology (u) 0.045\n"
       "-page size (bits) 8192 \n"
       "-burst length 8\n"
       "-internal prefetch width 8\n"
@@ -120,7 +121,6 @@ def generate_cacti_config(benchmark_name, config_name, params):
       "-lop Vdd (V) \"default\"\n"
       "-DVS(V): 0.8 1.1 1.3 1.4 1.5\n"
       "-Long channel devices - \"true\"\n"
-      "-output/input bus width 512\n"
       "-operating temperature (K) 300\n"
       "-tag size (b) \"default\"\n"
       "-access mode (normal, sequential, fast) - \"normal\"\n"
@@ -139,8 +139,8 @@ def generate_cacti_config(benchmark_name, config_name, params):
       "-Wire inside mat - \"semi-global\"\n"
       "-Wire outside mat - \"semi-global\"\n"
       "-Interconnect projection - \"conservative\"\n"
-      "-Core count 8\n"
-      "-Cache level (L2/L3) - \"L3\"\n"
+      "-Core count 1\n"
+      "-Cache level (L2/L3) - \"L2\"\n"
       "-Add ECC - \"true\"\n"
       "-Print level (DETAILED, CONCISE) - \"DETAILED\"\n"
       "-Print input parameters - \"true\"\n"
@@ -151,7 +151,60 @@ def generate_cacti_config(benchmark_name, config_name, params):
       "-Ndcm 1\n"
       "-Ndsam1 0\n"
       "-Ndsam2 0\n")
+
+def generate_all_cacti_configs(benchmark_name, config_name, params):
+  os.chdir(config_name)
+  config_file = open(CACTI_CACHE_CFG, "wb")
+  cache_params = {"cache_size": params["cache_size"],
+                  "cache_assoc": params["cache_assoc"],
+                  "rw_ports": max(params["load_bandwidth"],
+                                  params["store_bandwidth"]),
+                  "exw_ports":  0,
+                  "line_size": params["line_size_bytes"],
+                  "cache_type": "cache",
+                  "search_ports": 0,
+                  "io_bus_width": params["line_size_bytes"]*8}
+  write_cacti_config(config_file, config_name, cache_params)
   config_file.close()
+
+  config_file = open(CACTI_TLB_CFG, "wb")
+  tlb_params = {"cache_size": params["tlb_entries"]*4,
+                "cache_assoc": 0,  # fully associative
+                "rw_ports": 0,
+                "exw_ports":  1,  # One write port for miss returns.
+                "line_size": 4,  # 32b per TLB entry.
+                "cache_type": "cache",
+                "search_ports": max(params["load_bandwidth"],
+                                    params["store_bandwidth"]),
+                "line_size": 32,  # 32b per TLB entry.
+                "io_bus_width": 32}
+  write_cacti_config(config_file, config_name, tlb_params)
+  config_file.close()
+
+  config_file = open(CACTI_LQ_CFG, "wb")
+  lq_params = {"cache_size": params["load_queue_size"]*4,
+               "cache_assoc": 0,  # fully associative
+               "rw_ports": 0,
+               "exw_ports":  1,
+               "line_size": 4,  # 32b per entry
+               "cache_type": "cam",
+               "search_ports": params["load_bandwidth"],
+               "io_bus_width": 32}
+  write_cacti_config(config_file, config_name, lq_params)
+  config_file.close()
+
+  config_file = open(CACTI_SQ_CFG, "wb")
+  sq_params = {"cache_size": params["store_queue_size"]*4,
+               "cache_assoc": 0,  # fully associative
+               "rw_ports": 0,
+               "exw_ports":  1,
+               "line_size": 4,  # 32b per entry
+               "cache_type": "cam",
+               "search_ports": params["store_bandwidth"],
+               "io_bus_width": 32}
+  write_cacti_config(config_file, config_name, sq_params)
+  config_file.close()
+
   os.chdir("..")
 
 def generate_gem5_config(benchmark_name, config_name, params):
@@ -159,7 +212,7 @@ def generate_gem5_config(benchmark_name, config_name, params):
 
   Args:
     benchmark_name: Name of the benchmark.
-    config_name: A string formatted using CONFIG_NAME_FORMAT.
+    config_name: Name of the configuration.
     params: A dict of parameters. The keys must include the keys used in the
         GEM5 config, but only those that are in GEM5_DEFAULTS will be written to
         the config file.
@@ -182,12 +235,18 @@ def generate_gem5_config(benchmark_name, config_name, params):
              "%s/inputs/dynamic_trace" % benchmark_top_dir)
   config.set(benchmark_name, "config_file_name",
              "%%(input_dir)s/%s" % ALADDIN_CFG)
-  if params["memory_type"] == 'cache':
+  if params["memory_type"] == "cache":
     # Cache size in GEM5 is specified like 64kB, rather than 65536.
     cache_size_str = "%dkB" % (int(params["cache_size"])/1024)
     config.set(benchmark_name, "cache_size", cache_size_str)
-    config.set(benchmark_name, "cacti_config",
-               "%s/cacti.cfg" % cur_config_dir)
+    config.set(benchmark_name, "cacti_cache_config",
+               "%%(input_dir)s/%s" % (CACTI_CACHE_CFG))
+    config.set(benchmark_name, "cacti_tlb_config",
+               "%%(input_dir)s/%s" % (CACTI_TLB_CFG))
+    config.set(benchmark_name, "cacti_lq_config",
+               "%%(input_dir)s/%s" % (CACTI_LQ_CFG))
+    config.set(benchmark_name, "cacti_sq_config",
+               "%%(input_dir)s/%s" % (CACTI_SQ_CFG))
 
     # Use the same size and bandwidth for load and store queues.
     config.set(benchmark_name, "store_bandwidth", str(params["load_bandwidth"]))
@@ -240,35 +299,37 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
     # configuration now.
 
     # The config will use load_bandwidth as "bandwidth" in the naming since it's
-    # probable that even memory-bound accelerators are read-bound and not write-bound.
-    if set_params["memory_type"] == 'spad' or set_params["memory_type"] == 'dma':
+    # probable that even memory-bound accelerators are read-bound and not
+    # write-bound.
+    if set_params["memory_type"] == "spad" or set_params["memory_type"] == "dma":
       CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d"
       config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                           set_params["unrolling"],
                                           set_params["partition"])
 
-    elif set_params["memory_type"] == 'cache':
-      CONFIG_NAME_FORMAT = "unr_%d_tlb_%d_ldbw_%d_ldq_%d_ht_%d"
+    elif set_params["memory_type"] == "cache":
+      CONFIG_NAME_FORMAT = "unr_%d_tlb_%d_ldbw_%d_ldq_%d_stq_%d_ht_%d"
       config_name = CONFIG_NAME_FORMAT % (set_params["unrolling"],
                                           set_params["tlb_entries"],
                                           set_params["load_bandwidth"],
                                           set_params["load_queue_size"],
+                                          set_params["store_queue_size"],
                                           set_params["cache_hit_latency"])
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
     generate_aladdin_config(benchmark, config_name, set_params)
     generate_gem5_config(benchmark.name, config_name, set_params)
-    if set_params["memory_type"] == 'cache':
-      generate_cacti_config(benchmark.name, config_name, set_params)
+    if set_params["memory_type"] == "cache":
+      generate_all_cacti_configs(benchmark.name, config_name, set_params)
 
 def generate_all_configs(benchmark, memory_type):
   """ Generates all the possible configurations for the design sweep. """
-  if memory_type == 'spad' or memory_type == 'dma':
+  if memory_type == "spad" or memory_type == "dma":
     all_sweep_params = [pipelining,
                         unrolling,
                         partition]
-  elif memory_type == 'cache':
+  elif memory_type == "cache":
     all_sweep_params = [unrolling,
                         tlb_entries,
                         tlb_max_outstanding_walks,
@@ -278,7 +339,8 @@ def generate_all_configs(benchmark, memory_type):
                         store_queue_size,
                         cache_hit_latency,
                         cache_size,
-                        cache_assoc]
+                        cache_assoc,
+                        cache_line_sz]
   # This dict stores a single configuration.
   params = {"memory_type": memory_type}
   # Recursively generate all possible configurations.
@@ -308,7 +370,7 @@ def run_sweeps(workload, output_dir, dry_run=False):
     dry_run: True for a dry run.
   """
   cwd = os.getcwd()
-  gem5_home = cwd.split('sweeps')[0]
+  gem5_home = cwd.split("sweeps")[0]
   print gem5_home
   # Turning on debug outputs for CacheDatapath can incur a huge amount of disk
   # space, most of which is redundant, so we leave that out of the command here.
@@ -413,21 +475,21 @@ def generate_condor_scripts(workload, output_dir, username):
   cwd = os.getcwd()
   os.chdir("..")
   basicCondor = [
-      '#Submit this file in the directory where the input and output files live',
-      'Universe        = vanilla',
-      '# With the following setting, Condor will try to copy and use the environ-',
-      '# ment of the submitter, provided its not too large.',
-      'GetEnv          = True',
-      '# This forces the jobs to be run on the less crowded server',
-      'Requirements    = (OpSys == "LINUX") && (Arch == "X86_64") && ( TotalMemory > 128000)',
-      '# Change the email address to suit yourself',
-      'Notify_User     = %s@eecs.harvard.edu' % username,
-      'Notification    = Error',
-      'Executable = /bin/bash']
+      "#Submit this file in the directory where the input and output files live",
+      "Universe        = vanilla",
+      "# With the following setting, Condor will try to copy and use the environ-",
+      "# ment of the submitter, provided its not too large.",
+      "GetEnv          = True",
+      "# This forces the jobs to be run on the less crowded server",
+      "Requirements    = (OpSys == \"LINUX\") && (Arch == \"X86_64\") && ( TotalMemory > 128000)",
+      "# Change the email address to suit yourself",
+      "Notify_User     = %s@eecs.harvard.edu" % username,
+      "Notification    = Error",
+      "Executable = /bin/bash"]
 
-  f = open('%s/submit.con' % cwd, 'w')
+  f = open("%s/submit.con" % cwd, "w")
   for b in basicCondor:
-    f.write(b + ' \n')
+    f.write(b + " \n")
 
   for benchmark in workload:
     bmk_dir = "%s/%s/%s" % (cwd, output_dir, benchmark.name)
@@ -437,9 +499,9 @@ def generate_condor_scripts(workload, output_dir, username):
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
       if not os.path.exists(abs_cfg_path):
         continue
-      f.write('InitialDir = %s/%s/\n' % (bmk_dir, config))
-      f.write('Arguments = %s/%s/run.sh\n' % (bmk_dir, config))
-      f.write('Queue\n\n')
+      f.write("InitialDir = %s/%s/\n" % (bmk_dir, config))
+      f.write("Arguments = %s/%s/run.sh\n" % (bmk_dir, config))
+      f.write("Queue\n\n")
   f.close()
   os.chdir(cwd)
 

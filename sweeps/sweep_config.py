@@ -11,6 +11,8 @@ cache_size = SweepParam(
      "cache_size", start=16384, end=16384, step=NO_SWEEP, step_type=EXP_SWEEP)
 cache_assoc = SweepParam(
     "cache_assoc", start=8, end=8, step=2, step_type=EXP_SWEEP)
+cache_line_sz = SweepParam(
+    "line_size_bytes", start=8, end=8, step=1, step_type=LINEAR_SWEEP)
 pipelining = SweepParam(
     "pipelining", start=1, end=1, step=1, step_type=LINEAR_SWEEP)
 unrolling = SweepParam(

@@ -184,20 +184,23 @@ if options.aladdin_cfg_file:
           cacheSize = config.get(accel, "cache_size"),
           cacheAssoc = config.getint(accel, "cache_assoc"),
           cacheHitLatency = config.getint(accel, "cache_hit_latency"),
-          cactiConfig = config.get(accel, "cacti_config"),
+          cactiCacheConfig = config.get(accel, "cacti_cache_config"),
           cycleTime = config.getint(accel, "cycle_time"),
           tlbEntries = config.getint(accel, "tlb_entries"),
           tlbAssoc = config.getint(accel, "tlb_assoc"),
           tlbHitLatency = config.getint(accel, "tlb_hit_latency"),
           tlbMissLatency = config.getint(accel, "tlb_miss_latency"),
+          tlbCactiConfig = config.get(accel, "cacti_tlb_config"),
           tlbPageBytes = config.getint(accel, "tlb_page_size"),
           isPerfectTLB = config.getboolean(accel, "is_perfect_tlb"),
           numOutStandingWalks = config.getint(
               accel, "tlb_max_outstanding_walks"),
           loadQueueSize = config.getint(accel, "load_queue_size"),
           loadBandwidth = config.getint(accel, "load_bandwidth"),
+          loadQueueCacheConfig = config.get(accel, "cacti_lq_config"),
           storeQueueSize = config.getint(accel, "store_queue_size"),
           storeBandwidth = config.getint(accel, "store_bandwidth"),
+          storeQueueCacheConfig = config.get(accel, "cacti_sq_config"),
           tlbBandwidth = config.getint(accel, "tlb_bandwidth")))
     elif memory_type == "spad":
       datapaths.append(DmaScratchpadDatapath(
