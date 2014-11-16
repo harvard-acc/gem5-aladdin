@@ -108,7 +108,7 @@ def generate_cacti_config(benchmark_name, config_name, params):
       "-single ended read ports 0\n"
       "-search port 1\n"
       "-UCA bank count 1\n"
-      "-technology (u) 0.022\n"
+      "-technology (u) 0.040\n"
       "-page size (bits) 8192 \n"
       "-burst length 8\n"
       "-internal prefetch width 8\n"
@@ -121,7 +121,7 @@ def generate_cacti_config(benchmark_name, config_name, params):
       "-DVS(V): 0.8 1.1 1.3 1.4 1.5\n"
       "-Long channel devices - \"true\"\n"
       "-output/input bus width 512\n"
-      "-operating temperature (K) 360\n"
+      "-operating temperature (K) 300\n"
       "-tag size (b) \"default\"\n"
       "-access mode (normal, sequential, fast) - \"normal\"\n"
       "-design objective (weight delay, dynamic power, leakage power, "
@@ -132,7 +132,7 @@ def generate_cacti_config(benchmark_name, config_name, params):
           "cycle time, area) 100:100:0:0:100\n"
       "-NUCAdeviate (delay, dynamic power, leakage power, cycle time, area) "
           "10:10000:10000:10000:10000\n"
-      "-Optimize ED or ED^2 (ED, ED^2, NONE): \"ED^2\"\n"
+      "-Optimize ED or ED^2 (ED, ED^2, NONE): \"NONE\"\n"
       "-Cache model (NUCA, UCA)  - \"UCA\"\n"
       "-NUCA bank count 0\n"
       "-Wire signalling (fullswing, lowswing, default) - \"Global_30\"\n"
@@ -186,6 +186,8 @@ def generate_gem5_config(benchmark_name, config_name, params):
     # Cache size in GEM5 is specified like 64kB, rather than 65536.
     cache_size_str = "%dkB" % (int(params["cache_size"])/1024)
     config.set(benchmark_name, "cache_size", cache_size_str)
+    config.set(benchmark_name, "cacti_config",
+               "%s/cacti.cfg" % cur_config_dir)
 
     # Use the same size and bandwidth for load and store queues.
     config.set(benchmark_name, "store_bandwidth", str(params["load_bandwidth"]))
@@ -373,7 +375,7 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
     executable = output_file_prefix + "-instrumented"
     os.environ["WORKLOAD"]=",".join(benchmark.kernels)
     all_objs = [opt_obj]
-    
+
     defines = " "
     if memory_type == "dma":
       defines += "-DDMA_MODE "
