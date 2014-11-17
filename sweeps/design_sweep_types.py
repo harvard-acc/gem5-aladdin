@@ -34,7 +34,7 @@ Array = namedtuple("Array", "name, size, word_size, partition_type")
 
 class Benchmark(object):
   """ A benchmark description object. """
-  def __init__(self, name, source_file):
+  def __init__(self, name, source_file, harness_file=""):
     """ Construct a benchmark description object.
 
     Args:
@@ -49,7 +49,7 @@ class Benchmark(object):
     # Test harness, if applicable. If used, test_harness is assumed to contain
     # main(); otherwise, source_file is used, and test_harness MUST be the empty
     # string "".
-    self.test_harness = ""
+    self.test_harness = harness_file
 
   def add_loop(self, loop_name, line_num, trip_count=ALWAYS_UNROLL):
     self.loops.append(Loop(name=loop_name,
