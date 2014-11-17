@@ -51,6 +51,9 @@
 #include "sim/drain.hh"
 #include "sim/system.hh"
 
+//Modification of DMA for Aladdin simulation
+#define MAX_DMA_REQUEST 64
+
 class DmaPort : public MasterPort
 {
   private:
@@ -130,7 +133,11 @@ class DmaPort : public MasterPort
     /** If the port is currently waiting for a retry before it can
      * send whatever it is that it's sending. */
     bool inRetry;
+    /** Max number of outstanding requests*/
+    unsigned maxRequests;
 
+    /** Number of outstanding requests*/
+    unsigned numOfOutstandingRequests;
   protected:
 
     bool recvTimingResp(PacketPtr pkt);
@@ -140,7 +147,7 @@ class DmaPort : public MasterPort
 
   public:
 
-    DmaPort(MemObject *dev, System *s);
+    DmaPort(MemObject *dev, System *s, unsigned max_req);
 
     void dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                    uint8_t *data, Tick delay, Request::Flags flag = 0);

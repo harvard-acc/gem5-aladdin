@@ -48,29 +48,33 @@
 #include "dev/dma_device.hh"
 #include "sim/system.hh"
 
-DmaPort::DmaPort(MemObject *dev, System *s)
+DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req)
     : MasterPort(dev->name() + ".dma", dev), device(dev), sendEvent(this),
       sys(s), masterId(s->getMasterId(dev->name())),
       pendingCount(0), drainManager(NULL),
-      inRetry(false)
-{ }
+      inRetry(false), maxRequests(max_req)
+{ 
+  numOfOutstandingRequests = 0;
+}
 
 void
 DmaPort::handleResp(PacketPtr pkt, Tick delay)
 {
     // should always see a response with a sender state
     assert(pkt->isResponse());
+    numOfOutstandingRequests --;
 
     // get the DMA sender state
     DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
     assert(state);
 
     DPRINTF(DMA, "Received response %s for addr: %#x size: %d nb: %d,"  \
-            " tot: %d sched %d\n",
+            " tot: %d sched %d outstanding:%u\n",
             pkt->cmdString(), pkt->getAddr(), pkt->req->getSize(),
             state->numBytes, state->totBytes,
             state->completionEvent ?
-            state->completionEvent->scheduled() : 0);
+            state->completionEvent->scheduled() : 0, 
+            numOfOutstandingRequests);
 
     assert(pendingCount != 0);
     pendingCount--;
@@ -113,7 +117,7 @@ DmaPort::recvTimingResp(PacketPtr pkt)
 }
 
 DmaDevice::DmaDevice(const Params *p)
-    : PioDevice(p), dmaPort(this, sys)
+    : PioDevice(p), dmaPort(this, sys, MAX_DMA_REQUEST) //Modification for DMA w/ Aladdin
 { }
 
 void
@@ -209,6 +213,7 @@ DmaPort::trySendTimingReq()
     if (!inRetry) {
         transmitList.pop_front();
         DPRINTF(DMA, "-- Done\n");
+        numOfOutstandingRequests ++;
         // if there is more to do, then do so
         if (!transmitList.empty())
             // this should ultimately wait for as many cycles as the
@@ -235,8 +240,14 @@ DmaPort::sendDma()
     if (sys->isTimingMode()) {
         // if we are either waiting for a retry or are still waiting
         // after sending the last packet, then do not proceed
-        if (inRetry || sendEvent.scheduled()) {
+        // or number of outstanding requests > max requests
+        if (inRetry || sendEvent.scheduled() ) {
             DPRINTF(DMA, "Can't send immediately, waiting to send\n");
+            return;
+        }
+        if (numOfOutstandingRequests >= maxRequests) {
+            device->schedule(sendEvent, device->clockEdge(Cycles(1)));
+            DPRINTF(DMA, "Too many outstanding requests, try again next cycle...\n");
             return;
         }
 

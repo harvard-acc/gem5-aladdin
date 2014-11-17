@@ -202,14 +202,15 @@ if options.aladdin_cfg_file:
           storeBandwidth = config.getint(accel, "store_bandwidth"),
           storeQueueCacheConfig = config.get(accel, "cacti_sq_config"),
           tlbBandwidth = config.getint(accel, "tlb_bandwidth")))
-    elif memory_type == "spad":
+    elif memory_type == "spad" or memory_type == "dma":
       datapaths.append(DmaScratchpadDatapath(
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
           cycleTime = config.getint(accel, "cycle_time"),
           spadPorts = config.getint(accel, "spad_ports"),
-          dmaSetupLatency = config.getint(accel, "dma_setup_latency")))
+          dmaSetupLatency = config.getint(accel, "dma_setup_latency"),
+          maxDmaRequests = config.getint(accel, "max_dma_requests")))
     else:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))

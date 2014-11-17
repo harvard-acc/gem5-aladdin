@@ -21,21 +21,22 @@ GEM5_DEFAULTS = {
   "memory_type": "cache",
   "spad_ports": 1,
   "tlb_hit_latency": 0,
-  "tlb_miss_latency": 10,
+  "tlb_miss_latency": 100,
   "tlb_page_size": 4096,
   "tlb_entries": 0,
   "tlb_max_outstanding_walks": 0,
-  "tlb_assoc": 4,
+  "tlb_assoc": 0,
+  "tlb_bandwidth": 1,
   "is_perfect_tlb": False,
   "load_bandwidth": 1,
-  "cache_assoc": 1,
-  "cache_hit_latency": 1,
   "load_queue_size": 16,
   "store_bandwidth": 1,
   "store_queue_size": 16,
-  "tlb_bandwidth": 1,
-  "tlb_queue_size": 1,
+  "cache_assoc": 8,
+  "cache_hit_latency": 1,
+  "cache_line_sz" : 64,
   "dma_setup_latency" : 1,
+  "max_dma_requests" : 16,
 }
 
 def generate_aladdin_config(benchmark, config_name, params):
@@ -77,11 +78,13 @@ def generate_aladdin_config(benchmark, config_name, params):
   for loop in benchmark.loops:
     if (loop.trip_count == UNROLL_FLATTEN):
       config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
+    elif (params["unrolling"] >= loop.trip_count):
+      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
     elif (loop.trip_count == UNROLL_ONE):
       config_file.write("unrolling,%s,%d,%d\n" %
                         (loop.name, loop.line_num, loop.trip_count))
     elif (loop.trip_count == ALWAYS_UNROLL or
-          params["unrolling"] <= loop.trip_count):
+          params["unrolling"] < loop.trip_count):
       # We only unroll if it was specified to always unroll or if the loop's
       # trip count is greater than the current unrolling factor.
       config_file.write("unrolling,%s,%d,%d\n" %
@@ -155,15 +158,25 @@ def write_cacti_config(config_file, config_name, params):
 def generate_all_cacti_configs(benchmark_name, config_name, params):
   os.chdir(config_name)
   config_file = open(CACTI_CACHE_CFG, "wb")
+  if "cache_assoc" in params:
+    cache_assoc = params["cache_assoc"]
+  else:
+    cache_assoc = GEM5_DEFAULTS["cache_assoc"]
+  if "cache_line_sz" in params:
+    cache_line_sz = params["cache_line_sz"]
+  else:
+    cache_line_sz = GEM5_DEFAULTS["cache_line_sz"]
   cache_params = {"cache_size": params["cache_size"],
-                  "cache_assoc": params["cache_assoc"],
+                  "cache_assoc": cache_assoc,
                   "rw_ports": max(params["load_bandwidth"],
                                   params["store_bandwidth"]),
                   "exw_ports":  0,
-                  "line_size": params["line_size_bytes"],
+                  "line_size": cache_line_sz,
                   "cache_type": "cache",
                   "search_ports": 0,
-                  "io_bus_width": params["line_size_bytes"]*8}
+                  # Note for future reference - this may have to change per
+                  # benchmark.
+                  "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, cache_params)
   config_file.close()
 
@@ -172,12 +185,11 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                 "cache_assoc": 0,  # fully associative
                 "rw_ports": 0,
                 "exw_ports":  1,  # One write port for miss returns.
-                "line_size": 4,  # 32b per TLB entry.
+                "line_size": 4,  # 32b per TLB entry. in bytes
                 "cache_type": "cache",
                 "search_ports": max(params["load_bandwidth"],
                                     params["store_bandwidth"]),
-                "line_size": 32,  # 32b per TLB entry.
-                "io_bus_width": 32}
+                "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, tlb_params)
   config_file.close()
 
@@ -189,7 +201,7 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                "line_size": 4,  # 32b per entry
                "cache_type": "cam",
                "search_ports": params["load_bandwidth"],
-               "io_bus_width": 32}
+               "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, lq_params)
   config_file.close()
 
@@ -201,7 +213,7 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                "line_size": 4,  # 32b per entry
                "cache_type": "cam",
                "search_ports": params["store_bandwidth"],
-               "io_bus_width": 32}
+               "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, sq_params)
   config_file.close()
 
@@ -248,9 +260,14 @@ def generate_gem5_config(benchmark_name, config_name, params):
     config.set(benchmark_name, "cacti_sq_config",
                "%%(input_dir)s/%s" % (CACTI_SQ_CFG))
 
-    # Use the same size and bandwidth for load and store queues.
-    config.set(benchmark_name, "store_bandwidth", str(params["load_bandwidth"]))
-    config.set(benchmark_name, "store_queue_size", str(params["load_queue_size"]))
+    # Store queue is usually half of the size of load queue.
+    params["store_bandwidth"] = params["load_bandwidth"]/2
+    params["store_queue_size"] = params["load_queue_size"]/2
+    # Set max number of tlb outstanding walks the same as TLB sizes
+    params["tlb_max_outstanding_walks"] = params["tlb_entries"]
+    # Set TLB bandwidth the same as max(load/store_queue_bw)
+    params["tlb_bandwidth"] = min(params["load_bandwidth"],
+                                  params["tlb_entries"])
   for key in GEM5_DEFAULTS.iterkeys():
     if key in params:
       config.set(benchmark_name, key, str(params[key]))
@@ -308,13 +325,13 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
                                           set_params["partition"])
 
     elif set_params["memory_type"] == "cache":
-      CONFIG_NAME_FORMAT = "unr_%d_tlb_%d_ldbw_%d_ldq_%d_stq_%d_ht_%d"
-      config_name = CONFIG_NAME_FORMAT % (set_params["unrolling"],
+      CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d"
+      config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
+                                          set_params["unrolling"],
                                           set_params["tlb_entries"],
                                           set_params["load_bandwidth"],
                                           set_params["load_queue_size"],
-                                          set_params["store_queue_size"],
-                                          set_params["cache_hit_latency"])
+                                          set_params["cache_size"])
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
@@ -330,17 +347,12 @@ def generate_all_configs(benchmark, memory_type):
                         unrolling,
                         partition]
   elif memory_type == "cache":
-    all_sweep_params = [unrolling,
+    all_sweep_params = [pipelining,
+                        unrolling,
                         tlb_entries,
-                        tlb_max_outstanding_walks,
                         load_bandwidth,
                         load_queue_size,
-                        store_bandwidth,
-                        store_queue_size,
-                        cache_hit_latency,
-                        cache_size,
-                        cache_assoc,
-                        cache_line_sz]
+                        cache_size]
   # This dict stores a single configuration.
   params = {"memory_type": memory_type}
   # Recursively generate all possible configurations.
@@ -374,8 +386,9 @@ def run_sweeps(workload, output_dir, dry_run=False):
   print gem5_home
   # Turning on debug outputs for CacheDatapath can incur a huge amount of disk
   # space, most of which is redundant, so we leave that out of the command here.
-  run_cmd = ("%s/build/X86/gem5.opt --debug-flags=DmaScratchpadDatapath,DMA --debug-file=%s/debug.out "
+  run_cmd = ("%s/build/X86/gem5.opt --debug-file=%s/debug.out "
              "%s/configs/aladdin/aladdin_se.py --num-cpus=0 --mem-size=2GB "
+             "--mem-type=ddr3_1600_x64 "
              "--cpu-type=timing --caches "
              "--aladdin_cfg_file=%s > %s/stdout 2> %s/stderr")
   os.chdir("..")
@@ -421,16 +434,22 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
   trace_dir = "inputs"
   cwd = os.getcwd()
   for benchmark in workload:
+    print benchmark.name
     os.chdir("%s/%s" % (output_dir, benchmark.name))
     if not os.path.exists(trace_dir):
       os.makedirs(trace_dir)
     os.chdir(trace_dir)
-    source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
+    if workload == SHOC:
+      source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
+    elif workload == MACH:
+      source_file_prefix = "%s/%s/%s/%s" % (source_dir, \
+        benchmark.name.split('-')[0], benchmark.name.split('-')[1], benchmark.source_file)
     output_file_prefix = ("%s/%s/%s/inputs/%s" %
                           (cwd, output_dir, benchmark.name, benchmark.source_file))
     source_file = source_file_prefix + ".c"
     obj = output_file_prefix + ".llvm"
     opt_obj = output_file_prefix + "-opt.llvm"
+    test_file = "%s/%s" % ( source_dir, benchmark.test_harness)
     test_obj = output_file_prefix + "_test.llvm"
     full_llvm = output_file_prefix + "_full.llvm"
     full_s = output_file_prefix + "_full.s"
@@ -448,16 +467,15 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
               " "  + source_file)
     # Compile the test harness if applicable.
     if benchmark.test_harness:
+      all_objs.append(test_obj)
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
                 "-fno-unroll-loops -fno-inline -emit-llvm -o " + test_obj +
-                " "  + test)
-      all_objs.append(test_obj)
+                " "  + test_file)
 
     # Finish compilation, linking, and then execute the instrumented code to get
     # the dynamic trace.
     os.system("opt -S -load=" + os.getenv("TRACER_HOME") +
               "/full-trace/full_trace.so -fulltrace " + obj + " -o " + opt_obj)
-
     os.system("llvm-link -o " + full_llvm + " " + " ".join(all_objs) + " " +
               os.getenv("TRACER_HOME") + "/profile-func/trace_logger.llvm")
     os.system("llc -O0 -disable-fp-elim -filetype=asm -o " + full_s + " " + full_llvm)
@@ -465,7 +483,12 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
     # Change directory so that the dynamic_trace file gets put in the right
     # place.
     os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
-    os.system(executable)
+    if workload == SHOC:
+      os.system(executable)
+    elif workload == MACH:
+      os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
+       (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
+       source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
     os.chdir(cwd)
 
 def generate_condor_scripts(workload, output_dir, username):
@@ -535,8 +558,7 @@ def main():
   if args.benchmark_suite == "SHOC":
     workload = SHOC
   elif args.benchmark_suite == "MachSuite":
-    print "MachSuite benchmarks are currently not configured."
-    exit(1)
+    workload = MACH
 
   if args.mode == "configs" or args.mode == "all":
     if (not args.memory_type or
