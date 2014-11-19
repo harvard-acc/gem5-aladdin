@@ -48,17 +48,17 @@ from m5.objects import *
 
 class L1Cache(BaseCache):
     assoc = 2
-    hit_latency = 2
-    response_latency = 2
-    mshrs = 4
+    hit_latency = 1
+    response_latency = 0
+    mshrs = 16 #coretex-a15
     tgts_per_mshr = 20
     is_top_level = True
     is_perfect_cache = False
 
 class L2Cache(BaseCache):
     assoc = 8
-    hit_latency = 20
-    response_latency = 20
+    hit_latency = 12
+    response_latency = 6
     mshrs = 20
     tgts_per_mshr = 12
     write_buffers = 8

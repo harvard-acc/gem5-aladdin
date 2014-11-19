@@ -72,11 +72,11 @@ def config_cache(options, system):
                                    assoc=options.l2_assoc,
                                    hit_latency=options.l2_hit_latency,
                                    response_latency=options.l2_hit_latency,
-                                   is_perfect_cache=options.is_perfect_cache)
+                                   is_perfect_cache=options.is_perfect_l2_cache)
 
         system.tol2bus = CoherentBus(clk_domain = system.cpu_clk_domain,
                                      width = 32,
-                                     is_perfect_bus = options.is_perfect_bus)
+                                     is_perfect_bus = options.is_perfect_l2_bus)
 
         system.l2.cpu_side = system.tol2bus.master
         system.l2.mem_side = system.membus.slave
@@ -112,7 +112,7 @@ def config_cache(options, system):
     if options.aladdin_cfg_file:
       for datapath in system.datapaths:
         if isinstance(datapath, CacheDatapath):
-          aladdin_dcache = dcache_class(
+          aladdin_dcache = dcache_class(clk_domain=system.cpu_clk_domain,
                                 size=str(datapath.cacheSize),
                                 assoc=datapath.cacheAssoc,
                                 hit_latency=datapath.cacheHitLatency,
