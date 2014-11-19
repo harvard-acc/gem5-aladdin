@@ -69,11 +69,11 @@ def addCommonOptions(parser):
                       help = """Top-level voltage for blocks running at system
                       power supply""")
     parser.add_option("--sys-clock", action="store", type="string",
-                      default='1GHz',
+                      default='500MHz',
                       help = """Top-level clock for blocks running at system
                       speed""")
     parser.add_option("--cpu-clock", action="store", type="string",
-                      default='2GHz',
+                      default='1GHz',
                       help="Clock for blocks running at CPU speed")
     parser.add_option("--smt", action="store_true", default=False,
                       help = """

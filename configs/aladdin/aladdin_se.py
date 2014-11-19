@@ -165,6 +165,21 @@ if options.smt and options.num_cpus > 1:
 system = System(mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
+# Create a top-level voltage domain
+system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
+
+# Create a source clock for the system and set the clock period
+system.clk_domain = SrcClockDomain(clock = options.sys_clock,
+                                   voltage_domain = system.voltage_domain)
+
+# Create a CPU voltage domain
+system.cpu_voltage_domain = VoltageDomain()
+
+# Create a separate clock domain for the CPUs
+system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
+                                       voltage_domain =
+                                       system.cpu_voltage_domain)
+
 if np > 0:
   system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
 if options.aladdin_cfg_file:
@@ -177,7 +192,7 @@ if options.aladdin_cfg_file:
   for accel in accels:
     memory_type = config.get(accel, 'memory_type').lower()
     if memory_type == "cache":
-      datapaths.append(CacheDatapath(
+      datapaths.append(CacheDatapath(clk_domain = system.cpu_clk_domain,
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
@@ -203,7 +218,7 @@ if options.aladdin_cfg_file:
           storeQueueCacheConfig = config.get(accel, "cacti_sq_config"),
           tlbBandwidth = config.getint(accel, "tlb_bandwidth")))
     elif memory_type == "spad" or memory_type == "dma":
-      datapaths.append(DmaScratchpadDatapath(
+      datapaths.append(DmaScratchpadDatapath(clk_domain = system.cpu_clk_domain,
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
@@ -215,21 +230,6 @@ if options.aladdin_cfg_file:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
   system.datapaths = datapaths
-
-# Create a top-level voltage domain
-system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
-
-# Create a source clock for the system and set the clock period
-system.clk_domain = SrcClockDomain(clock =  options.sys_clock,
-                                   voltage_domain = system.voltage_domain)
-
-# Create a CPU voltage domain
-system.cpu_voltage_domain = VoltageDomain()
-
-# Create a separate clock domain for the CPUs
-system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
-                                       voltage_domain =
-                                       system.cpu_voltage_domain)
 
 # All cpus belong to a common cpu_clk_domain, therefore running at a common
 # frequency.

@@ -34,7 +34,7 @@ GEM5_DEFAULTS = {
   "load_queue_size": 16,
   "store_bandwidth": 1,
   "store_queue_size": 16,
-  "cache_assoc": 8,
+  "cache_assoc": 2,
   "cache_hit_latency": 1,
   "cache_line_sz" : 64,
   "dma_setup_latency" : 1,
@@ -76,21 +76,38 @@ def generate_aladdin_config(benchmark, config_name, params):
         print("Invalid array partitioning configuration for array %s." %
               array.name)
         exit(1)
-
-  for loop in benchmark.loops:
-    if (loop.trip_count == UNROLL_FLATTEN):
-      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
-    elif (params["unrolling"] >= loop.trip_count):
-      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
-    elif (loop.trip_count == UNROLL_ONE):
-      config_file.write("unrolling,%s,%d,%d\n" %
-                        (loop.name, loop.line_num, loop.trip_count))
-    elif (loop.trip_count == ALWAYS_UNROLL or
-          params["unrolling"] < loop.trip_count):
-      # We only unroll if it was specified to always unroll or if the loop's
-      # trip count is greater than the current unrolling factor.
-      config_file.write("unrolling,%s,%d,%d\n" %
-                        (loop.name, loop.line_num, params["unrolling"]))
+  # md-grid specific unrolling config
+  if benchmark.name == "md-grid":
+    config_file.write("unrolling,md,46,1\n")
+    config_file.write("unrolling,md,47,1\n")
+    config_file.write("unrolling,md,48,1\n")
+    config_file.write("unrolling,md,50,1\n")
+    config_file.write("unrolling,md,51,1\n")
+    config_file.write("unrolling,md,52,1\n")
+    if params["unrolling"] <= 4:
+      config_file.write("unrolling,md,56,1\n")
+      config_file.write("unrolling,md,62,%d\n" %(params["unrolling"]))
+    elif params["unrolling"] <=16:
+      config_file.write("unrolling,md,56,%d\n" %(params["unrolling"]/4))
+      config_file.write("flatten,md,62\n")
+  # md-knn specific unrolling config
+  elif benchmark.name == "md-knn":
+    if params["unrolling"] <= 16:
+      config_file.write("unrolling,md,51,1\n")
+      config_file.write("unrolling,md,58,%d\n" %(params["unrolling"]))
+    else:
+      config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]/16))
+      config_file.write("flatten,md,58\n")
+  else:
+    for loop in benchmark.loops:
+      if (loop.trip_count == UNROLL_FLATTEN):
+        config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
+      elif (loop.trip_count == UNROLL_ONE):
+        config_file.write("unrolling,%s,%d,%d\n" %
+                          (loop.name, loop.line_num, loop.trip_count))
+      else:
+        config_file.write("unrolling,%s,%d,%d\n" %
+                          (loop.name, loop.line_num, params["unrolling"]))
 
   config_file.close()
   os.chdir("..")
@@ -98,7 +115,10 @@ def generate_aladdin_config(benchmark, config_name, params):
 def write_cacti_config(config_file, config_name, params):
   """ Writes CACTI 6.5+ config files to the provided file handle. """
   config_file.write("// Config: %s\n" % config_name)  # File comment
-  config_file.write("-size (bytes) %d\n" % params["cache_size"])
+  cache_size = params["cache_size"]
+  if cache_size < 64:
+    cache_size = 64
+  config_file.write("-size (bytes) %d\n" % cache_size)
   config_file.write("-associativity %d\n" % params["cache_assoc"])
   config_file.write("-read-write port %d\n" % params["rw_ports"])
   config_file.write("-cache type \"%s\"\n" % params["cache_type"])
@@ -106,15 +126,14 @@ def write_cacti_config(config_file, config_name, params):
   config_file.write("-search port %d\n" % params["search_ports"])
   config_file.write("-output/input bus width %d\n" % params["io_bus_width"])
   config_file.write("-exclusive write port %d\n" % params["exw_ports"])
-
+  config_file.write("-UCA bank count %d\n" % params["banks"])
   # Default parameters
   config_file.write(
       "-Power Gating - \"false\"\n"
       "-Power Gating Performance Loss 0.01\n"
       "-exclusive read port 0\n"
       "-single ended read ports 0\n"
-      "-UCA bank count 1\n"
-      "-technology (u) 0.045\n"
+      "-technology (u) 0.040\n"
       "-page size (bits) 8192 \n"
       "-burst length 8\n"
       "-internal prefetch width 8\n"
@@ -169,15 +188,16 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
     cache_line_sz = GEM5_DEFAULTS["cache_line_sz"]
   cache_params = {"cache_size": params["cache_size"],
                   "cache_assoc": cache_assoc,
-                  "rw_ports": max(params["load_bandwidth"],
-                                  params["store_bandwidth"]),
-                  "exw_ports":  0,
+                  "rw_ports": 0,
+                  "exw_ports": 2, # Two exclusive write ports
+                  "exr_ports": 2, # Two exclusive read ports
                   "line_size": cache_line_sz,
+                  "banks" : 2, # Two banks
                   "cache_type": "cache",
                   "search_ports": 0,
                   # Note for future reference - this may have to change per
                   # benchmark.
-                  "io_bus_width" : 32}
+                  "io_bus_width" : cache_line_sz * 8}
   write_cacti_config(config_file, config_name, cache_params)
   config_file.close()
 
@@ -187,7 +207,8 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                 "rw_ports": 0,
                 "exw_ports":  1,  # One write port for miss returns.
                 "line_size": 4,  # 32b per TLB entry. in bytes
-                "cache_type": "cache",
+                "banks" : 1,
+                "cache_type": "ram",
                 "search_ports": max(params["load_bandwidth"],
                                     params["store_bandwidth"]),
                 "io_bus_width" : 32}
@@ -199,8 +220,9 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                "cache_assoc": 0,  # fully associative
                "rw_ports": 0,
                "exw_ports":  1,
+               "banks" : 1,
                "line_size": 4,  # 32b per entry
-               "cache_type": "cam",
+               "cache_type": "ram",
                "search_ports": params["load_bandwidth"],
                "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, lq_params)
@@ -211,8 +233,9 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                "cache_assoc": 0,  # fully associative
                "rw_ports": 0,
                "exw_ports":  1,
+               "banks" : 1,
                "line_size": 4,  # 32b per entry
-               "cache_type": "cam",
+               "cache_type": "ram",
                "search_ports": params["store_bandwidth"],
                "io_bus_width" : 32}
   write_cacti_config(config_file, config_name, sq_params)
@@ -324,8 +347,9 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
       config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                           set_params["unrolling"],
                                           set_params["partition"])
-
     elif set_params["memory_type"] == "cache":
+      if set_params["load_bandwidth"] > set_params["load_queue_size"]:
+        return
       CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d"
       config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                           set_params["unrolling"],
@@ -333,6 +357,8 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
                                           set_params["load_bandwidth"],
                                           set_params["load_queue_size"],
                                           set_params["cache_size"])
+    if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
+      return
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
@@ -389,8 +415,12 @@ def run_sweeps(workload, output_dir, dry_run=False):
   # space, most of which is redundant, so we leave that out of the command here.
   run_cmd = ("%s/build/X86/gem5.opt --debug-file=%s/debug.out "
              "%s/configs/aladdin/aladdin_se.py --num-cpus=0 --mem-size=2GB "
+             "--sys-clock=1GHz "
              "--mem-type=ddr3_1600_x64 "
              "--cpu-type=timing --caches "
+             #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=0 "
+             #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=1 "
+             #"--is_perfect_l2_bus=1 --mem-latency=0ns "
              "--aladdin_cfg_file=%s > %s/stdout 2> %s/stderr")
   os.chdir("..")
   for benchmark in workload:

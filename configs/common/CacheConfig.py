@@ -108,7 +108,7 @@ def config_cache(options, system):
     if options.aladdin_cfg_file:
       for datapath in system.datapaths:
         if isinstance(datapath, CacheDatapath):
-          aladdin_dcache = dcache_class(
+          aladdin_dcache = dcache_class(clk_domain=system.cpu_clk_domain,
                                 size=str(datapath.cacheSize),
                                 assoc=datapath.cacheAssoc,
                                 hit_latency=datapath.cacheHitLatency,
