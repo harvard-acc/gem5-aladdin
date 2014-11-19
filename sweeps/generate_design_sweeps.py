@@ -122,7 +122,6 @@ def write_cacti_config(config_file, config_name, params):
       "-hp Vdd (V) \"default\"\n"
       "-lstp Vdd (V) \"default\"\n"
       "-lop Vdd (V) \"default\"\n"
-      "-DVS(V): 0.8 1.1 1.3 1.4 1.5\n"
       "-Long channel devices - \"true\"\n"
       "-operating temperature (K) 300\n"
       "-tag size (b) \"default\"\n"
