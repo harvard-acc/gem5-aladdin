@@ -73,6 +73,7 @@ class Benchmark(object):
                            trip_count=trip_count))
 
   def add_array(self, name, size, word_size, partition_type):
+    """ Define an array in the benchmark. Size is in words. """
     self.arrays.append(Array(name=name, size=size, word_size=word_size,
                              partition_type=partition_type))
 
