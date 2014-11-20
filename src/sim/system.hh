@@ -183,14 +183,21 @@ class System : public MemObject
      * Get the cache line size of the system.
      */
     unsigned int cacheLineSize() const { return _cacheLineSize; }
-    
+
 #if THE_ISA != NULL_ISA
     PCEventQueue pcEventQueue;
 #endif
 
     std::vector<ThreadContext *> threadContexts;
     int _numContexts;
-    int _numRunningAccelerators;
+
+    /* TODO: Hacky way to implement multiple dependent accelerators.
+     * This map specifies the set of accelerators that another accelerator
+     * depends on. Only when an accelerator's dependencies have completed can it
+     * proceed with execution. The size of the map is the number of executing
+     * accelerators.
+     */
+    std::map<int, std::vector<int> > _accelerator_deps;
 
     ThreadContext *getThreadContext(ThreadID tid)
     {
@@ -203,16 +210,64 @@ class System : public MemObject
         return _numContexts;
     }
 
-    /* Returns the number of accelerators that are currently running in the
-     * system.
+    /* Returns the number of accelerators that are currently registered and
+     * running in the system.
      */
-    int numRunningAccelerators() { return _numRunningAccelerators; }
+    int numRunningAccelerators()
+    {
+        return _accelerator_deps.size();
+    }
 
     /**
-     * Update the number of running accelerators when one starts or exits.
+     * Registers an accelerator and its dependencies. Returns -1 if the
+     * accelerator has already been registered, and 0 if successful.
      */
-    void registerAcceleratorStart() { _numRunningAccelerators ++; }
-    void registerAcceleratorExit() { _numRunningAccelerators --; }
+    int registerAcceleratorStart(int _accel_id, std::vector<int> _accel_deps)
+    {
+        if (_accelerator_deps.find(_accel_id) != _accelerator_deps.end())
+            return -1;
+        _accelerator_deps[_accel_id] = _accel_deps;
+        std::cerr << "Registered accelerator " << _accel_id
+                  << " with dependencies ";
+        for (auto it = _accel_deps.begin(); it != _accel_deps.end(); ++it)
+            std::cerr << *it << " ";
+        std::cerr << std::endl;
+        return 0;
+    }
+
+    /**
+     * Marks an accelerator as finished. This returns -1 if the accelerator id
+     * was not previously registered with the system. Upon successful
+     * completion, returns 0.
+     */
+    int registerAcceleratorExit(int _accel_id)
+    {
+         if (_accelerator_deps.find(_accel_id) == _accelerator_deps.end())
+             return -1;
+         std::cerr << "Deregistered accelerator " << _accel_id << std::endl;
+         _accelerator_deps.erase(_accel_id);
+         return 0;
+    }
+
+    /**
+     * Returns the number of accelerator dependencies that have not yet been
+     * satisfied, or -1 if the accelerator was not registered with the system.
+     */
+    int numAcceleratorDepsRemaining(int accel_id)
+    {
+        if (_accelerator_deps.find(accel_id) == _accelerator_deps.end())
+            return -1;
+        std::vector<int> deps = _accelerator_deps[accel_id];
+        int num_deps_remaining = deps.size();
+        for (int i = 0; i < deps.size(); i ++)
+        {
+            // If the dependency is not in the list of running accelerators,
+            // then it has been satisfied.
+            if (_accelerator_deps.find(deps[i]) == _accelerator_deps.end())
+                num_deps_remaining --;
+        }
+        return num_deps_remaining;
+    }
 
     /** Return number of running (non-halted) thread contexts in
      * system.  These threads could be Active or Suspended. */
@@ -281,7 +336,7 @@ class System : public MemObject
     PhysicalMemory physmem;
 
     Enums::MemoryMode memoryMode;
-    
+
     //GooUnit *gooUnit;
 
     //Datapath *datapath;
@@ -337,7 +392,7 @@ class System : public MemObject
      * Called by pseudo_inst to track the number of work items completed by
      * this system.
      */
-    uint64_t 
+    uint64_t
     incWorkItemsEnd()
     {
         return ++workItemsEnd;
@@ -348,13 +403,13 @@ class System : public MemObject
      * Returns the total number of cpus that have executed work item begin or
      * ends.
      */
-    int 
+    int
     markWorkItem(int index)
     {
         int count = 0;
         assert(index < activeCpus.size());
         activeCpus[index] = true;
-        for (std::vector<bool>::iterator i = activeCpus.begin(); 
+        for (std::vector<bool>::iterator i = activeCpus.begin();
              i < activeCpus.end(); i++) {
             if (*i) count++;
         }
