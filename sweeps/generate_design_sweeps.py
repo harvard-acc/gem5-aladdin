@@ -7,6 +7,8 @@ import os
 import sys
 
 from sweep_config import *
+from shoc_config import SHOC
+from machsuite_config import MACH
 
 GEM5_CFG = "gem5.cfg"
 ALADDIN_CFG = "aladdin.cfg"
