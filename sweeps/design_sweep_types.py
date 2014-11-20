@@ -38,8 +38,10 @@ class Benchmark(object):
     """ Construct a benchmark description object.
 
     Args:
-      name: Informal name of the benchmark.
-      source_file: Source code file name, excluding the extension.
+      name: Name of the benchmark.
+      source_file: Source code file name, excluding the extension. This should
+        be a relative path from the command-line specified source_dir, so that
+        the source file is located at <source_dir>/<benchmark_name>/<source_file>.
     """
     self.name = name
     self.source_file = source_file
@@ -50,8 +52,22 @@ class Benchmark(object):
     # main(); otherwise, source_file is used, and test_harness MUST be the empty
     # string "".
     self.test_harness = harness_file
+    # For more sophisticated benchmark suites, use a Makefile located in the
+    # directory of the source file to generate the traces.
+    self.makefile = False
+    # Produce separate Aladdin configuration files for each kernel. This is
+    # useful for composability studies.
+    self.separate_kernels = False
+    # When kernels are modeled in a composable system and the order of execution
+    # matters, this flag is set to True.
+    self.enforce_order = False
 
   def add_loop(self, loop_name, line_num, trip_count=ALWAYS_UNROLL):
+    """ Add a loop, its line number, and its trip count to the benchmark.
+
+    If the loop is not tagged, the loop_name should be the name of the kernel
+    function to which it belongs.
+    """
     self.loops.append(Loop(name=loop_name,
                            line_num=line_num,
                            trip_count=trip_count))
@@ -61,10 +77,33 @@ class Benchmark(object):
                              partition_type=partition_type))
 
   def set_kernels(self, kernels):
+    """ Names of the distinct functions/kernels in the benchmark.
+
+    If there are multiple kernels, generate_separate_kernels() has been or will
+    be called, and the order in which they are executed matters, then that order
+    will be the order of this list. Sequential execution is enforced.
+    """
     self.kernels = kernels
 
   def set_test_harness(self, test_harness):
     self.test_harness = test_harness
+
+  def use_local_makefile(self, value=True):
+    self.makefile = value
+
+  def generate_separate_kernels(self, separate=True, enforce_order=False):
+    self.separate_kernels = separate
+    self.enforce_order = enforce_order
+
+  def get_kernel_id(self, kernel):
+    """ Returns the index at which @kernel appears in the list of kernels.
+
+    If not found, this returns -1.
+    """
+    for i in range(0, len(self.kernels)):
+      if self.kernels[i] == kernel:
+        return i
+    return -1
 
 if __name__ == "__main__":
   main()

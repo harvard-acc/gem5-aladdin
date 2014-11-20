@@ -9,13 +9,15 @@ import sys
 from sweep_config import *
 from shoc_config import SHOC
 from machsuite_config import MACH
+from cortexsuite_config import CORTEXSUITE
+from cortexsuite_indep_config import CORTEXSUITE_KERNELS
 
 GEM5_CFG = "gem5.cfg"
-ALADDIN_CFG = "aladdin.cfg"
-CACTI_CACHE_CFG = "cacti_cache.cfg"
-CACTI_TLB_CFG = "cacti_tlb.cfg"
-CACTI_LQ_CFG = "cacti_lq.cfg"
-CACTI_SQ_CFG = "cacti_sq.cfg"
+ALADDIN_CFG = "aladdin"
+CACTI_CACHE_CFG = "cacti_cache"
+CACTI_TLB_CFG = "cacti_tlb"
+CACTI_LQ_CFG = "cacti_lq"
+CACTI_SQ_CFG = "cacti_sq"
 
 # Taken from the template cfg file in <gem5_home>/configs/aladdin.
 GEM5_DEFAULTS = {
@@ -41,20 +43,8 @@ GEM5_DEFAULTS = {
   "max_dma_requests" : 16,
 }
 
-def generate_aladdin_config(benchmark, config_name, params):
-  """ Write an Aladdin configuration file for the specified parameters.
-
-  Args:
-    benchmark: A benchmark description object.
-    config_name: Name of the configuration.
-    params: Configuration parameters. Must include the keys partition,
-        unrolling, and pipelining.
-  """
-  os.chdir(config_name)
-  config_file = open(ALADDIN_CFG, "wb")
-  if "pipelining" in params:
-    config_file.write("pipelining,%d\n" % params["pipelining"])
-
+def write_aladdin_array_configs(benchmark, config_file, params):
+  """ Write the Aladdin array partitioning configurations. """
   if "partition" in params:
     for array in benchmark.arrays:
       if array.partition_type == PARTITION_CYCLIC:
@@ -76,6 +66,8 @@ def generate_aladdin_config(benchmark, config_name, params):
         print("Invalid array partitioning configuration for array %s." %
               array.name)
         exit(1)
+
+def write_benchmark_specific_configs(benchmark, config_file, params):
   # md-grid specific unrolling config
   if benchmark.name == "md-grid":
     config_file.write("unrolling,md,46,1\n")
@@ -98,26 +90,44 @@ def generate_aladdin_config(benchmark, config_name, params):
     else:
       config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]/16))
       config_file.write("flatten,md,58\n")
-  else:
-    for loop in benchmark.loops:
-      if (loop.trip_count == UNROLL_FLATTEN):
-        config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
-      elif (loop.trip_count == UNROLL_ONE):
-        config_file.write("unrolling,%s,%d,%d\n" %
-                          (loop.name, loop.line_num, loop.trip_count))
-      else:
-        config_file.write("unrolling,%s,%d,%d\n" %
-                          (loop.name, loop.line_num, params["unrolling"]))
 
+def generate_aladdin_config(benchmark, kernel, params, loops):
+  """ Write an Aladdin configuration file for the specified parameters.
+
+  Args:
+    benchmark: A benchmark description object.
+    kernel: Either "aladdin" or the name of the individual kernel.
+    params: Configuration parameters. Must include the keys partition,
+        unrolling, and pipelining.
+    loops: The list of loops to include in the config file.
+  """
+  config_file = open("%s.cfg" % kernel, "wb")
+  if "pipelining" in params:
+    config_file.write("pipelining,%d\n" % params["pipelining"])
+  # TODO: Currently we're not separating arrays by kernel. This needs to
+  # change.
+  write_aladdin_array_configs(benchmark, config_file, params)
+  write_benchmark_specific_configs(benchmark, config_file, params)
+
+  for loop in loops:
+    if loop.trip_count == UNROLL_FLATTEN:
+      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
+    elif loop.trip_count == UNROLL_ONE:
+      config_file.write("unrolling,%s,%d,%d\n" %
+                        (loop.name, loop.line_num, loop.trip_count))
+    elif (loop.trip_count == ALWAYS_UNROLL or
+          params["unrolling"] < loop.trip_count):
+      # We only unroll if it was specified to always unroll or if the loop's
+      # trip count is greater than the current unrolling factor.
+      config_file.write("unrolling,%s,%d,%d\n" %
+                        (loop.name, loop.line_num, params["unrolling"]))
+    elif params["unrolling"] >= loop.trip_count:
+      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
   config_file.close()
-  os.chdir("..")
 
-def write_cacti_config(config_file, config_name, params):
+def write_cacti_config(config_file, params):
   """ Writes CACTI 6.5+ config files to the provided file handle. """
-  config_file.write("// Config: %s\n" % config_name)  # File comment
-  cache_size = params["cache_size"]
-  if cache_size < 64:
-    cache_size = 64
+  cache_size = max(64, params["cache_size"])
   config_file.write("-size (bytes) %d\n" % cache_size)
   config_file.write("-associativity %d\n" % params["cache_assoc"])
   config_file.write("-read-write port %d\n" % params["rw_ports"])
@@ -139,6 +149,7 @@ def write_cacti_config(config_file, config_name, params):
       "-internal prefetch width 8\n"
       "-Data array cell type - \"itrs-hp\"\n"
       "-Tag array cell type - \"itrs-hp\"\n"
+      "-Data array peripheral type - \"itrs-hp\"\n"
       "-Tag array peripheral type - \"itrs-hp\"\n"
       "-hp Vdd (V) \"default\"\n"
       "-lstp Vdd (V) \"default\"\n"
@@ -175,9 +186,8 @@ def write_cacti_config(config_file, config_name, params):
       "-Ndsam1 0\n"
       "-Ndsam2 0\n")
 
-def generate_all_cacti_configs(benchmark_name, config_name, params):
-  os.chdir(config_name)
-  config_file = open(CACTI_CACHE_CFG, "wb")
+def generate_all_cacti_configs(benchmark_name, kernel, params):
+  config_file = open("%s_%s.cfg" % (kernel, CACTI_CACHE_CFG), "wb")
   if "cache_assoc" in params:
     cache_assoc = params["cache_assoc"]
   else:
@@ -198,91 +208,94 @@ def generate_all_cacti_configs(benchmark_name, config_name, params):
                   # Note for future reference - this may have to change per
                   # benchmark.
                   "io_bus_width" : cache_line_sz * 8}
-  write_cacti_config(config_file, config_name, cache_params)
+  write_cacti_config(config_file, cache_params)
   config_file.close()
 
-  config_file = open(CACTI_TLB_CFG, "wb")
+  config_file = open("%s_%s.cfg" % (kernel, CACTI_TLB_CFG), "wb")
   tlb_params = {"cache_size": params["tlb_entries"]*4,
                 "cache_assoc": 0,  # fully associative
                 "rw_ports": 0,
                 "exw_ports":  1,  # One write port for miss returns.
                 "line_size": 4,  # 32b per TLB entry. in bytes
                 "banks" : 1,
-                "cache_type": "ram",
+                "cache_type": "cache",
                 "search_ports": max(params["load_bandwidth"],
                                     params["store_bandwidth"]),
                 "io_bus_width" : 32}
-  write_cacti_config(config_file, config_name, tlb_params)
+  write_cacti_config(config_file, tlb_params)
   config_file.close()
 
-  config_file = open(CACTI_LQ_CFG, "wb")
+  config_file = open("%s_%s.cfg" % (kernel, CACTI_LQ_CFG), "wb")
   lq_params = {"cache_size": params["load_queue_size"]*4,
                "cache_assoc": 0,  # fully associative
                "rw_ports": 0,
                "exw_ports":  1,
                "banks" : 1,
                "line_size": 4,  # 32b per entry
-               "cache_type": "ram",
+               "cache_type": "cache",
                "search_ports": params["load_bandwidth"],
                "io_bus_width" : 32}
-  write_cacti_config(config_file, config_name, lq_params)
+  write_cacti_config(config_file, lq_params)
   config_file.close()
 
-  config_file = open(CACTI_SQ_CFG, "wb")
+  config_file = open("%s_%s.cfg" % (kernel, CACTI_SQ_CFG), "wb")
   sq_params = {"cache_size": params["store_queue_size"]*4,
                "cache_assoc": 0,  # fully associative
                "rw_ports": 0,
                "exw_ports":  1,
                "banks" : 1,
                "line_size": 4,  # 32b per entry
-               "cache_type": "ram",
+               "cache_type": "cache",
                "search_ports": params["store_bandwidth"],
                "io_bus_width" : 32}
-  write_cacti_config(config_file, config_name, sq_params)
+  write_cacti_config(config_file, sq_params)
   config_file.close()
 
-  os.chdir("..")
-
-def generate_gem5_config(benchmark_name, config_name, params):
+def generate_gem5_config(benchmark, kernel, params, write_new=True):
   """ Writes a GEM5 config file for Aladdin inside the config directory.
 
   Args:
-    benchmark_name: Name of the benchmark.
-    config_name: Name of the configuration.
+    benchmark: The Benchmark description object.
+    kernel: Name of the kernel, or ALADDIN_CFG.
     params: A dict of parameters. The keys must include the keys used in the
         GEM5 config, but only those that are in GEM5_DEFAULTS will be written to
         the config file.
+    write_new: True if we are writing a new config file. In this case, a
+        defaults section will be added, and any existing files will be
+        overwritten.
   """
-  config = ConfigParser.SafeConfigParser(GEM5_DEFAULTS)
-  config.add_section(benchmark_name)
+  defaults = GEM5_DEFAULTS if write_new else []
+  config = ConfigParser.SafeConfigParser(defaults)
+  config.add_section(kernel)
 
   # Create an output directory for Aladdin to dump temporary files.
-  benchmark_top_dir = os.getcwd()
-  os.chdir(config_name)
-  cur_config_dir = "%s/%s" % (benchmark_top_dir, config_name)
-  output_dir = "%s/outputs" % (cur_config_dir)
+  cur_config_file_dir = os.getcwd()
+  benchmark_top_dir = os.path.dirname(cur_config_file_dir)  # One dir level up.
+  output_dir = "%s/outputs" % (cur_config_file_dir)
   if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-  config.set(benchmark_name, "input_dir", cur_config_dir)
-  config.set(benchmark_name, "bench_name",
-             "%%(input_dir)s/outputs/%s" % benchmark_name)
-  config.set(benchmark_name, "trace_file_name",
-             "%s/inputs/dynamic_trace" % benchmark_top_dir)
-  config.set(benchmark_name, "config_file_name",
-             "%%(input_dir)s/%s" % ALADDIN_CFG)
+  trace_file = (
+      "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace")
+  config.set(kernel, "input_dir", cur_config_file_dir)
+  config.set(kernel, "bench_name",
+             "%%(input_dir)s/outputs/%s" % kernel)
+  config.set(kernel, "trace_file_name",
+             "%s/inputs/%s" % (benchmark_top_dir, trace_file))
+  config.set(kernel, "config_file_name",
+             "%%(input_dir)s/%s.cfg" % kernel)
   if params["memory_type"] == "cache":
     # Cache size in GEM5 is specified like 64kB, rather than 65536.
     cache_size_str = "%dkB" % (int(params["cache_size"])/1024)
-    config.set(benchmark_name, "cache_size", cache_size_str)
-    config.set(benchmark_name, "cacti_cache_config",
-               "%%(input_dir)s/%s" % (CACTI_CACHE_CFG))
-    config.set(benchmark_name, "cacti_tlb_config",
-               "%%(input_dir)s/%s" % (CACTI_TLB_CFG))
-    config.set(benchmark_name, "cacti_lq_config",
-               "%%(input_dir)s/%s" % (CACTI_LQ_CFG))
-    config.set(benchmark_name, "cacti_sq_config",
-               "%%(input_dir)s/%s" % (CACTI_SQ_CFG))
+    config.set(kernel, "cache_size", cache_size_str)
+    config.set(kernel, "cacti_cache_config",
+               "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_CACHE_CFG))
+    config.set(kernel, "cacti_tlb_config",
+               "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_TLB_CFG))
+    config.set(kernel, "cacti_lq_config",
+               "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_LQ_CFG))
+    config.set(kernel, "cacti_sq_config",
+               "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_SQ_CFG))
 
     # Store queue is usually half of the size of load queue.
     params["store_bandwidth"] = params["load_bandwidth"]/2
@@ -294,11 +307,26 @@ def generate_gem5_config(benchmark_name, config_name, params):
                                   params["tlb_entries"])
   for key in GEM5_DEFAULTS.iterkeys():
     if key in params:
-      config.set(benchmark_name, key, str(params[key]))
+      config.set(kernel, key, str(params[key]))
 
-  with open(GEM5_CFG, "wb") as configfile:
+  # Write the accelerator id and dependencies.
+  kernel_id = 0  # By default.
+  if benchmark.separate_kernels:
+    kernel_id = benchmark.get_kernel_id(kernel)
+    if kernel_id == -1:
+      print("Something went wrong! "
+            "%s was not found in the list of kernels." % kernel)
+      exit(1)
+  config.set(kernel, "accelerator_id", str(kernel_id))
+  if benchmark.enforce_order and kernel_id > 0:
+    # Kernels depend on the previous kernel, except for the first.
+    config.set(kernel, "accelerator_deps", str(kernel_id - 1))
+  else:
+    config.set(kernel, "accelerator_deps", "")
+
+  mode = "w" if write_new else "a"
+  with open(GEM5_CFG, mode) as configfile:
     config.write(configfile)
-  os.chdir("..")
 
 def generate_configs_recurse(benchmark, set_params, sweep_params):
   """ Recursively generate all possible configuration settings.
@@ -322,7 +350,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
     # Generate all values of this parameter as set by the sweep start, end, and
     # step. If the parameter was set to NO_SWEEP, then we just use the start
     # value.
-    if next_param.step == NO_SWEEP:
+    if next_param.step_type == NO_SWEEP:
       value_range = [next_param.start]
     else:
       if next_param.step_type == LINEAR_SWEEP:
@@ -362,10 +390,27 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
-    generate_aladdin_config(benchmark, config_name, set_params)
-    generate_gem5_config(benchmark.name, config_name, set_params)
-    if set_params["memory_type"] == "cache":
-      generate_all_cacti_configs(benchmark.name, config_name, set_params)
+
+    os.chdir(config_name)
+    # This is a dict from kernels to its loops and arrays.  If we are generating
+    # separate config files for each kernel, then the key is the name of that
+    # kernel's config file, and the values are the Loop description objects.
+    # Otherwise, we give it a generic name and include all loops specified.
+    kernel_setup = {}
+    if benchmark.separate_kernels:
+      for kernel in benchmark.kernels:
+        kernel_setup[kernel] = [
+            loop for loop in benchmark.loops if loop.name == kernel]
+    else:
+      kernel_setup = {ALADDIN_CFG: benchmark.loops}
+    new_gem5_config = True
+    for kernel, loops in kernel_setup.iteritems():
+      generate_aladdin_config(benchmark, kernel, set_params, loops)
+      generate_gem5_config(benchmark, kernel, set_params, write_new=new_gem5_config)
+      if set_params["memory_type"] == "cache":
+        generate_all_cacti_configs(benchmark.name, kernel, set_params)
+      new_gem5_config = False
+    os.chdir("..")
 
 def generate_all_configs(benchmark, memory_type):
   """ Generates all the possible configurations for the design sweep. """
@@ -395,7 +440,7 @@ def write_config_files(benchmark, output_dir, memory_type):
   generate_all_configs(benchmark, memory_type)
   os.chdir("..")
 
-def run_sweeps(workload, output_dir, dry_run=False):
+def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -413,16 +458,25 @@ def run_sweeps(workload, output_dir, dry_run=False):
   print gem5_home
   # Turning on debug outputs for CacheDatapath can incur a huge amount of disk
   # space, most of which is redundant, so we leave that out of the command here.
-  run_cmd = ("%s/build/X86/gem5.opt --debug-file=%s/debug.out "
-             "%s/configs/aladdin/aladdin_se.py --num-cpus=0 --mem-size=2GB "
-             "--sys-clock=1GHz "
+  run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
+             "--outdir=%(output_path)s/%(outdir)s "
+             "%(gem5_home)s/configs/aladdin/aladdin_se.py "
+             "--num-cpus=0 --mem-size=2GB "
              "--mem-type=ddr3_1600_x64 "
-             "--cpu-type=timing --caches "
+             "--sys-clock=1GHz "
+             "--cpu-type=timing --caches %(l2cache_flag)s "
              #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=0 "
              #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=1 "
              #"--is_perfect_l2_bus=1 --mem-latency=0ns "
-             "--aladdin_cfg_file=%s > %s/stdout 2> %s/stderr")
+             "--aladdin_cfg_file=%(aladdin_cfg_path)s > "
+             "%(output_path)s/stdout 2> %(output_path)s/stderr")
   os.chdir("..")
+  # TODO: Since the L2 cache is such an important flag, I'm hardcoding in a few
+  # parameters specific to it so we can quickly run experiments with and without
+  # it. We should reimplement this later so it's more general.
+  l2cache_flag = "--l2cache" if enable_l2 else ""
+  file_name = "run_L2.sh" if enable_l2 else "run.sh"
+  outdir = "with_L2" if enable_l2 else "no_L2"
   for benchmark in workload:
     print "------------------------------------"
     print "Executing benchmark %s" % benchmark.name
@@ -434,11 +488,14 @@ def run_sweeps(workload, output_dir, dry_run=False):
       if not os.path.exists(abs_cfg_path):
         continue
       abs_output_path = "%s/%s/outputs" % (bmk_dir, config)
-      cmd = run_cmd % (gem5_home, abs_output_path, gem5_home, abs_cfg_path,
-                       abs_output_path, abs_output_path)
+      cmd = run_cmd % {"gem5_home": gem5_home,
+                       "output_path": abs_output_path,
+                       "aladdin_cfg_path": abs_cfg_path,
+                       "outdir": outdir,
+                       "l2cache_flag": l2cache_flag}
       # Create a run.sh convenience script in this directory so that we can
       # quickly run a single config.
-      run_script = open("%s/%s/run.sh" % (bmk_dir, config), "wb")
+      run_script = open("%s/%s/%s" % (bmk_dir, config, file_name), "wb")
       run_script.write("#!/usr/bin/env bash\n"
                        "%s\n" % cmd)
       run_script.close()
@@ -447,13 +504,59 @@ def run_sweeps(workload, output_dir, dry_run=False):
         os.system(cmd)
   os.chdir(cwd)
 
+def handle_local_makefile(benchmark, output_dir, source_dir):
+  """ Invoke a benchmark-local Makefile for instrumentation.
+
+  There are four requirements:
+
+    1. Define the environment variable TARGET_DIR to specify the final
+       destination of the traces to the Makefile.
+    2. Define the environment variable WORKLOAD to specify the kernels being
+       traced.
+    3. The Makefile must have a target called "autotrace" which will compile the
+       traces and copy them to TARGET_DIR. It should fail if TARGET_DIR is not
+       defined. Depending on the Makefile, the complete dynamic trace may or may
+       not be automatically split up into smaller traces for each function or
+       loop iteration.
+    4. If the generated trace needs to be divided into separate traces, set the
+       environment variable SPLIT_TRACE to 1. In separated trace mode, the names
+       of the divided traces must be of the format <kernel>_trace. If the
+       benchmark or kernel is being simulated on its own, then the trace file
+       should be named "dynamic_trace".
+  """
+  # Set the appropriate environment variable and run the Makefile.
+  cwd = os.getcwd()
+  source_file_loc = "%s/%s" % (source_dir, benchmark.source_file)
+  print "Source: %s" % source_file_loc
+  # If traces are being placed, then put them into separate kernel directories.
+  # Otherwise, put the trace under the benchmark.name directory.
+  trace_subdir = (",".join(benchmark.kernels)
+                  if benchmark.separate_kernels else benchmark.name)
+  trace_abs_dir = os.path.abspath("%s/%s/inputs" % (output_dir, trace_subdir))
+  print "trace directory : %s" % trace_abs_dir
+  if not os.path.isdir(trace_abs_dir):
+    os.makedirs(trace_abs_dir)
+  print "trace abs directory : %s" % trace_abs_dir
+  print ",".join(benchmark.kernels)
+  os.environ["TARGET_DIR"] = trace_abs_dir
+  os.environ["WORKLOAD"] = ",".join(benchmark.kernels)
+  os.chdir(os.path.dirname(source_file_loc))
+  os.system("make autotrace")
+  os.chdir(cwd)
+  return
+
 def generate_traces(workload, output_dir, source_dir, memory_type):
   """ Generates dynamic traces for each workload.
 
-  The traces are placed into <output_dir>/<benchmark>/inputs. This compilation
-  procedure is very simple and assumes that all the relevant code is contained
-  inside a single source file, with the exception that a separate test harness
-  can be specified through the Benchmark description objects.
+  If the workloads do not have local Makefiles and were not configured as such,
+  then the traces are placed into <output_dir>/<benchmark>/inputs. This
+  compilation procedure is very simple and assumes that all the relevant code is
+  contained inside a single source file, with the exception that a separate test
+  harness can be specified through the Benchmark description objects.
+
+  If the workloads do have local Makefiles and were configured as such in the
+  benchmark config script, then that local Makefile is invoked. See
+  handle_local_makefile() for more details.
 
   Args:
     workload: A list of Benchmark description objects.
@@ -462,67 +565,71 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
   """
   if not "TRACER_HOME" in os.environ:
     raise Exception("Set TRACER_HOME directory as an environment variable")
-  trace_dir = "inputs"
   cwd = os.getcwd()
+  trace_dir = "inputs"
   for benchmark in workload:
-    print benchmark.name
-    os.chdir("%s/%s" % (output_dir, benchmark.name))
-    if not os.path.exists(trace_dir):
-      os.makedirs(trace_dir)
-    os.chdir(trace_dir)
-    if workload == SHOC:
-      source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
-    elif workload == MACH:
-      source_file_prefix = "%s/%s/%s/%s" % (source_dir, \
-        benchmark.name.split('-')[0], benchmark.name.split('-')[1], benchmark.source_file)
-    output_file_prefix = ("%s/%s/%s/inputs/%s" %
-                          (cwd, output_dir, benchmark.name, benchmark.source_file))
-    source_file = source_file_prefix + ".c"
-    obj = output_file_prefix + ".llvm"
-    opt_obj = output_file_prefix + "-opt.llvm"
-    test_file = "%s/%s" % ( source_dir, benchmark.test_harness)
-    test_obj = output_file_prefix + "_test.llvm"
-    full_llvm = output_file_prefix + "_full.llvm"
-    full_s = output_file_prefix + "_full.s"
-    executable = output_file_prefix + "-instrumented"
-    os.environ["WORKLOAD"]=",".join(benchmark.kernels)
-    all_objs = [opt_obj]
+    if benchmark.makefile:
+      handle_local_makefile(benchmark, output_dir, source_dir)
+    else:
+      trace_output_dir = "%s/%s/%s/%s" % (
+          cwd, output_dir, benchmark.name, trace_dir)
+      if not os.path.exists(trace_output_dir):
+        os.makedirs(trace_output_dir)
+      print benchmark.name
+      os.chdir(trace_output_dir)
+      if workload == SHOC:
+        source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
+      elif workload == MACH:
+        source_file_prefix = "%s/%s/%s/%s" % (source_dir, \
+          benchmark.name.split('-')[0], benchmark.name.split('-')[1], benchmark.source_file)
+      output_file_prefix = ("%s/%s/%s/inputs/%s" %
+                            (cwd, output_dir, benchmark.name, benchmark.source_file))
+      source_file = source_file_prefix + ".c"
+      obj = output_file_prefix + ".llvm"
+      opt_obj = output_file_prefix + "-opt.llvm"
+      test_file = "%s/%s" % ( source_dir, benchmark.test_harness)
+      test_obj = output_file_prefix + "_test.llvm"
+      full_llvm = output_file_prefix + "_full.llvm"
+      full_s = output_file_prefix + "_full.s"
+      executable = output_file_prefix + "-instrumented"
+      os.environ["WORKLOAD"]=",".join(benchmark.kernels)
+      all_objs = [opt_obj]
 
-    defines = " "
-    if memory_type == "dma":
-      defines += "-DDMA_MODE "
-    # Compile the source file.
-    os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-              "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
-              "-fno-unroll-loops -fno-inline -emit-llvm -o " + obj +
-              " "  + source_file)
-    # Compile the test harness if applicable.
-    if benchmark.test_harness:
-      all_objs.append(test_obj)
+      defines = " "
+      if memory_type == "dma":
+        defines += "-DDMA_MODE "
+      # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-                "-fno-unroll-loops -fno-inline -emit-llvm -o " + test_obj +
-                " "  + test_file)
+                "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
+                "-fno-unroll-loops -fno-inline -emit-llvm -o " + obj +
+                " "  + source_file)
+      # Compile the test harness if applicable.
+      if benchmark.test_harness:
+        all_objs.append(test_obj)
+        os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
+                  "-fno-unroll-loops -fno-inline -emit-llvm -o " + test_obj +
+                  " "  + test_file)
 
-    # Finish compilation, linking, and then execute the instrumented code to get
-    # the dynamic trace.
-    os.system("opt -S -load=" + os.getenv("TRACER_HOME") +
-              "/full-trace/full_trace.so -fulltrace " + obj + " -o " + opt_obj)
-    os.system("llvm-link -o " + full_llvm + " " + " ".join(all_objs) + " " +
-              os.getenv("TRACER_HOME") + "/profile-func/trace_logger.llvm")
-    os.system("llc -O0 -disable-fp-elim -filetype=asm -o " + full_s + " " + full_llvm)
-    os.system("gcc -O0 -fno-inline -o " + executable + " " + full_s + " -lm")
-    # Change directory so that the dynamic_trace file gets put in the right
-    # place.
-    os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
-    if workload == SHOC:
-      os.system(executable)
-    elif workload == MACH:
-      os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
-       (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
-       source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
-    os.chdir(cwd)
+      # Finish compilation, linking, and then execute the instrumented code to
+      # get the dynamic trace.
+      os.system("opt -S -load=" + os.getenv("TRACER_HOME") +
+                "/full-trace/full_trace.so -fulltrace " + obj + " -o " + opt_obj)
+      os.system("llvm-link -o " + full_llvm + " " + " ".join(all_objs) + " " +
+                os.getenv("TRACER_HOME") + "/profile-func/trace_logger.llvm")
+      os.system("llc -O0 -disable-fp-elim -filetype=asm -o " + full_s + " " + full_llvm)
+      os.system("gcc -O0 -fno-inline -o " + executable + " " + full_s + " -lm")
+      # Change directory so that the dynamic_trace file gets put in the right
+      # place.
+      os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
+      if workload == SHOC:
+        os.system(executable)
+      elif workload == MACH:
+        os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
+         (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
+         source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
+      os.chdir(cwd)
 
-def generate_condor_scripts(workload, output_dir, username):
+def generate_condor_scripts(workload, output_dir, username, enable_l2=False):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
   run_sweeps(workload, output_dir, dry_run=True)
@@ -541,10 +648,12 @@ def generate_condor_scripts(workload, output_dir, username):
       "Notification    = Error",
       "Executable = /bin/bash"]
 
-  f = open("%s/submit.con" % cwd, "w")
+  condor_file_name = "submit_L2.con" if enable_l2 else "submit.con"
+  f = open("%s/%s" % (cwd, condor_file_name), "w")
   for b in basicCondor:
     f.write(b + " \n")
 
+  run_file = "run_L2.sh" if enable_l2 else "run.sh"
   for benchmark in workload:
     bmk_dir = "%s/%s/%s" % (cwd, output_dir, benchmark.name)
     configs = [file for file in os.listdir(bmk_dir)
@@ -554,7 +663,7 @@ def generate_condor_scripts(workload, output_dir, username):
       if not os.path.exists(abs_cfg_path):
         continue
       f.write("InitialDir = %s/%s/\n" % (bmk_dir, config))
-      f.write("Arguments = %s/%s/run.sh\n" % (bmk_dir, config))
+      f.write("Arguments = %s/%s/%s\n" % (bmk_dir, config, run_file))
       f.write("Queue\n\n")
   f.close()
   os.chdir(cwd)
@@ -573,8 +682,8 @@ def main():
                       "directory. Required for all modes.")
   parser.add_argument("--memory_type", help="\"cache\" or \"spad\" or \"dma\". "
                       "Required for config mode.")
-  parser.add_argument("--benchmark_suite", help="SHOC or MachSuite. Required "
-                      "for config and trace modes.")
+  parser.add_argument("--benchmark_suite", required=True, help="SHOC, "
+      "MachSuite, CortexSuite, or CortexSuiteKernels. Required for all modes.")
   parser.add_argument("--source_dir", help="Path to the benchmark suite "
                       "directory. Required for trace mode.")
   parser.add_argument("--dry", action="store_true", help="Perform a dry run. "
@@ -583,13 +692,25 @@ def main():
       "simulation manually.")
   parser.add_argument("--username", help="Username for the Condor scripts. If "
       "this is not provided, Python will try to figure it out.")
+  parser.add_argument("--enable_l2", action="store_true", help="Enable the L2 "
+      "cache during simulations if applicable. This will cause the simulation "
+      "output to be dumped to a directory called outputs/with_L2. Without this "
+      "flag, GEM5 output is stored to outputs/no_L2. If generating Condor "
+      "scripts, this flag will run L2-enabled simulations.")
   args = parser.parse_args()
 
   workload = []
-  if args.benchmark_suite == "SHOC":
+  if args.benchmark_suite.upper() == "SHOC":
     workload = SHOC
-  elif args.benchmark_suite == "MachSuite":
+  elif args.benchmark_suite.upper() == "MACHSUITE":
     workload = MACH
+  elif args.benchmark_suite.upper() == "CORTEXSUITE":
+    workload = CORTEXSUITE
+  elif args.benchmark_suite.upper() == "CORTEXSUITEKERNELS":
+    workload = CORTEXSUITE_KERNELS
+  else:
+    print "Invalid benchmark provided!"
+    exit(1)
 
   if args.mode == "configs" or args.mode == "all":
     if (not args.memory_type or
@@ -619,7 +740,8 @@ def main():
     if not args.benchmark_suite:
       print "Missing benchmark_suite parameter! See help documentation (-h)"
       exit(1)
-    run_sweeps(workload, args.output_dir, args.dry)
+    run_sweeps(
+        workload, args.output_dir, dry_run=args.dry, enable_l2=args.enable_l2)
 
   if args.mode == "condor":
     if not args.benchmark_suite:
@@ -629,7 +751,8 @@ def main():
     if not args.username:
       args.username = getpass.getuser()
       print "Username was not specified for Condor. Using %s." % args.username
-    generate_condor_scripts(workload, args.output_dir, args.username)
+    generate_condor_scripts(
+        workload, args.output_dir, args.username, enable_l2=args.enable_l2)
 
 if __name__ == "__main__":
   main()
