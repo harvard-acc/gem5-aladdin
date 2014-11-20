@@ -40,7 +40,7 @@ GEM5_DEFAULTS = {
   "cache_assoc": 4,
   "cache_hit_latency": 1,
   "cache_line_sz" : 64,
-  "dma_setup_latency" : 1,
+  "dma_setup_latency" : 100,
   "max_dma_requests" : 16,
 }
 
