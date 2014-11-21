@@ -36,7 +36,8 @@ GEM5_DEFAULTS = {
   "load_queue_size": 16,
   "store_bandwidth": 1,
   "store_queue_size": 16,
-  "cache_assoc": 2,
+  "cache_size" : 32768,
+  "cache_assoc": 4,
   "cache_hit_latency": 1,
   "cache_line_sz" : 64,
   "dma_setup_latency" : 1,
@@ -136,12 +137,12 @@ def write_cacti_config(config_file, params):
   config_file.write("-search port %d\n" % params["search_ports"])
   config_file.write("-output/input bus width %d\n" % params["io_bus_width"])
   config_file.write("-exclusive write port %d\n" % params["exw_ports"])
+  config_file.write("-exclusive read port %d\n" % params["exr_ports"])
   config_file.write("-UCA bank count %d\n" % params["banks"])
   # Default parameters
   config_file.write(
       "-Power Gating - \"false\"\n"
       "-Power Gating Performance Loss 0.01\n"
-      "-exclusive read port 0\n"
       "-single ended read ports 0\n"
       "-technology (u) 0.040\n"
       "-page size (bits) 8192 \n"
@@ -196,11 +197,15 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
     cache_line_sz = params["cache_line_sz"]
   else:
     cache_line_sz = GEM5_DEFAULTS["cache_line_sz"]
-  cache_params = {"cache_size": params["cache_size"],
+  if "cache_size" in params:
+    cache_size = params["cache_size"]
+  else:
+    cache_size = GEM5_DEFAULTS["cache_size"]
+  cache_params = {"cache_size": cache_size,
                   "cache_assoc": cache_assoc,
                   "rw_ports": 0,
-                  "exw_ports": 2, # Two exclusive write ports
-                  "exr_ports": 2, # Two exclusive read ports
+                  "exw_ports": params["load_bandwidth"], # Two exclusive write ports
+                  "exr_ports": params["store_bandwidth"], # Two exclusive read ports
                   "line_size": cache_line_sz,
                   "banks" : 2, # Two banks
                   "cache_type": "cache",
@@ -212,15 +217,18 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   config_file.close()
 
   config_file = open("%s_%s.cfg" % (kernel, CACTI_TLB_CFG), "wb")
+  # Set TLB bandwidth the same as max(load/store_queue_bw)
+  params["tlb_bandwidth"] = min(params["load_bandwidth"],
+                                params["tlb_entries"])
   tlb_params = {"cache_size": params["tlb_entries"]*4,
                 "cache_assoc": 0,  # fully associative
                 "rw_ports": 0,
                 "exw_ports":  1,  # One write port for miss returns.
+                "exr_ports": params["tlb_bandwidth"],
                 "line_size": 4,  # 32b per TLB entry. in bytes
                 "banks" : 1,
                 "cache_type": "cache",
-                "search_ports": max(params["load_bandwidth"],
-                                    params["store_bandwidth"]),
+                "search_ports": params["tlb_bandwidth"],
                 "io_bus_width" : 32}
   write_cacti_config(config_file, tlb_params)
   config_file.close()
@@ -228,8 +236,9 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   config_file = open("%s_%s.cfg" % (kernel, CACTI_LQ_CFG), "wb")
   lq_params = {"cache_size": params["load_queue_size"]*4,
                "cache_assoc": 0,  # fully associative
-               "rw_ports": 0,
-               "exw_ports":  1,
+               "rw_ports": params["load_bandwidth"],
+               "exw_ports":  0,
+               "exr_ports": 0,
                "banks" : 1,
                "line_size": 4,  # 32b per entry
                "cache_type": "cache",
@@ -241,8 +250,9 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   config_file = open("%s_%s.cfg" % (kernel, CACTI_SQ_CFG), "wb")
   sq_params = {"cache_size": params["store_queue_size"]*4,
                "cache_assoc": 0,  # fully associative
-               "rw_ports": 0,
-               "exw_ports":  1,
+               "rw_ports": params["store_bandwidth"],
+               "exw_ports":  0,
+               "exr_ports": 0,
                "banks" : 1,
                "line_size": 4,  # 32b per entry
                "cache_type": "cache",
@@ -285,8 +295,12 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
   config.set(kernel, "config_file_name",
              "%%(input_dir)s/%s.cfg" % kernel)
   if params["memory_type"] == "cache":
+    if "cache_size" in params:
+      cache_size = params["cache_size"]
+    else:
+      cache_size = GEM5_DEFAULTS["cache_size"]
     # Cache size in GEM5 is specified like 64kB, rather than 65536.
-    cache_size_str = "%dkB" % (int(params["cache_size"])/1024)
+    cache_size_str = "%dkB" % (int(cache_size)/1024)
     config.set(kernel, "cache_size", cache_size_str)
     config.set(kernel, "cacti_cache_config",
                "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_CACHE_CFG))
@@ -328,7 +342,8 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
   with open(GEM5_CFG, mode) as configfile:
     config.write(configfile)
 
-def generate_configs_recurse(benchmark, set_params, sweep_params):
+def generate_configs_recurse(benchmark, set_params, sweep_params,
+          perfect_l1=False):
   """ Recursively generate all possible configuration settings.
 
   On each iteration, this function pops a SweepParam object from sweep_params,
@@ -362,7 +377,8 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
                                         next_param.step))+1)]
     for value in value_range:
       set_params[next_param.name] = value
-      generate_configs_recurse(benchmark, set_params, local_sweep_params)
+      generate_configs_recurse(benchmark, set_params, local_sweep_params,
+                                    perfect_l1)
   else:
     # All parameters have been populated with values. We can write the
     # configuration now.
@@ -376,15 +392,21 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
                                           set_params["unrolling"],
                                           set_params["partition"])
     elif set_params["memory_type"] == "cache":
-      if set_params["load_bandwidth"] > set_params["load_queue_size"]:
-        return
-      CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d"
-      config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
-                                          set_params["unrolling"],
-                                          set_params["tlb_entries"],
-                                          set_params["load_bandwidth"],
-                                          set_params["load_queue_size"],
-                                          set_params["cache_size"])
+      if perfect_l1:
+        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d"
+        config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
+                                            set_params["unrolling"],
+                                            set_params["tlb_entries"],
+                                            set_params["load_bandwidth"],
+                                            set_params["load_queue_size"])
+      else:
+        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d"
+        config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
+                                            set_params["unrolling"],
+                                            set_params["tlb_entries"],
+                                            set_params["load_bandwidth"],
+                                            set_params["load_queue_size"],
+                                            set_params["cache_size"])
     if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
       return
     print "  Configuration %s" % config_name
@@ -412,35 +434,43 @@ def generate_configs_recurse(benchmark, set_params, sweep_params):
       new_gem5_config = False
     os.chdir("..")
 
-def generate_all_configs(benchmark, memory_type):
+def generate_all_configs(benchmark, memory_type, perfect_l1=False):
   """ Generates all the possible configurations for the design sweep. """
   if memory_type == "spad" or memory_type == "dma":
     all_sweep_params = [pipelining,
                         unrolling,
                         partition]
   elif memory_type == "cache":
-    all_sweep_params = [pipelining,
-                        unrolling,
-                        tlb_entries,
-                        load_bandwidth,
-                        load_queue_size,
-                        cache_size]
+    if perfect_l1: 
+      all_sweep_params = [pipelining,
+                          unrolling,
+                          tlb_entries,
+                          load_bandwidth,
+                          load_queue_size]
+    else:
+      all_sweep_params = [pipelining,
+                          unrolling,
+                          tlb_entries,
+                          load_bandwidth,
+                          load_queue_size,
+                          cache_size]
   # This dict stores a single configuration.
   params = {"memory_type": memory_type}
   # Recursively generate all possible configurations.
-  generate_configs_recurse(benchmark, params, all_sweep_params)
+  generate_configs_recurse(benchmark, params, all_sweep_params, perfect_l1)
 
-def write_config_files(benchmark, output_dir, memory_type):
+def write_config_files(benchmark, output_dir, memory_type, perfect_l1=False):
   """ Create the directory structure and config files for a benchmark. """
   # This assumes we're already in output_dir.
   if not os.path.exists(benchmark.name):
     os.makedirs(benchmark.name)
   print "Generating configurations for %s" % benchmark.name
   os.chdir(benchmark.name)
-  generate_all_configs(benchmark, memory_type)
+  generate_all_configs(benchmark, memory_type, perfect_l1)
   os.chdir("..")
 
-def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False):
+def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False,
+                 perfect_l1=False):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -462,12 +492,10 @@ def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False):
              "--outdir=%(output_path)s/%(outdir)s "
              "%(gem5_home)s/configs/aladdin/aladdin_se.py "
              "--num-cpus=0 --mem-size=2GB "
-             "--mem-type=ddr3_1600_x64 "
+             "%(mem_flag)s "
              "--sys-clock=1GHz "
              "--cpu-type=timing --caches %(l2cache_flag)s "
-             #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=0 "
-             #"--cpu-type=timing --caches --l2cache --is_perfect_l2_cache=1 "
-             #"--is_perfect_l2_bus=1 --mem-latency=0ns "
+             "%(perfect_l1_flag)s "
              "--aladdin_cfg_file=%(aladdin_cfg_path)s > "
              "%(output_path)s/stdout 2> %(output_path)s/stderr")
   os.chdir("..")
@@ -475,8 +503,17 @@ def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False):
   # parameters specific to it so we can quickly run experiments with and without
   # it. We should reimplement this later so it's more general.
   l2cache_flag = "--l2cache" if enable_l2 else ""
-  file_name = "run_L2.sh" if enable_l2 else "run.sh"
-  outdir = "with_L2" if enable_l2 else "no_L2"
+  mem_flag = "--mem-latency=0ns --mem-type=simple_mem " if perfect_l1 else "--mem-type=ddr3_1600_x64 "
+  perfect_l1_flag = "--is_perfect_cache=1 --is_perfect_bus=1 " if perfect_l1 else ""
+  if enable_l2:
+    file_name = "run_L2.sh"
+    outdir = "with_L2"
+  elif perfect_l1:
+    file_name = "run_perfect_l1.sh"
+    outdir = "perfect_l1"
+  else:
+    outdir = "no_L2"
+    file_name = "run.sh"
   for benchmark in workload:
     print "------------------------------------"
     print "Executing benchmark %s" % benchmark.name
@@ -492,7 +529,9 @@ def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False):
                        "output_path": abs_output_path,
                        "aladdin_cfg_path": abs_cfg_path,
                        "outdir": outdir,
-                       "l2cache_flag": l2cache_flag}
+                       "l2cache_flag": l2cache_flag,
+                       "mem_flag": mem_flag,
+                       "perfect_l1_flag" : perfect_l1_flag}
       # Create a run.sh convenience script in this directory so that we can
       # quickly run a single config.
       run_script = open("%s/%s/%s" % (bmk_dir, config, file_name), "wb")
@@ -629,10 +668,11 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
          source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
       os.chdir(cwd)
 
-def generate_condor_scripts(workload, output_dir, username, enable_l2=False):
+def generate_condor_scripts(workload, output_dir, username, enable_l2=False,
+       perfect_l1=False):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
-  run_sweeps(workload, output_dir, dry_run=True)
+  run_sweeps(workload, output_dir, True, enable_l2, perfect_l1)
   cwd = os.getcwd()
   os.chdir("..")
   basicCondor = [
@@ -647,13 +687,19 @@ def generate_condor_scripts(workload, output_dir, username, enable_l2=False):
       "Notify_User     = %s@eecs.harvard.edu" % username,
       "Notification    = Error",
       "Executable = /bin/bash"]
-
-  condor_file_name = "submit_L2.con" if enable_l2 else "submit.con"
+  if enable_l2:
+    condor_file_name = "submit_L2.con"
+    run_file = "run_L2.sh"
+  elif perfect_l1:
+    condor_file_name = "submit_perfect_l1.con"
+    run_file = "run_perfect_l1.sh"
+  else:
+    condor_file_name = "submit.con"
+    run_file = "run.sh"
   f = open("%s/%s" % (cwd, condor_file_name), "w")
   for b in basicCondor:
     f.write(b + " \n")
 
-  run_file = "run_L2.sh" if enable_l2 else "run.sh"
   for benchmark in workload:
     bmk_dir = "%s/%s/%s" % (cwd, output_dir, benchmark.name)
     configs = [file for file in os.listdir(bmk_dir)
@@ -697,6 +743,11 @@ def main():
       "output to be dumped to a directory called outputs/with_L2. Without this "
       "flag, GEM5 output is stored to outputs/no_L2. If generating Condor "
       "scripts, this flag will run L2-enabled simulations.")
+  parser.add_argument("--perfect_l1", action="store_true", help="Enable the "
+      "perfect l1 cache during simulations if applicable. This will cause the "
+      "simulation output to be dumped to a directory called outputs/perfect_l1."
+      "Without this flag, GEM5 output is stored to outputs/no_L2. If generating "
+      "Condor scripts, this flag will run perfect l1 simulations.")
   args = parser.parse_args()
 
   workload = []
@@ -723,7 +774,8 @@ def main():
       os.makedirs(args.output_dir)
     os.chdir(args.output_dir)
     for benchmark in workload:
-      write_config_files(benchmark, args.output_dir, args.memory_type)
+      write_config_files(benchmark, args.output_dir, args.memory_type, 
+          perfect_l1=args.perfect_l1)
     os.chdir(current_dir)
 
   if args.mode == "trace" or args.mode == "all":
@@ -741,7 +793,8 @@ def main():
       print "Missing benchmark_suite parameter! See help documentation (-h)"
       exit(1)
     run_sweeps(
-        workload, args.output_dir, dry_run=args.dry, enable_l2=args.enable_l2)
+        workload, args.output_dir, dry_run=args.dry, enable_l2=args.enable_l2,
+          perfect_l1=args.perfect_l1)
 
   if args.mode == "condor":
     if not args.benchmark_suite:
@@ -752,7 +805,8 @@ def main():
       args.username = getpass.getuser()
       print "Username was not specified for Condor. Using %s." % args.username
     generate_condor_scripts(
-        workload, args.output_dir, args.username, enable_l2=args.enable_l2)
+        workload, args.output_dir, args.username, enable_l2=args.enable_l2,
+          perfect_l1=args.perfect_l1)
 
 if __name__ == "__main__":
   main()
