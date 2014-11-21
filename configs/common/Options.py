@@ -69,7 +69,7 @@ def addCommonOptions(parser):
                       help = """Top-level voltage for blocks running at system
                       power supply""")
     parser.add_option("--sys-clock", action="store", type="string",
-                      default='500MHz',
+                      default='1GHz',
                       help = """Top-level clock for blocks running at system
                       speed""")
     parser.add_option("--cpu-clock", action="store", type="string",

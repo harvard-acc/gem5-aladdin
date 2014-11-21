@@ -38,8 +38,8 @@ gemm_blocked.set_kernels(["bbgemm"])
 gemm_blocked.add_array("m1", 4096, 4, PARTITION_CYCLIC)
 gemm_blocked.add_array("m2", 4096, 4, PARTITION_CYCLIC)
 gemm_blocked.add_array("prod", 4096, 4, PARTITION_CYCLIC)
-gemm_blocked.add_loop("bbgemm", 45, 8)
-gemm_blocked.add_loop("bbgemm", 46, 8)
+gemm_blocked.add_loop("bbgemm", 45, 1)
+gemm_blocked.add_loop("bbgemm", 46, 1)
 gemm_blocked.add_loop("bbgemm", 47, 64)
 gemm_blocked.add_loop("bbgemm", 48, 0)
 gemm_blocked.add_loop("bbgemm", 52, 0)
@@ -177,13 +177,13 @@ fft_transpose.add_loop("fft1D_512", 215, 64)
 
 stencil_stencil2d = Benchmark("stencil-stencil2d", "stencil", "common/harness.c")
 stencil_stencil2d.set_kernels(["stencil"])
-stencil_stencil2d.add_array("orig", 8192, 4, PARTITION_CYCLIC)
-stencil_stencil2d.add_array("sol", 8192, 4, PARTITION_CYCLIC)
+stencil_stencil2d.add_array("orig", 8580, 4, PARTITION_CYCLIC)
+stencil_stencil2d.add_array("sol", 8580, 4, PARTITION_CYCLIC)
 stencil_stencil2d.add_array("filter", 9, 4, PARTITION_COMPLETE)
 stencil_stencil2d.add_loop("stencil", 40, 1)
 stencil_stencil2d.add_loop("stencil", 41, 64)
-stencil_stencil2d.add_loop("stencil", 42, 0)
 stencil_stencil2d.add_loop("stencil", 43, 0)
+stencil_stencil2d.add_loop("stencil", 44, 0)
 
 spmv_crs = Benchmark("spmv-crs", "crs", "common/harness.c")
 spmv_crs.set_kernels(["spmv"])
@@ -213,7 +213,8 @@ gemm_ncubed.add_loop("gemm", 44, 1)
 gemm_ncubed.add_loop("gemm", 45, 1)
 gemm_ncubed.add_loop("gemm", 48, 64)
 
-MACH = [ bfs_bulk, sort_merge, spmv_ellpack, bfs_queue, gemm_blocked,\
-         stencil_stencil3d, viterbi_viterbi, sort_radix, kmp_kmp, \
+MACH = [ bfs_bulk, sort_merge, spmv_ellpack, bfs_queue,\
+         stencil_stencil3d, sort_radix, kmp_kmp, \
          nw_nw, md_grid, fft_strided, aes_aes, md_knn, fft_transpose,\
-         stencil_stencil2d, spmv_crs, gemm_ncubed]
+         spmv_crs] #, gemm_ncubed, viterbi_viterbi]
+         # gemm_blocked,stencil_stencil2d, 
