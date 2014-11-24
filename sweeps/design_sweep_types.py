@@ -16,12 +16,25 @@ PARTITION_CYCLIC = 1
 PARTITION_BLOCK = 2
 PARTITION_COMPLETE = 3
 
-# The name of the SweepParam indicates the parameter being swept. The sweep
-# begins at @start and ends at @end, stepping by @step. The step type is either
-# linear or exponential. For linear, the parameter value is simply incremented
-# by the step amount each iteration. For exponential the parameter value is
-# multiplied by the step amount instead.
-SweepParam = namedtuple("SweepParam", "name, start, end, step, step_type")
+class SweepParam(namedtuple(
+      "SweepParamBase", "name, start, end, step, step_type, sweep_per_kernel")):
+  """ SweepParam: A description of a parameter to sweep.
+
+  Args:
+    name: Indicates the parameter being swept.
+    start: Start the sweep from this value.
+    ends: End the sweep at this value, inclusive.
+    step: The amount to increase this parameter per sweep.
+    type: LINEAR_SWEEP or EXP_SWEEP. Linear sweeps will increment the value by
+      @step; For exponential the parameter value is multiplied by the step
+      amount instead.
+    sweep_per_kernel: Optional. For multi-kernel accelerators, set this to True
+    to sweep this parameter within the kernels themselves, rather than applying
+    the value globally.
+  """
+  def __new__(cls, name, start, end, step, step_type, sweep_per_kernel=False):
+    return super(SweepParam, cls).__new__(
+        cls, name, start, end, step, step_type, sweep_per_kernel)
 
 # A loop inside a benchmark. It is given a name and a line number in which it
 # appears in the source file.
