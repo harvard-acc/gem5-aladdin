@@ -36,12 +36,13 @@ GEM5_DEFAULTS = {
   "load_queue_size": 16,
   "store_bandwidth": 1,
   "store_queue_size": 16,
-  "cache_size" : 32768,
   "cache_assoc": 4,
   "cache_hit_latency": 1,
   "cache_line_sz" : 64,
   "dma_setup_latency" : 100,
   "max_dma_requests" : 16,
+  "cache_size": 16384,
+  "l2cache_size": "131072"
 }
 
 def write_aladdin_array_configs(benchmark, config_file, params):
@@ -98,7 +99,7 @@ def generate_aladdin_config(benchmark, kernel, params, loops):
   Args:
     benchmark: A benchmark description object.
     kernel: Either "aladdin" or the name of the individual kernel.
-    params: Configuration parameters. Must include the keys partition,
+    params: Kernel configuration parameters. Must include the keys partition,
         unrolling, and pipelining.
     loops: The list of loops to include in the config file.
   """
@@ -261,6 +262,20 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   write_cacti_config(config_file, sq_params)
   config_file.close()
 
+def handle_gem5_cache_config(params):
+  """ Converts a power of 2 into the format XXkB, as GEM5 requires. """
+  l1cache_size = 0
+  l2cache_size = 0
+  if "cache_size" in params:
+    cache_size = params["cache_size"]/1024
+  else:
+    cache_size = GEM5_DEFAULTS["cache_size"]/1024
+  if "l2cache_size" in params:
+    l2cache_size = params["l2cache_size"]/1024
+  else:
+    l2cache_size = GEM5_DEFAULTS["l2cache_size"]/1024
+  return (int(l1cache_size), int(l2cache_size))
+
 def generate_gem5_config(benchmark, kernel, params, write_new=True):
   """ Writes a GEM5 config file for Aladdin inside the config directory.
 
@@ -295,13 +310,9 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
   config.set(kernel, "config_file_name",
              "%%(input_dir)s/%s.cfg" % kernel)
   if params["memory_type"] == "cache":
-    if "cache_size" in params:
-      cache_size = params["cache_size"]
-    else:
-      cache_size = GEM5_DEFAULTS["cache_size"]
-    # Cache size in GEM5 is specified like 64kB, rather than 65536.
-    cache_size_str = "%dkB" % (int(cache_size)/1024)
-    config.set(kernel, "cache_size", cache_size_str)
+    (l1cache_size, l2cache_size) = handle_gem5_cache_config(params)
+    config.set(kernel, "cache_size", "%dkB" % l1cache_size)
+    config.set(kernel, "l2cache_size", "%dkB" % l2cache_size)
     config.set(kernel, "cacti_cache_config",
                "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_CACHE_CFG))
     config.set(kernel, "cacti_tlb_config",
@@ -320,7 +331,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     params["tlb_bandwidth"] = min(params["load_bandwidth"],
                                   params["tlb_entries"])
   for key in GEM5_DEFAULTS.iterkeys():
-    if key in params:
+    if key in params and not config.has_option(kernel, key):
       config.set(kernel, key, str(params[key]))
 
   # Write the accelerator id and dependencies.
@@ -441,11 +452,12 @@ def generate_all_configs(benchmark, memory_type, perfect_l1=False):
                         unrolling,
                         partition]
   elif memory_type == "cache":
-    if perfect_l1: 
+    if perfect_l1:
       all_sweep_params = [pipelining,
                           unrolling,
                           tlb_entries,
                           load_bandwidth,
+                          cache_assoc,
                           load_queue_size]
     else:
       all_sweep_params = [pipelining,
@@ -453,11 +465,15 @@ def generate_all_configs(benchmark, memory_type, perfect_l1=False):
                           tlb_entries,
                           load_bandwidth,
                           load_queue_size,
+                          cache_assoc,
+                          l2cache_size,
                           cache_size]
   # This dict stores a single configuration.
   params = {"memory_type": memory_type}
   # Recursively generate all possible configurations.
-  generate_configs_recurse(benchmark, params, all_sweep_params, perfect_l1)
+  print benchmark.kernels
+  generate_configs_recurse(benchmark, params, all_sweep_params,
+                           perfect_l1)
 
 def write_config_files(benchmark, output_dir, memory_type, perfect_l1=False):
   """ Create the directory structure and config files for a benchmark. """
@@ -546,12 +562,15 @@ def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False,
 def handle_local_makefile(benchmark, output_dir, source_dir):
   """ Invoke a benchmark-local Makefile for instrumentation.
 
-  There are four requirements:
+  There are five requirements:
 
     1. Define the environment variable TARGET_DIR to specify the final
        destination of the traces to the Makefile.
     2. Define the environment variable WORKLOAD to specify the kernels being
        traced.
+    3. Define the environment variable ACCEL_NAME to specify the name of the
+       benchmark. This determines into which subfolder the trace is ultimately
+       placed.
     3. The Makefile must have a target called "autotrace" which will compile the
        traces and copy them to TARGET_DIR. It should fail if TARGET_DIR is not
        defined. Depending on the Makefile, the complete dynamic trace may or may
@@ -569,8 +588,7 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
   print "Source: %s" % source_file_loc
   # If traces are being placed, then put them into separate kernel directories.
   # Otherwise, put the trace under the benchmark.name directory.
-  trace_subdir = (",".join(benchmark.kernels)
-                  if benchmark.separate_kernels else benchmark.name)
+  trace_subdir = benchmark.name
   trace_abs_dir = os.path.abspath("%s/%s/inputs" % (output_dir, trace_subdir))
   print "trace directory : %s" % trace_abs_dir
   if not os.path.isdir(trace_abs_dir):
@@ -578,7 +596,10 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
   print "trace abs directory : %s" % trace_abs_dir
   print ",".join(benchmark.kernels)
   os.environ["TARGET_DIR"] = trace_abs_dir
+  os.environ["ACCEL_NAME"] = benchmark.name
   os.environ["WORKLOAD"] = ",".join(benchmark.kernels)
+  if benchmark.separate_kernels:
+    os.environ["SPLIT_TRACE"] = "1"
   os.chdir(os.path.dirname(source_file_loc))
   os.system("make autotrace")
   os.chdir(cwd)
@@ -746,8 +767,8 @@ def main():
   parser.add_argument("--perfect_l1", action="store_true", help="Enable the "
       "perfect l1 cache during simulations if applicable. This will cause the "
       "simulation output to be dumped to a directory called outputs/perfect_l1."
-      "Without this flag, GEM5 output is stored to outputs/no_L2. If generating "
-      "Condor scripts, this flag will run perfect l1 simulations.")
+      "Without this flag, GEM5 output is stored to outputs/no_L2. If "
+      "generating Condor scripts, this flag will run perfect l1 simulations.")
   args = parser.parse_args()
 
   workload = []
@@ -774,7 +795,7 @@ def main():
       os.makedirs(args.output_dir)
     os.chdir(args.output_dir)
     for benchmark in workload:
-      write_config_files(benchmark, args.output_dir, args.memory_type, 
+      write_config_files(benchmark, args.output_dir, args.memory_type,
           perfect_l1=args.perfect_l1)
     os.chdir(current_dir)
 
@@ -786,7 +807,8 @@ def main():
     if not args.source_dir:
       print "Need to specify the benchmark suite source directory!"
       exit(1)
-    generate_traces(workload, args.output_dir, args.source_dir, args.memory_type)
+    generate_traces(
+        workload, args.output_dir, args.source_dir, args.memory_type)
 
   if args.mode == "run" or args.mode == "all":
     if not args.benchmark_suite:

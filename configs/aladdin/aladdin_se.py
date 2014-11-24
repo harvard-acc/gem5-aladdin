@@ -202,6 +202,7 @@ if options.aladdin_cfg_file:
           cacheSize = config.get(accel, "cache_size"),
           cacheAssoc = config.getint(accel, "cache_assoc"),
           cacheHitLatency = config.getint(accel, "cache_hit_latency"),
+          l2CacheSize = config.get(accel, "l2cache_size"),
           cactiCacheConfig = config.get(accel, "cacti_cache_config"),
           cycleTime = config.getint(accel, "cycle_time"),
           tlbEntries = config.getint(accel, "tlb_entries"),
