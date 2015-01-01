@@ -192,6 +192,7 @@ if options.aladdin_cfg_file:
   for accel in accels:
     memory_type = config.get(accel, 'memory_type').lower()
     if memory_type == "cache":
+      options.cacheline_size = config.getint(accel, "cache_line_sz")
       datapaths.append(CacheDatapath(clk_domain = system.cpu_clk_domain,
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
@@ -202,6 +203,7 @@ if options.aladdin_cfg_file:
           cacheSize = config.get(accel, "cache_size"),
           cacheAssoc = config.getint(accel, "cache_assoc"),
           cacheHitLatency = config.getint(accel, "cache_hit_latency"),
+          cacheLineSize = config.getint(accel, "cache_line_sz"),
           l2CacheSize = config.get(accel, "l2cache_size"),
           cactiCacheConfig = config.get(accel, "cacti_cache_config"),
           cycleTime = config.getint(accel, "cycle_time"),
@@ -220,7 +222,9 @@ if options.aladdin_cfg_file:
           storeQueueSize = config.getint(accel, "store_queue_size"),
           storeBandwidth = config.getint(accel, "store_bandwidth"),
           storeQueueCacheConfig = config.get(accel, "cacti_sq_config"),
-          tlbBandwidth = config.getint(accel, "tlb_bandwidth")))
+          tlbBandwidth = config.getint(accel, "tlb_bandwidth"),
+          useDb = config.getboolean(accel, "use_db"),
+          experimentName = config.get(accel, "experiment_name")))
     elif memory_type == "spad" or memory_type == "dma":
       datapaths.append(DmaScratchpadDatapath(clk_domain = system.cpu_clk_domain,
           benchName = config.get(accel, "bench_name"),
@@ -229,7 +233,9 @@ if options.aladdin_cfg_file:
           cycleTime = config.getint(accel, "cycle_time"),
           spadPorts = config.getint(accel, "spad_ports"),
           dmaSetupLatency = config.getint(accel, "dma_setup_latency"),
-          maxDmaRequests = config.getint(accel, "max_dma_requests")))
+          maxDmaRequests = config.getint(accel, "max_dma_requests"),
+          useDb = config.getboolean(accel, "use_db"),
+          experimentName = config.get(accel, "experiment_name")))
     else:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
