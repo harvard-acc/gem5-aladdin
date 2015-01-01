@@ -24,6 +24,15 @@ GEM5_DEFAULTS = {
   "cycle_time": 1,
   "memory_type": "cache",
   "spad_ports": 1,
+  "dma_setup_latency" : 100,
+  "max_dma_requests" : 16,
+}
+
+L1CACHE_DEFAULTS = {
+  "cache_size": 16384,
+  "cache_assoc": 4,
+  "cache_hit_latency": 1,
+  "cache_line_sz" : 64,
   "tlb_hit_latency": 0,
   "tlb_miss_latency": 100,
   "tlb_page_size": 4096,
@@ -35,14 +44,14 @@ GEM5_DEFAULTS = {
   "load_bandwidth": 1,
   "load_queue_size": 16,
   "store_bandwidth": 1,
-  "store_queue_size": 16,
-  "cache_assoc": 4,
-  "cache_hit_latency": 1,
-  "cache_line_sz" : 64,
-  "dma_setup_latency" : 100,
-  "max_dma_requests" : 16,
-  "cache_size": 16384,
-  "l2cache_size": "131072"
+  "store_queue_size": 16
+}
+
+L2CACHE_DEFAULTS = {
+  "cache_size": 131072,
+  "cache_assoc": 8,
+  "cache_hit_latency": 6,
+  "cache_line_sz": 64
 }
 
 def write_aladdin_array_configs(benchmark, config_file, params):
@@ -267,13 +276,11 @@ def handle_gem5_cache_config(params):
   l1cache_size = 0
   l2cache_size = 0
   if "cache_size" in params:
-    cache_size = params["cache_size"]/1024
+    l1cache_size = params["cache_size"]/1024
   else:
-    cache_size = GEM5_DEFAULTS["cache_size"]/1024
+    l1cache_size = GEM5_DEFAULTS["cache_size"]/1024
   if "l2cache_size" in params:
     l2cache_size = params["l2cache_size"]/1024
-  else:
-    l2cache_size = GEM5_DEFAULTS["l2cache_size"]/1024
   return (int(l1cache_size), int(l2cache_size))
 
 def generate_gem5_config(benchmark, kernel, params, write_new=True):
@@ -302,6 +309,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
 
   trace_file = (
       "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace")
+  config.set(kernel, "memory_type", params["memory_type"])
   config.set(kernel, "input_dir", cur_config_file_dir)
   config.set(kernel, "bench_name",
              "%%(input_dir)s/outputs/%s" % kernel)
@@ -330,6 +338,14 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     # Set TLB bandwidth the same as max(load/store_queue_bw)
     params["tlb_bandwidth"] = min(params["load_bandwidth"],
                                   params["tlb_entries"])
+
+    for key, value in L1CACHE_DEFAULTS.iteritems():
+      if not config.has_option(kernel, key):
+        if key in params:
+          config.set(kernel, key, str(params[key]))
+        else:
+          config.set(kernel, key, str(value))
+
   for key in GEM5_DEFAULTS.iterkeys():
     if key in params and not config.has_option(kernel, key):
       config.set(kernel, key, str(params[key]))
@@ -348,13 +364,19 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     config.set(kernel, "accelerator_deps", str(kernel_id - 1))
   else:
     config.set(kernel, "accelerator_deps", "")
+  if params["experiment_name"]:
+    config.set(kernel, "use_db", "True")
+    config.set(kernel, "experiment_name", params["experiment_name"])
+  else:
+    config.set(kernel, "use_db", "False")
+    config.set(kernel, "experiment_name", "NULL")
 
   mode = "w" if write_new else "a"
   with open(GEM5_CFG, mode) as configfile:
     config.write(configfile)
 
 def generate_configs_recurse(benchmark, set_params, sweep_params,
-          perfect_l1=False):
+                             perfect_l1, enable_l2):
   """ Recursively generate all possible configuration settings.
 
   On each iteration, this function pops a SweepParam object from sweep_params,
@@ -389,7 +411,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     for value in value_range:
       set_params[next_param.name] = value
       generate_configs_recurse(benchmark, set_params, local_sweep_params,
-                                    perfect_l1)
+                               perfect_l1, enable_l2)
   else:
     # All parameters have been populated with values. We can write the
     # configuration now.
@@ -411,13 +433,14 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
                                             set_params["load_bandwidth"],
                                             set_params["load_queue_size"])
       else:
-        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d"
+        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d_line_%d"
         config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                             set_params["unrolling"],
                                             set_params["tlb_entries"],
                                             set_params["load_bandwidth"],
                                             set_params["load_queue_size"],
-                                            set_params["cache_size"])
+                                            set_params["cache_size"],
+                                            set_params["cache_line_sz"])
     if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
       return
     print "  Configuration %s" % config_name
@@ -435,7 +458,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
         kernel_setup[kernel] = [
             loop for loop in benchmark.loops if loop.name == kernel]
     else:
-      kernel_setup = {ALADDIN_CFG: benchmark.loops}
+      kernel_setup = {benchmark.name: benchmark.loops}
     new_gem5_config = True
     for kernel, loops in kernel_setup.iteritems():
       generate_aladdin_config(benchmark, kernel, set_params, loops)
@@ -443,9 +466,15 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
       if set_params["memory_type"] == "cache":
         generate_all_cacti_configs(benchmark.name, kernel, set_params)
       new_gem5_config = False
+    # L2 cache.
+    if enable_l2:
+      l2cache_params = dict(set_params)
+      l2cache_params["cache_size"] = set_params["l2cache_size"]
+      write_cacti_config(benchmark.name, l2cache_params)
     os.chdir("..")
 
-def generate_all_configs(benchmark, memory_type, perfect_l1=False):
+def generate_all_configs(
+    benchmark, memory_type, experiment_name, perfect_l1, enable_l2):
   """ Generates all the possible configurations for the design sweep. """
   if memory_type == "spad" or memory_type == "dma":
     all_sweep_params = [pipelining,
@@ -463,26 +492,31 @@ def generate_all_configs(benchmark, memory_type, perfect_l1=False):
       all_sweep_params = [pipelining,
                           unrolling,
                           tlb_entries,
+                          tlb_bandwidth,
                           load_bandwidth,
                           load_queue_size,
+                          cache_hit_latency,
                           cache_assoc,
-                          l2cache_size,
+                          cache_line_sz,
                           cache_size]
   # This dict stores a single configuration.
-  params = {"memory_type": memory_type}
+  params = {"memory_type": memory_type, "experiment_name": experiment_name}
   # Recursively generate all possible configurations.
   print benchmark.kernels
   generate_configs_recurse(benchmark, params, all_sweep_params,
-                           perfect_l1)
+                           perfect_l1, enable_l2)
 
-def write_config_files(benchmark, output_dir, memory_type, perfect_l1=False):
+def write_config_files(benchmark, output_dir, memory_type,
+                       experiment_name=None, perfect_l1=False,
+                       enable_l2=False):
   """ Create the directory structure and config files for a benchmark. """
   # This assumes we're already in output_dir.
   if not os.path.exists(benchmark.name):
     os.makedirs(benchmark.name)
   print "Generating configurations for %s" % benchmark.name
   os.chdir(benchmark.name)
-  generate_all_configs(benchmark, memory_type, perfect_l1)
+  generate_all_configs(
+      benchmark, memory_type, experiment_name, perfect_l1, enable_l2)
   os.chdir("..")
 
 def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False,
@@ -537,6 +571,7 @@ def run_sweeps(workload, output_dir, dry_run=False, enable_l2=False,
     configs = [file for file in os.listdir(bmk_dir)
                if os.path.isdir("%s/%s" % (bmk_dir, file))]
     for config in configs:
+      config_path = "%s/%s" % (bmk_dir, config)
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
       if not os.path.exists(abs_cfg_path):
         continue
@@ -757,6 +792,9 @@ def main():
       "Simulations will not be executed, but a convenience Bash script will be "
       "written to each config directory so the user can run that config "
       "simulation manually.")
+  parser.add_argument("--experiment_name", help="Store the final Aladdin "
+      "summary data into a database under this experiment name, which is an "
+      "identifier for a set of related simulations.")
   parser.add_argument("--username", help="Username for the Condor scripts. If "
       "this is not provided, Python will try to figure it out.")
   parser.add_argument("--enable_l2", action="store_true", help="Enable the L2 "
@@ -796,7 +834,8 @@ def main():
     os.chdir(args.output_dir)
     for benchmark in workload:
       write_config_files(benchmark, args.output_dir, args.memory_type,
-          perfect_l1=args.perfect_l1)
+                         experiment_name=args.experiment_name,
+                         perfect_l1=args.perfect_l1, enable_l2=args.enable_l2)
     os.chdir(current_dir)
 
   if args.mode == "trace" or args.mode == "all":

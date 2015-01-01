@@ -194,7 +194,7 @@ termcap = get_termcap(GetOption('use_colors'))
 # export TERM so that clang reports errors in color
 use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
                  'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PYTHONPATH',
-                 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT'])
+                 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT', 'MYSQL_HOME'])
 
 use_prefixes = [
     "M5",           # M5 configuration (e.g., path to kernels)
@@ -214,8 +214,8 @@ main.Decider('MD5-timestamp')
 main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
 #FIXME
-main.Append(CPPPATH=use_env['BOOST_ROOT'])
-main.Append(LINKFLAGS='-lboost_graph -lboost_regex')
+main.Append(CPPPATH=[use_env['BOOST_ROOT'], use_env['MYSQL_HOME']])
+main.Append(LINKFLAGS='-lboost_graph -lboost_regex -lmysqlcppconn')
 #FIXME
 main_dict_keys = main.Dictionary().keys()
 
