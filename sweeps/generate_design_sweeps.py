@@ -556,7 +556,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
   else:
     run_cmd = ("%(aladdin_home)s/common/aladdin "
                "%(output_path)s/%(benchmark_name)s "
-               "%(bmk_dir)s/inputs/dynamic_trace "
+               "%(bmk_dir)s/inputs/%(trace_name)s_trace "
                "%(config_path)s/%(benchmark_name)s.cfg")
   os.chdir("..")
   # TODO: Since the L2 cache is such an important flag, I'm hardcoding in a few
@@ -596,11 +596,25 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                          "mem_flag": mem_flag,
                          "perfect_l1_flag" : perfect_l1_flag}
       else:
-        cmd = run_cmd % {"aladdin_home": os.environ["ALADDIN_HOME"],
-                         "benchmark_name": benchmark.name,
-                         "output_path": abs_output_path,
-                         "bmk_dir": bmk_dir,
-                         "config_path": config_path}
+        if benchmark.separate_kernels:
+          # If the workload has separated kernels, we need to run Aladdin on
+          # each of the kernels.
+          for kernel in benchmark.kernels:
+              cmd = cmd + "\n" + run_cmd % {
+                "aladdin_home": os.environ["ALADDIN_HOME"],
+                "benchmark_name": kernel,
+                "trace_name": kernel,
+                "output_path": abs_output_path,
+                "bmk_dir": bmk_dir,
+                "config_path": config_path}
+        else:
+          cmd = run_cmd % {"aladdin_home": os.environ["ALADDIN_HOME"],
+                           "benchmark_name": benchmark.name,
+                           "trace_name": "dynamic",
+                           "output_path": abs_output_path,
+                           "bmk_dir": bmk_dir,
+                           "config_path": config_path}
+
       # Create a run.sh convenience script in this directory so that we can
       # quickly run a single config.
       run_script = open("%s/%s/%s" % (bmk_dir, config, file_name), "wb")
