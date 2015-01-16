@@ -63,4 +63,23 @@ sift.add_loop("imsmooth_worker", 101, UNROLL_ONE)
 sift.add_loop("imsmooth_worker", 103)
 sift.use_local_makefile()
 
-CORTEXSUITE = [disparity, localization, sift]
+# for sqcif: srtdPnts: 1632, suppressR: 544, supId: 544, tempp: 1632, temps: 544 interestPnts: 1632
+# for sim: srtdPnts: 27, suppressR: 9, supId: 9, tempp: 27, temps: 9 interestPnts: 27
+stitch = Benchmark("stitch", "stitch/src/c/script_stitch")
+stitch.set_kernels(["getANMS_worker"])
+stitch.add_array("srtdPnts", 27, 4, PARTITION_CYCLIC)
+stitch.add_array("suppressR", 9, 4, PARTITION_CYCLIC)
+stitch.add_array("supId", 9, 4, PARTITION_CYCLIC)
+stitch.add_array("tempp", 27, 4, PARTITION_CYCLIC)
+stitch.add_array("temps", 9, 4, PARTITION_CYCLIC)
+stitch.add_array("interestPnts", 27, 4, PARTITION_CYCLIC)
+stitch.add_array("validCount", 1, 4, PARTITION_COMPLETE)
+stitch.add_array("num_interest_pts", 1, 4, PARTITION_COMPLETE)
+stitch.add_loop("getANMS_worker", 121)
+stitch.add_loop("getANMS_worker", 142)
+stitch.add_loop("getANMS_worker", 157)
+stitch.add_loop("getANMS_worker", 180)
+stitch.add_loop("getANMS_worker", 193)
+stitch.use_local_makefile()
+
+CORTEXSUITE = [disparity, localization, sift, stitch]
