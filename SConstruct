@@ -182,6 +182,8 @@ AddLocalOption('--update-ref', dest='update_ref', action='store_true',
                help='Update test reference outputs')
 AddLocalOption('--verbose', dest='verbose', action='store_true',
                help='Print full tool command lines')
+AddLocalOption('--use_db', dest='use_db', action='store_true',
+               help='Compile with support for writing to MySQL DB.')
 
 termcap = get_termcap(GetOption('use_colors'))
 
@@ -214,8 +216,14 @@ main.Decider('MD5-timestamp')
 main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
 #FIXME
-main.Append(CPPPATH=[use_env['BOOST_ROOT'], use_env['MYSQL_HOME']])
-main.Append(LINKFLAGS='-lboost_graph -lboost_regex -lmysqlcppconn')
+main.Append(CPPPATH=[use_env['BOOST_ROOT']])
+main.Append(LINKFLAGS='-lboost_graph -lboost_regex')
+
+if GetOption('use_db'):
+  main.Append(CPPPATH=[use_env['MYSQL_HOME']])
+  main.Append(CPPPATH='-DUSE_DB')
+  main.Append(LINKFLAGS='-L%s -lmysqlcppconn' % use_env['MYSQL_HOME'])
+
 #FIXME
 main_dict_keys = main.Dictionary().keys()
 
