@@ -520,7 +520,7 @@ def write_config_files(benchmark, output_dir, memory_type,
   os.chdir("..")
 
 def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
-               perfect_l1=False):
+               perfect_l1=False, experiment_name=None):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -535,6 +535,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
     dry_run: True for a dry run.
     enable_l2: Use a shared L2 last level cache.
     perfect_l1: Use a perfect L1 cache.
+    experiment_name: Label the experiment in the database if using the DB.
   """
   cwd = os.getcwd()
   gem5_home = cwd.split("sweeps")[0]
@@ -557,7 +558,8 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
     run_cmd = ("%(aladdin_home)s/common/aladdin "
                "%(output_path)s/%(benchmark_name)s "
                "%(bmk_dir)s/inputs/%(trace_name)s_trace "
-               "%(config_path)s/%(benchmark_name)s.cfg")
+               "%(config_path)s/%(benchmark_name)s.cfg "
+               "%(experiment_name)s")
   os.chdir("..")
   # TODO: Since the L2 cache is such an important flag, I'm hardcoding in a few
   # parameters specific to it so we can quickly run experiments with and without
@@ -596,6 +598,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                          "mem_flag": mem_flag,
                          "perfect_l1_flag" : perfect_l1_flag}
       else:
+        experiment_name = "" if None else experiment_name
         if benchmark.separate_kernels:
           # If the workload has separated kernels, we need to run Aladdin on
           # each of the kernels.
@@ -606,14 +609,16 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                 "trace_name": kernel,
                 "output_path": abs_output_path,
                 "bmk_dir": bmk_dir,
-                "config_path": config_path}
+                "config_path": config_path,
+                "experiment_name": experiment_name}
         else:
           cmd = run_cmd % {"aladdin_home": os.environ["ALADDIN_HOME"],
                            "benchmark_name": benchmark.name,
                            "trace_name": "dynamic",
                            "output_path": abs_output_path,
                            "bmk_dir": bmk_dir,
-                           "config_path": config_path}
+                           "config_path": config_path,
+                           "experiment_name": experiment_name}
 
       # Create a run.sh convenience script in this directory so that we can
       # quickly run a single config.
@@ -667,6 +672,8 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
   os.environ["WORKLOAD"] = ",".join(benchmark.kernels)
   if benchmark.separate_kernels:
     os.environ["SPLIT_TRACE"] = "1"
+  else:
+    del os.environ["SPLIT_TRACE"]
   os.chdir(os.path.dirname(source_file_loc))
   os.system("make autotrace")
   os.chdir(cwd)
@@ -757,10 +764,12 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       os.chdir(cwd)
 
 def generate_condor_scripts(workload, simulator, output_dir, username,
-                            enable_l2=False, perfect_l1=False):
+                            enable_l2=False, perfect_l1=False,
+                            experiment_name=None):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
-  run_sweeps(workload, simulator, output_dir, True, enable_l2, perfect_l1)
+  run_sweeps(workload, simulator, output_dir, True, enable_l2, perfect_l1,
+             experiment_name)
   cwd = os.getcwd()
   os.chdir("..")
   basicCondor = [
@@ -811,9 +820,9 @@ def main():
       "Run mode. \"configs\" will generate all possible configurations for the "
       "desired sweep. \"trace\" will build dynamic traces for all benchmarks. "
       "\"run\" will run the generated design sweep for a benchmark suite. "
-      "\"all\" will do all of the above in that order. \"condor\" will write a "
-      "condor job script for the complete design sweep, but this mode is not "
-      "included in \"all\".")
+      "\"condor\" will write a condor job script for the complete design sweep."
+      " \"all\" will do all of the above EXCEPT for actually running the "
+      "experiment. ")
   parser.add_argument("--output_dir", required=True, help="Config output "
                       "directory. Required for all modes.")
   parser.add_argument("--memory_type", help="\"cache\" or \"spad\" or \"dma\". "
@@ -858,6 +867,9 @@ def main():
     print "Invalid benchmark provided!"
     exit(1)
 
+  if args.mode == "all":
+    args.dry = True
+
   if args.mode == "configs" or args.mode == "all":
     if (not args.memory_type or
         not args.benchmark_suite):
@@ -885,15 +897,16 @@ def main():
     generate_traces(
         workload, args.output_dir, args.source_dir, args.memory_type)
 
-  if args.mode == "run" or args.mode == "all":
+  if args.mode == "run":
     if not args.benchmark_suite:
       print "Missing benchmark_suite parameter! See help documentation (-h)"
       exit(1)
     run_sweeps(
         workload, args.simulator, args.output_dir, dry_run=args.dry,
-        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1)
+        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
+        experiment_name=args.experiment_name)
 
-  if args.mode == "condor":
+  if args.mode == "condor" or args.mode == "all":
     if not args.benchmark_suite:
       print "Missing benchmark_suite parameter! See help documentation (-h)"
       exit(1)
@@ -903,7 +916,8 @@ def main():
       print "Username was not specified for Condor. Using %s." % args.username
     generate_condor_scripts(
         workload, args.simulator, args.output_dir, args.username,
-        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1)
+        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
+        experiment_name=args.experiment_name)
 
 if __name__ == "__main__":
   main()
