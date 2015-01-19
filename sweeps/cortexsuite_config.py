@@ -82,4 +82,24 @@ stitch.add_loop("getANMS_worker", 180)
 stitch.add_loop("getANMS_worker", 193)
 stitch.use_local_makefile()
 
-CORTEXSUITE = [disparity, localization, sift, stitch]
+# Input size: sim_fast, 16x16
+# TODO: Some of these F2D and I2D structure array sizes aren't quite right
+# because there is also an height and width member that I'm not yet accounting
+# for. These will add two additional words to the total size.
+# TODO: drand48() may cause some problems.
+texture = Benchmark("texture_synthesis",
+    "texture_synthesis/src/c/script_texture_synthesis")
+texture.set_kernels(["create_candidates_worker"])
+texture.add_array("result", 1026, 4, PARTITION_CYCLIC)
+texture.add_array("target", 1026, 4, PARTITION_CYCLIC)
+texture.add_array("atlas", 2048, 4, PARTITION_CYCLIC)
+texture.add_array("xloopout", 64, 4, PARTITION_COMPLETE)
+texture.add_array("yloopout", 64, 4, PARTITION_COMPLETE)
+texture.add_array("candlistx", 13, 4, PARTITION_COMPLETE)
+texture.add_array("candlisty", 13, 4, PARTITION_COMPLETE)
+texture.add_loop("create_candidates_worker", 182, UNROLL_ONE)
+texture.add_loop("create_candidates_worker", 184)
+texture.add_loop("create_candidates_worker", 209)
+texture.use_local_makefile()
+
+CORTEXSUITE = [disparity, localization, sift, stitch, texture]
