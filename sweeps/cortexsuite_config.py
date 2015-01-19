@@ -82,11 +82,7 @@ stitch.add_loop("getANMS_worker", 180)
 stitch.add_loop("getANMS_worker", 193)
 stitch.use_local_makefile()
 
-# Input size: sim_fast, 16x16
-# TODO: Some of these F2D and I2D structure array sizes aren't quite right
-# because there is also an height and width member that I'm not yet accounting
-# for. These will add two additional words to the total size.
-# TODO: drand48() may cause some problems.
+# Input size: sim_fast (16x16)
 texture = Benchmark("texture_synthesis",
     "texture_synthesis/src/c/script_texture_synthesis")
 texture.set_kernels(["create_candidates_worker"])
