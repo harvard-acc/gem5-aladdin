@@ -559,6 +559,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                "%(output_path)s/%(benchmark_name)s "
                "%(bmk_dir)s/inputs/%(trace_name)s_trace "
                "%(config_path)s/%(benchmark_name)s.cfg "
+               "%(cycle_time)f "
                "%(experiment_name)s "
                "> %(output_path)s/stdout 2> %(output_path)s/stderr")
   os.chdir("..")
@@ -612,6 +613,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                 "output_path": abs_output_path,
                 "bmk_dir": bmk_dir,
                 "config_path": config_path,
+                "cycle_time" : GEM5_DEFAULTS["cycle_time"],
                 "experiment_name": experiment_name}
         else:
           cmd = run_cmd % {"aladdin_home": os.environ["ALADDIN_HOME"],
@@ -620,6 +622,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                            "output_path": abs_output_path,
                            "bmk_dir": bmk_dir,
                            "config_path": config_path,
+                           "cycle_time" : GEM5_DEFAULTS["cycle_time"],
                            "experiment_name": experiment_name}
 
       # Create a run.sh convenience script in this directory so that we can
