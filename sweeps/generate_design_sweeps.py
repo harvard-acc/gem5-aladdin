@@ -559,7 +559,8 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                "%(output_path)s/%(benchmark_name)s "
                "%(bmk_dir)s/inputs/%(trace_name)s_trace "
                "%(config_path)s/%(benchmark_name)s.cfg "
-               "%(experiment_name)s")
+               "%(experiment_name)s "
+               "> %(output_path)s/stdout 2> %(output_path)s/stderr")
   os.chdir("..")
   # TODO: Since the L2 cache is such an important flag, I'm hardcoding in a few
   # parameters specific to it so we can quickly run experiments with and without
@@ -598,7 +599,8 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                          "mem_flag": mem_flag,
                          "perfect_l1_flag" : perfect_l1_flag}
       else:
-        experiment_name = "" if None else experiment_name
+        if not experiment_name:
+          experiment_name = ""
         if benchmark.separate_kernels:
           # If the workload has separated kernels, we need to run Aladdin on
           # each of the kernels.
@@ -672,7 +674,7 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
   os.environ["WORKLOAD"] = ",".join(benchmark.kernels)
   if benchmark.separate_kernels:
     os.environ["SPLIT_TRACE"] = "1"
-  else:
+  elif "SPLIT_TRACE" in os.environ:
     del os.environ["SPLIT_TRACE"]
   os.chdir(os.path.dirname(source_file_loc))
   os.system("make autotrace")
