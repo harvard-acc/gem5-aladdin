@@ -6,7 +6,13 @@ import math
 import os
 import sys
 
-from sweep_config import *
+try:
+  from sweep_config import *
+except ImportError:
+  sys.exit("ERROR: Missing sweep_config.py.\n"
+           "You must define a sweep_config.py script. Please look at "
+           "sweep_config_example.py for an example and further instructions.")
+
 from shoc_config import SHOC
 from machsuite_config import MACH
 from cortexsuite_config import CORTEXSUITE
@@ -115,6 +121,8 @@ def generate_aladdin_config(benchmark, kernel, params, loops):
   config_file = open("%s.cfg" % kernel, "wb")
   if "pipelining" in params:
     config_file.write("pipelining,%d\n" % params["pipelining"])
+  if "cycle_time" in params:
+    config_file.write("cycle_time,%d\n" % params["cycle_time"])
   # TODO: Currently we're not separating arrays by kernel. This needs to
   # change.
   write_aladdin_array_configs(benchmark, config_file, params)
@@ -347,7 +355,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
           config.set(kernel, key, str(value))
 
   for key in GEM5_DEFAULTS.iterkeys():
-    if key in params and not config.has_option(kernel, key):
+    if key in params:
       config.set(kernel, key, str(params[key]))
 
   # Write the accelerator id and dependencies.
@@ -466,7 +474,6 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
       if set_params["memory_type"] == "cache":
         generate_all_cacti_configs(benchmark.name, kernel, set_params)
       new_gem5_config = False
-    # L2 cache.
     if enable_l2:
       l2cache_params = dict(set_params)
       l2cache_params["cache_size"] = set_params["l2cache_size"]
@@ -479,11 +486,13 @@ def generate_all_configs(
   if memory_type == "spad" or memory_type == "dma":
     all_sweep_params = [pipelining,
                         unrolling,
-                        partition]
+                        partition,
+                        cycle_time]
   elif memory_type == "cache":
     if perfect_l1:
       all_sweep_params = [pipelining,
                           unrolling,
+                          cycle_time,
                           tlb_entries,
                           load_bandwidth,
                           cache_assoc,
@@ -491,6 +500,7 @@ def generate_all_configs(
     else:
       all_sweep_params = [pipelining,
                           unrolling,
+                          cycle_time,
                           tlb_entries,
                           tlb_bandwidth,
                           load_bandwidth,
@@ -559,7 +569,6 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                "%(output_path)s/%(benchmark_name)s "
                "%(bmk_dir)s/inputs/%(trace_name)s_trace "
                "%(config_path)s/%(benchmark_name)s.cfg "
-               "%(cycle_time)f "
                "%(experiment_name)s "
                "> %(output_path)s/stdout 2> %(output_path)s/stderr")
   os.chdir("..")
@@ -613,7 +622,6 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                 "output_path": abs_output_path,
                 "bmk_dir": bmk_dir,
                 "config_path": config_path,
-                "cycle_time" : GEM5_DEFAULTS["cycle_time"],
                 "experiment_name": experiment_name}
         else:
           cmd = run_cmd % {"aladdin_home": os.environ["ALADDIN_HOME"],
@@ -622,7 +630,6 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                            "output_path": abs_output_path,
                            "bmk_dir": bmk_dir,
                            "config_path": config_path,
-                           "cycle_time" : GEM5_DEFAULTS["cycle_time"],
                            "experiment_name": experiment_name}
 
       # Create a run.sh convenience script in this directory so that we can
