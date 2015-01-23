@@ -98,4 +98,16 @@ texture.add_loop("create_candidates_worker", 184)
 texture.add_loop("create_candidates_worker", 209)
 texture.use_local_makefile()
 
-CORTEXSUITE = [disparity, localization, sift, stitch, texture]
+# Input size: sim_fast
+# Note: sim_fast produces a 650MB dynamic trace, which is still workable. The
+# test input results in just 53 cycles of total accelerator execution.
+svm = Benchmark("svm", "svm/src/c/script_svm")
+svm.set_kernels(["cal_learned_func_smart", "polynomial_smart"])
+svm.add_array("X", 5122, 4, PARTITION_CYCLIC)
+svm.add_array("Y", 20, 4, PARTITION_COMPLETE)
+svm.add_array("a", 20, 4, PARTITION_COMPLETE)
+svm.add_loop("polynomial_smart", 47)
+svm.add_loop("cal_learned_func_smart", 46)
+svm.use_local_makefile()
+
+CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm]
