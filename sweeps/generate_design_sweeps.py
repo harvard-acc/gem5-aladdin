@@ -570,7 +570,8 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                "%(bmk_dir)s/inputs/%(trace_name)s_trace "
                "%(config_path)s/%(benchmark_name)s.cfg "
                "%(experiment_name)s "
-               "> %(output_path)s/stdout 2> %(output_path)s/stderr")
+               "> %(output_path)s/%(benchmark_name)s_stdout "
+               "2> %(output_path)s/%(benchmark_name)s_stderr")
   os.chdir("..")
   # TODO: Since the L2 cache is such an important flag, I'm hardcoding in a few
   # parameters specific to it so we can quickly run experiments with and without
