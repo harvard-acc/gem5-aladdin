@@ -110,4 +110,52 @@ svm.add_loop("polynomial_smart", 47)
 svm.add_loop("cal_learned_func_smart", 46)
 svm.use_local_makefile()
 
-CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm]
+# Input size: sim (48x48 = 2304, +2 for extra metadata = 2306).
+# TODO: Some kernels use the same array names, but the required sizes are
+# smaller, so I'm just going to not specify them for now. In the future, we may
+# need to specify array names on a per kernel basis.
+tracking = Benchmark("tracking", "tracking/src/c/script_tracking")
+tracking.set_kernels(["imageBlur_worker", "calcSobel_dY_worker",
+                      "calcSobel_dX_worker", "imageResize_worker",
+                      "calcAreaSum_worker"])
+tracking.add_array("imageIn", 2306, 4, PARTITION_CYCLIC)
+tracking.add_array("imageOut", 2306, 4, PARTITION_CYCLIC)
+tracking.add_array("tempOut", 2306, 4, PARTITION_CYCLIC)
+tracking.add_array("kernel", 5, 4, PARTITION_COMPLETE)
+tracking.add_array("kernel_1", 3, 4, PARTITION_COMPLETE)
+tracking.add_array("kernel_2", 3, 4, PARTITION_COMPLETE)
+tracking.add_array("input", 50, 4, PARTITION_CYCLIC)
+tracking.add_array("src", 2306, 4, PARTITION_CYCLIC)
+tracking.add_array("output", 2306, 4, PARTITION_CYCLIC)
+tracking.add_loop("imageBlur_worker", 52, UNROLL_ONE)
+tracking.add_loop("imageBlur_worker", 53)
+tracking.add_loop("imageBlur_worker", 56)
+tracking.add_loop("imageBlur_worker", 64, UNROLL_ONE)
+tracking.add_loop("imageBlur_worker", 66)
+tracking.add_loop("imageBlur_worker", 69)
+tracking.add_loop("imageResize_worker", 57, UNROLL_ONE)
+tracking.add_loop("imageResize_worker", 60)
+tracking.add_loop("imageResize_worker", 63)
+tracking.add_loop("imageResize_worker", 73, UNROLL_ONE)
+tracking.add_loop("imageResize_worker", 75)
+tracking.add_loop("imageResize_worker", 78)
+tracking.add_loop("calcSobel_dX_worker", 63, UNROLL_ONE)
+tracking.add_loop("calcSobel_dX_worker", 65)
+tracking.add_loop("calcSobel_dX_worker", 68)
+tracking.add_loop("calcSobel_dX_worker", 76, UNROLL_ONE)
+tracking.add_loop("calcSobel_dX_worker", 78)
+tracking.add_loop("calcSobel_dX_worker", 81)
+tracking.add_loop("calcSobel_dY_worker", 65, UNROLL_ONE)
+tracking.add_loop("calcSobel_dY_worker", 67)
+tracking.add_loop("calcSobel_dY_worker", 70)
+tracking.add_loop("calcSobel_dY_worker", 78, UNROLL_ONE)
+tracking.add_loop("calcSobel_dY_worker", 80)
+tracking.add_loop("calcSobel_dY_worker", 83)
+tracking.add_loop("calcAreaSum_worker", 63, UNROLL_ONE)
+tracking.add_loop("calcAreaSum_worker", 65, UNROLL_FLATTEN)
+tracking.add_loop("calcAreaSum_worker", 70, UNROLL_FLATTEN)
+tracking.add_loop("calcAreaSum_worker", 73, UNROLL_FLATTEN)
+tracking.generate_separate_kernels(separate=True, enforce_order=False)
+tracking.use_local_makefile()
+
+CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm, tracking]
