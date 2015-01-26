@@ -85,6 +85,10 @@ def write_aladdin_array_configs(benchmark, config_file, params):
         exit(1)
 
 def write_benchmark_specific_configs(benchmark, config_file, params):
+  """ Writes benchmark specific loop configurations.
+
+  Returns True if configurations were affected, False otherwise.
+  """
   # md-grid specific unrolling config
   if benchmark.name == "md-grid":
     config_file.write("unrolling,md,46,1\n")
@@ -99,6 +103,7 @@ def write_benchmark_specific_configs(benchmark, config_file, params):
     elif params["unrolling"] <=16:
       config_file.write("unrolling,md,56,%d\n" %(params["unrolling"]/4))
       config_file.write("flatten,md,62\n")
+    return True
   # md-knn specific unrolling config
   elif benchmark.name == "md-knn":
     if params["unrolling"] <= 16:
@@ -107,6 +112,8 @@ def write_benchmark_specific_configs(benchmark, config_file, params):
     else:
       config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]/16))
       config_file.write("flatten,md,58\n")
+    return True
+  return False
 
 def generate_aladdin_config(benchmark, kernel, params, loops):
   """ Write an Aladdin configuration file for the specified parameters.
@@ -126,22 +133,24 @@ def generate_aladdin_config(benchmark, kernel, params, loops):
   # TODO: Currently we're not separating arrays by kernel. This needs to
   # change.
   write_aladdin_array_configs(benchmark, config_file, params)
-  write_benchmark_specific_configs(benchmark, config_file, params)
+  specific_configs = write_benchmark_specific_configs(
+      benchmark, config_file, params)
 
-  for loop in loops:
-    if loop.trip_count == UNROLL_FLATTEN:
-      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
-    elif loop.trip_count == UNROLL_ONE:
-      config_file.write("unrolling,%s,%d,%d\n" %
-                        (loop.name, loop.line_num, loop.trip_count))
-    elif (loop.trip_count == ALWAYS_UNROLL or
-          params["unrolling"] < loop.trip_count):
-      # We only unroll if it was specified to always unroll or if the loop's
-      # trip count is greater than the current unrolling factor.
-      config_file.write("unrolling,%s,%d,%d\n" %
-                        (loop.name, loop.line_num, params["unrolling"]))
-    elif params["unrolling"] >= loop.trip_count:
-      config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
+  if not specific_configs:
+    for loop in loops:
+      if loop.trip_count == UNROLL_FLATTEN:
+        config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
+      elif loop.trip_count == UNROLL_ONE:
+        config_file.write("unrolling,%s,%d,%d\n" %
+                          (loop.name, loop.line_num, loop.trip_count))
+      elif (loop.trip_count == ALWAYS_UNROLL or
+            params["unrolling"] < loop.trip_count):
+        # We only unroll if it was specified to always unroll or if the loop's
+        # trip count is greater than the current unrolling factor.
+        config_file.write("unrolling,%s,%d,%d\n" %
+                          (loop.name, loop.line_num, params["unrolling"]))
+      elif params["unrolling"] >= loop.trip_count:
+        config_file.write("flatten,%s,%d\n" % (loop.name, loop.line_num))
   config_file.close()
 
 def write_cacti_config(config_file, params):
