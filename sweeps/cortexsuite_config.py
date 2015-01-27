@@ -158,4 +158,19 @@ tracking.add_loop("calcAreaSum_worker", 73, UNROLL_FLATTEN)
 tracking.generate_separate_kernels(separate=True, enforce_order=False)
 tracking.use_local_makefile()
 
-CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm, tracking]
+# Input size: test (18x24). Smallest available, yet it still generates a 4GB
+# dynamic trace!
+multi_ncut = Benchmark("multi_ncut", "multi_ncut/src/c/script_multi_ncut")
+multi_ncut.set_kernels(["fSortIndices_worker"])
+multi_ncut.add_array("in", 1606, 4, PARTITION_CYCLIC)
+multi_ncut.add_array("ind", 1606, 4, PARTITION_CYCLIC)
+multi_ncut.add_loop("fSortIndices_worker", 39, UNROLL_ONE)
+multi_ncut.add_loop("fSortIndices_worker", 41)
+multi_ncut.add_loop("fSortIndices_worker", 46)
+multi_ncut.add_loop("fSortIndices_worker", 59, UNROLL_ONE)
+multi_ncut.add_loop("fSortIndices_worker", 61)
+multi_ncut.add_loop("fSortIndices_worker", 66)
+multi_ncut.use_local_makefile()
+
+CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm, tracking,
+               multi_ncut]
