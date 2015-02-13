@@ -61,6 +61,7 @@ class Benchmark(object):
     self.loops = []
     self.arrays = []
     self.kernels = []
+    self.main_id = 0
     # Test harness, if applicable. If used, test_harness is assumed to contain
     # main(); otherwise, source_file is used, and test_harness MUST be the empty
     # string "".
@@ -99,6 +100,13 @@ class Benchmark(object):
     """
     self.kernels = kernels
 
+  def set_main_id(self, main_id):
+    """ Set the starting accelerator code or ioctl request code.
+
+    See src/aladdin/gem5/aladdin_ioctl_req.cpp for more details.
+    """
+    self.main_id = main_id
+
   def set_test_harness(self, test_harness):
     self.test_harness = test_harness
 
@@ -116,7 +124,7 @@ class Benchmark(object):
     """
     for i in range(0, len(self.kernels)):
       if self.kernels[i] == kernel:
-        return i
+        return self.main_id - i
     return -1
 
 if __name__ == "__main__":
