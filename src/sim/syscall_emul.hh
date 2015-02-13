@@ -69,6 +69,9 @@
 #include "sim/syscallreturn.hh"
 #include "sim/system.hh"
 
+#include "aladdin/gem5/aladdin_ioctl.h"
+#include "aladdin/gem5/aladdin_ioctl_req.h"
+
 ///
 /// System call descriptor.
 ///
@@ -583,16 +586,26 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
     unsigned req = process->getSyscallArg(tc, index);
+    Addr finish_flag = (Addr) process->getSyscallArg(tc, index);
 
     DPRINTF(SyscallVerbose, "ioctl(%d, 0x%x, ...)\n", fd, req);
 
-    if (fd < 0 || process->sim_fd(fd) < 0) {
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD) {
         // doesn't map to any simulator fd: not a valid target fd
         return -EBADF;
     }
 
     if (OS::isTtyReq(req)) {
         return -ENOTTY;
+    }
+
+    if (ALADDIN::isValidRequestCode(req)) {
+      // Translate the finish flag pointer to a physical address that Aladdin
+      // will write to when execution is completed.
+      Addr paddr;
+      process->pTable->translate(finish_flag, paddr);
+      process->system->activateAccelerator(req, paddr);
+      return -ENOTTY;
     }
 
     warn("Unsupported ioctl call: ioctl(%d, 0x%x, ...) @ \n",

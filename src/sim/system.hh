@@ -63,6 +63,9 @@
 #include "mem/physical.hh"
 #include "params/System.hh"
 
+#include "aladdin/gem5/Gem5Datapath.h"
+#include "debug/Aladdin.hh"
+
 class BaseCPU;
 class BaseRemoteGDB;
 class GDBListener;
@@ -191,14 +194,6 @@ class System : public MemObject
     std::vector<ThreadContext *> threadContexts;
     int _numContexts;
 
-    /* TODO: Hacky way to implement multiple dependent accelerators.
-     * This map specifies the set of accelerators that another accelerator
-     * depends on. Only when an accelerator's dependencies have completed can it
-     * proceed with execution. The size of the map is the number of executing
-     * accelerators.
-     */
-    std::map<int, std::vector<int> > _accelerator_deps;
-
     ThreadContext *getThreadContext(ThreadID tid)
     {
         return threadContexts[tid];
@@ -210,28 +205,53 @@ class System : public MemObject
         return _numContexts;
     }
 
+    /* Stores a pointer to a datapath object with any dependencies (other
+     * accelerators that must finish execution before this accelerator an
+     * execute) the accelerator has. When the acclerator is finished, a sentinel
+     * value will be written to the address specified by finish_flag.
+     */
+    class AccelData {
+        public:
+            AccelData(Gem5Datapath* _datapath,
+                      std::vector<int> _deps,
+                      Addr _finish_flag = 0)
+              : datapath(_datapath),
+                deps(_deps),
+                finish_flag(_finish_flag) {}
+
+            Gem5Datapath* datapath;
+            std::vector<int> deps;
+            Addr finish_flag;
+    };
+
+    /* Maps an accelerator id to an AccelData object. The id can be an IOCTL
+     * request code. When gem5 intercepts the ioctl syscall, it will schedule
+     * the accelerator given by the request code for execution.  This map
+     * specifies the set of accelerators that another accelerator depends on.
+     * Only when an accelerator's dependencies have completed can it proceed
+     * with execution. The size of the map is the number of executing
+     * accelerators.
+     */
+    std::map<int, AccelData*> accelerators;
+
     /* Returns the number of accelerators that are currently registered and
      * running in the system.
      */
     int numRunningAccelerators()
     {
-        return _accelerator_deps.size();
+        return accelerators.size();
     }
 
-    /**
-     * Registers an accelerator and its dependencies. Returns -1 if the
-     * accelerator has already been registered, and 0 if successful.
+    /* Registers the datapath pointer and list of dependencies with the system.
+     * Returns -1 if the accelerator id already exists, 0 otherwise.
      */
-    int registerAcceleratorStart(int _accel_id, std::vector<int> _accel_deps)
+    int registerAccelerator(
+        int id, Gem5Datapath* accelerator, std::vector<int> accel_deps)
     {
-        if (_accelerator_deps.find(_accel_id) != _accelerator_deps.end())
+        if (accelerators.find(id) != accelerators.end())
             return -1;
-        _accelerator_deps[_accel_id] = _accel_deps;
-        std::cerr << "Registered accelerator " << _accel_id
-                  << " with dependencies ";
-        for (auto it = _accel_deps.begin(); it != _accel_deps.end(); ++it)
-            std::cerr << *it << " ";
-        std::cerr << std::endl;
+        accelerators[id] = new AccelData(accelerator, accel_deps);
+        DPRINTF(Aladdin, "Registered accelerator %d\n", id);
         return 0;
     }
 
@@ -240,13 +260,34 @@ class System : public MemObject
      * was not previously registered with the system. Upon successful
      * completion, returns 0.
      */
-    int registerAcceleratorExit(int _accel_id)
+    int deregisterAccelerator(int id)
     {
-         if (_accelerator_deps.find(_accel_id) == _accelerator_deps.end())
-             return -1;
-         std::cerr << "Deregistered accelerator " << _accel_id << std::endl;
-         _accelerator_deps.erase(_accel_id);
-         return 0;
+        if (accelerators.find(id) == accelerators.end())
+            return -1;
+        delete accelerators[id]->datapath;
+        delete accelerators[id];
+        accelerators.erase(id);
+        return 0;
+    }
+
+    void registerAcceleratorFinishFlag(int accel_id, Addr finish_flag)
+    {
+        accelerators[accel_id]->finish_flag = finish_flag;
+    }
+
+    Addr getFinishedFlag(int accel_id)
+    {
+        return accelerators[accel_id]->finish_flag;
+    }
+
+    /* Adds the specified accelerator to the event queue with a given number of
+     * delay cycles (to emulate software overhead during invocation).
+     */
+    void scheduleAccelerator(int id, int delay)
+    {
+        Gem5Datapath *datapath = accelerators[id]->datapath;
+        datapath->scheduleOnEventQueue(delay);
+        DPRINTF(Aladdin, "Scheduling accelerator %d\n", id);
     }
 
     /**
@@ -255,18 +296,24 @@ class System : public MemObject
      */
     int numAcceleratorDepsRemaining(int accel_id)
     {
-        if (_accelerator_deps.find(accel_id) == _accelerator_deps.end())
+        if (accelerators.find(accel_id) == accelerators.end())
             return -1;
-        std::vector<int> deps = _accelerator_deps[accel_id];
+        std::vector<int> deps = accelerators[accel_id]->deps;
         int num_deps_remaining = deps.size();
         for (int i = 0; i < deps.size(); i ++)
         {
             // If the dependency is not in the list of running accelerators,
             // then it has been satisfied.
-            if (_accelerator_deps.find(deps[i]) == _accelerator_deps.end())
+            if (accelerators.find(deps[i]) == accelerators.end())
                 num_deps_remaining --;
         }
         return num_deps_remaining;
+    }
+
+    void activateAccelerator(unsigned req, Addr finish_flag) {
+        DPRINTF(Aladdin, "Activating accelerator id %d\n", req);
+        registerAcceleratorFinishFlag(req, finish_flag);
+        scheduleAccelerator(req, 1);
     }
 
     /** Return number of running (non-halted) thread contexts in

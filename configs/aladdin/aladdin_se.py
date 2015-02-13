@@ -182,6 +182,10 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
 
 if np > 0:
   system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
+
+for cpu in system.cpu:
+    cpu.clk_domain = system.cpu_clk_domain
+
 if options.aladdin_cfg_file:
   config = ConfigParser.SafeConfigParser()
   config.read(options.aladdin_cfg_file)
@@ -191,9 +195,15 @@ if options.aladdin_cfg_file:
   datapaths = []
   for accel in accels:
     memory_type = config.get(accel, 'memory_type').lower()
+    # Accelerators need their own clock domain!
+    cycleTime = config.getint(accel, "cycle_time")
+    clock = "%1.3fGHz" % (1/cycleTime)
+    clk_domain = SrcClockDomain(
+        clock = clock, voltage_domain = system.cpu_voltage_domain)
     if memory_type == "cache":
       options.cacheline_size = config.getint(accel, "cache_line_sz")
-      datapaths.append(CacheDatapath(clk_domain = system.cpu_clk_domain,
+      datapaths.append(CacheDatapath(
+          clk_domain = clk_domain,
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
@@ -206,7 +216,7 @@ if options.aladdin_cfg_file:
           cacheLineSize = config.getint(accel, "cache_line_sz"),
           l2cacheSize = config.get(accel, "l2cache_size"),
           cactiCacheConfig = config.get(accel, "cacti_cache_config"),
-          cycleTime = config.getint(accel, "cycle_time"),
+          cycleTime = cycleTime,
           tlbEntries = config.getint(accel, "tlb_entries"),
           tlbAssoc = config.getint(accel, "tlb_assoc"),
           tlbHitLatency = config.getint(accel, "tlb_hit_latency"),
@@ -224,18 +234,22 @@ if options.aladdin_cfg_file:
           storeQueueCacheConfig = config.get(accel, "cacti_sq_config"),
           tlbBandwidth = config.getint(accel, "tlb_bandwidth"),
           useDb = config.getboolean(accel, "use_db"),
-          experimentName = config.get(accel, "experiment_name")))
+          experimentName = config.get(accel, "experiment_name"),
+          executeStandalone = (np == 0)))
     elif memory_type == "spad" or memory_type == "dma":
-      datapaths.append(DmaScratchpadDatapath(clk_domain = system.cpu_clk_domain,
+      datapaths.append(DmaScratchpadDatapath(
+          clk_domain = clk_domain,
           benchName = config.get(accel, "bench_name"),
           traceFileName = config.get(accel, "trace_file_name"),
           configFileName = config.get(accel, "config_file_name"),
-          cycleTime = config.getint(accel, "cycle_time"),
+          cycleTime = cycleTime,
           spadPorts = config.getint(accel, "spad_ports"),
+          acceleratorId = config.getint(accel, "accelerator_id"),
           dmaSetupLatency = config.getint(accel, "dma_setup_latency"),
           maxDmaRequests = config.getint(accel, "max_dma_requests"),
           useDb = config.getboolean(accel, "use_db"),
-          experimentName = config.get(accel, "experiment_name")))
+          experimentName = config.get(accel, "experiment_name"),
+          executeStandalone = (np == 0)))
     else:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))

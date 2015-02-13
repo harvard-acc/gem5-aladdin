@@ -368,7 +368,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
       config.set(kernel, key, str(params[key]))
 
   # Write the accelerator id and dependencies.
-  kernel_id = 0  # By default.
+  kernel_id = benchmark.main_id  # By default.
   if benchmark.separate_kernels:
     kernel_id = benchmark.get_kernel_id(kernel)
     if kernel_id == -1:
@@ -376,9 +376,9 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
             "%s was not found in the list of kernels." % kernel)
       exit(1)
   config.set(kernel, "accelerator_id", str(kernel_id))
-  if benchmark.enforce_order and kernel_id > 0:
+  if benchmark.enforce_order and kernel_id != benchmark.main_id:
     # Kernels depend on the previous kernel, except for the first.
-    config.set(kernel, "accelerator_deps", str(kernel_id - 1))
+    config.set(kernel, "accelerator_deps", str(kernel_id + 1))
   else:
     config.set(kernel, "accelerator_deps", "")
   if params["experiment_name"]:
