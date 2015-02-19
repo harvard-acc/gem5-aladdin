@@ -113,13 +113,26 @@ def config_cache(options, system):
     if options.aladdin_cfg_file:
       for datapath in system.datapaths:
         if isinstance(datapath, CacheDatapath):
-          aladdin_dcache = dcache_class(clk_domain=system.cpu_clk_domain,
-                                size=str(datapath.cacheSize),
-                                assoc=datapath.cacheAssoc,
-                                hit_latency=datapath.cacheHitLatency,
-                                response_latency=datapath.cacheHitLatency,
-                                is_perfect_cache=options.is_perfect_cache)
+          aladdin_dcache = dcache_class(
+              clk_domain=datapath.clk_domain,
+              size=str(datapath.cacheSize),
+              assoc=datapath.cacheAssoc,
+              hit_latency=datapath.cacheHitLatency,
+              response_latency=datapath.cacheHitLatency,
+              is_perfect_cache=options.is_perfect_cache)
           datapath.addPrivateL1Dcache(aladdin_dcache)
+        elif isinstance(datapath, DmaScratchpadDatapath):
+          # Pretty arbitrary parameters, but this is just supposed to be used
+          # for communicating tiny amounts of shared data (e.g. CPU-bound
+          # synchronization messages).
+          io_cache = dcache_class(
+              clk_domain=datapath.clk_domain,
+              size="64B",
+              assoc=1,
+              hit_latency=1,
+              response_latency=1,
+              is_perfect_cache=False)
+          datapath.addIOCache(io_cache)
         if options.l2cache:
           datapath.connectAllPorts(system.tol2bus, system.membus)
         else:
