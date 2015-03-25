@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "arch/registers.hh"
+#include "base/loader/object_file.hh"
 #include "base/statistics.hh"
 #include "base/types.hh"
 #include "config/the_isa.hh"
@@ -310,6 +311,8 @@ class LiveProcess : public Process
     }
 
     std::string getcwd() const { return cwd; }
+
+    ObjectFile::Arch getObjectFileArch() { return objFile->getArch(); }
 
     virtual void syscall(int64_t callnum, ThreadContext *tc);
 

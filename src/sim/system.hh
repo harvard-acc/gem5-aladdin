@@ -316,6 +316,18 @@ class System : public MemObject
         scheduleAccelerator(req, 1);
     }
 
+    /* Add an address tranlation into the datapath TLB between vaddr and paddr. */
+    void insertArrayMapping(int accel_id, Addr paddr, Addr vaddr) {
+        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+        datapath->insertTLBEntry(vaddr, paddr);
+    }
+
+    /* Get the base trace address of of the array for the specified accelerator. */
+    Addr getArrayBaseAddress(int accel_id, const char* array_name) {
+        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+        return datapath->getBaseAddress(std::string(array_name));
+    }
+
     /** Return number of running (non-halted) thread contexts in
      * system.  These threads could be Active or Suspended. */
     int numRunningContexts();
