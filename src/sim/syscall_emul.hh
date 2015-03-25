@@ -298,13 +298,16 @@ SyscallReturn fchownFunc(SyscallDesc *desc, int num,
 SyscallReturn dupFunc(SyscallDesc *desc, int num,
                       LiveProcess *process, ThreadContext *tc);
 
-/// Target fnctl() handler.
+/// Target fcntl() handler.
 SyscallReturn fcntlFunc(SyscallDesc *desc, int num,
                         LiveProcess *process, ThreadContext *tc);
 
 /// Target fcntl64() handler.
 SyscallReturn fcntl64Func(SyscallDesc *desc, int num,
                         LiveProcess *process, ThreadContext *tc);
+
+// Aladdin handler function shared between 32-bit and 64-bit fcntl emulations.
+void fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc);
 
 /// Target setuid() handler.
 SyscallReturn setuidFunc(SyscallDesc *desc, int num,

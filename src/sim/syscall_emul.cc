@@ -38,6 +38,7 @@
 
 #include "arch/utility.hh"
 #include "base/chunk_generator.hh"
+#include "base/loader/object_file.hh"
 #include "base/trace.hh"
 #include "config/the_isa.hh"
 #include "cpu/base.hh"
@@ -578,6 +579,56 @@ dupFunc(SyscallDesc *desc, int num, LiveProcess *process, ThreadContext *tc)
         process->alloc_fd(result, fdo->filename, fdo->flags, fdo->mode, false);
 }
 
+void
+fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
+{
+    using namespace ALADDIN;
+    int index = 2;
+    Addr mapping_ptr = (Addr) process->getSyscallArg(tc, index);
+    SETranslatingPortProxy& memProxy = tc->getMemProxy();
+
+    // Deserialize the mapping struct bytes.
+    size_t word_size = 4;
+    if (process->getObjectFileArch() == ObjectFile::X86_64) {
+      word_size = 8;
+    }
+    inform("Handling fcntl() syscall for Aladdin array mapping.\n");
+    uint8_t* mapping_buf = new uint8_t[sizeof(aladdin_map_t)];
+    memProxy.readBlob(mapping_ptr, mapping_buf, sizeof(aladdin_map_t));
+    aladdin_map_t mapping;
+    // Initialize all values to 0 so we avoid garbage from 32-bit to 64-bit
+    // conversions and only keep what we copy.
+    mapping.addr = nullptr;
+    void* array_name_addr = nullptr;
+    mapping.request_code = 0;
+    mapping.size = 0;
+    memcpy(&array_name_addr, &(mapping_buf[0]), word_size);
+    memcpy(&(mapping.addr), &(mapping_buf[word_size]), word_size);
+    memcpy(&(mapping.request_code), &(mapping_buf[2*word_size]), word_size);
+    memcpy(&(mapping.size), &(mapping_buf[3*word_size]), word_size);
+
+    // Extract the array name. Assume the variable name is at most 100 chars.
+    Addr string_addr = (Addr) array_name_addr;
+    uint8_t* string_buf = new uint8_t[100];
+    memProxy.readBlob(string_addr, string_buf, 100);
+    mapping.array_name = (const char*) string_buf;
+
+    inform("Received mapping for array %s at address %x of length %d.\n",
+           mapping.array_name, mapping.addr, mapping.size);
+    int num_pages = ceil(((float)mapping.size) / TheISA::VMPageSize);
+    Addr array_base_addr = process->system->getArrayBaseAddress(
+        mapping.request_code, mapping.array_name);
+    for (int i = 0; i < num_pages; i++) {
+      Addr paddr;
+      process->pTable->translate(
+          (Addr) mapping.addr + i*TheISA::VMPageSize, paddr);
+      process->system->insertArrayMapping(
+          mapping.request_code, paddr, array_base_addr + i*TheISA::VMPageSize);
+    }
+
+    delete mapping_buf;
+    delete string_buf;
+}
 
 SyscallReturn
 fcntlFunc(SyscallDesc *desc, int num, LiveProcess *process,
@@ -586,10 +637,15 @@ fcntlFunc(SyscallDesc *desc, int num, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
 
-    if (fd < 0 || process->sim_fd(fd) < 0)
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD)
         return -EBADF;
 
     int cmd = process->getSyscallArg(tc, index);
+    if (cmd == ALADDIN::MAP_ARRAY) {
+        fcntlAladdinHandler(process, tc);
+        return 0;
+    }
+
     switch (cmd) {
       case 0: // F_DUPFD
         // if we really wanted to support this, we'd need to do it
@@ -629,10 +685,15 @@ fcntl64Func(SyscallDesc *desc, int num, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
 
-    if (fd < 0 || process->sim_fd(fd) < 0)
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD)
         return -EBADF;
 
     int cmd = process->getSyscallArg(tc, index);
+    if (cmd == ALADDIN::MAP_ARRAY) {
+        fcntlAladdinHandler(process, tc);
+        return 0;
+    }
+
     switch (cmd) {
       case 33: //F_GETLK64
         warn("fcntl64(%d, F_GETLK64) not supported, error returned\n", fd);
