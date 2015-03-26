@@ -582,7 +582,6 @@ dupFunc(SyscallDesc *desc, int num, LiveProcess *process, ThreadContext *tc)
 void
 fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
 {
-    using namespace ALADDIN;
     int index = 2;
     Addr mapping_ptr = (Addr) process->getSyscallArg(tc, index);
     SETranslatingPortProxy& memProxy = tc->getMemProxy();
@@ -637,11 +636,11 @@ fcntlFunc(SyscallDesc *desc, int num, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
 
-    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD)
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN_FD)
         return -EBADF;
 
     int cmd = process->getSyscallArg(tc, index);
-    if (cmd == ALADDIN::MAP_ARRAY) {
+    if (cmd == ALADDIN_MAP_ARRAY) {
         fcntlAladdinHandler(process, tc);
         return 0;
     }
@@ -685,11 +684,11 @@ fcntl64Func(SyscallDesc *desc, int num, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
 
-    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD)
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN_FD)
         return -EBADF;
 
     int cmd = process->getSyscallArg(tc, index);
-    if (cmd == ALADDIN::MAP_ARRAY) {
+    if (cmd == ALADDIN_MAP_ARRAY) {
         fcntlAladdinHandler(process, tc);
         return 0;
     }
