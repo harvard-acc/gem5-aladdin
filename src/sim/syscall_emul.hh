@@ -69,8 +69,8 @@
 #include "sim/syscallreturn.hh"
 #include "sim/system.hh"
 
-#include "aladdin/gem5/aladdin_ioctl.h"
-#include "aladdin/gem5/aladdin_ioctl_req.h"
+#include "aladdin/gem5/aladdin_sys_connection.h"
+#include "aladdin/gem5/aladdin_sys_constants.h"
 
 ///
 /// System call descriptor.
@@ -593,7 +593,7 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
 
     DPRINTF(SyscallVerbose, "ioctl(%d, 0x%x, ...)\n", fd, req);
 
-    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN::ALADDIN_FD) {
+    if ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN_FD) {
         // doesn't map to any simulator fd: not a valid target fd
         return -EBADF;
     }
@@ -602,7 +602,7 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
         return -ENOTTY;
     }
 
-    if (ALADDIN::isValidRequestCode(req)) {
+    if (isValidRequestCode(req)) {
       // Translate the finish flag pointer to a physical address that Aladdin
       // will write to when execution is completed.
       Addr paddr;
