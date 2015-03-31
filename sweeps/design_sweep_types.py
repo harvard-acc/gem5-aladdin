@@ -17,7 +17,8 @@ PARTITION_BLOCK = 2
 PARTITION_COMPLETE = 3
 
 class SweepParam(namedtuple(
-      "SweepParamBase", "name, start, end, step, step_type, sweep_per_kernel")):
+      "SweepParamBase", "name, start, end, step, step_type, short_name, "
+      "sweep_per_kernel")):
   """ SweepParam: A description of a parameter to sweep.
 
   Args:
@@ -28,13 +29,17 @@ class SweepParam(namedtuple(
     type: LINEAR_SWEEP or EXP_SWEEP. Linear sweeps will increment the value by
       @step; For exponential the parameter value is multiplied by the step
       amount instead.
+    short_name: Abbreviated name to use for file naming. Defaults to full name.
     sweep_per_kernel: Optional. For multi-kernel accelerators, set this to True
-    to sweep this parameter within the kernels themselves, rather than applying
-    the value globally.
+      to sweep this parameter within the kernels themselves, rather than
+      applying the value globally.
   """
-  def __new__(cls, name, start, end, step, step_type, sweep_per_kernel=False):
+  def __new__(cls, name, start, end, step, step_type, short_name=None,
+              sweep_per_kernel=False):
+    if not short_name:
+      short_name = name
     return super(SweepParam, cls).__new__(
-        cls, name, start, end, step, step_type, sweep_per_kernel)
+        cls, name, start, end, step, step_type, short_name, sweep_per_kernel)
 
 # A loop inside a benchmark. It is given a name and a line number in which it
 # appears in the source file.

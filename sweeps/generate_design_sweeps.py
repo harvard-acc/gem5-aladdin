@@ -60,6 +60,24 @@ L2CACHE_DEFAULTS = {
   "cache_line_sz": 64
 }
 
+def generate_smart_config_name(set_params):
+  """ Generate a config name that only contains parameters which were swept.
+
+  Any parameters that were fixed will not be included in the name. This reduces
+  the length of the configuration name.
+  """
+  name = ""
+  for key, value in set_params.iteritems():
+    if key == "memory_type" or key == "experiment_name":
+      continue
+    try:
+      parameter = globals()[key]
+    except KeyError:
+      print "ERR: Did not find sweep parameter called %s." % key
+    if not parameter.step_type == NO_SWEEP:
+      name = name + "%s_%d_" % (parameter.short_name, value)
+  return name[:-1]  # Drop the trailing underscore
+
 def write_aladdin_array_configs(benchmark, config_file, params):
   """ Write the Aladdin array partitioning configurations. """
   if "partition" in params:
@@ -450,14 +468,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
                                             set_params["load_bandwidth"],
                                             set_params["load_queue_size"])
       else:
-        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d_size_%d_line_%d"
-        config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
-                                            set_params["unrolling"],
-                                            set_params["tlb_entries"],
-                                            set_params["load_bandwidth"],
-                                            set_params["load_queue_size"],
-                                            set_params["cache_size"],
-                                            set_params["cache_line_sz"])
+        config_name = generate_smart_config_name(set_params)
     if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
       return
     print "  Configuration %s" % config_name
@@ -500,6 +511,7 @@ def generate_all_configs(
   elif memory_type == "cache":
     if perfect_l1:
       all_sweep_params = [pipelining,
+                          partition,
                           unrolling,
                           cycle_time,
                           tlb_entries,
@@ -508,6 +520,7 @@ def generate_all_configs(
                           load_queue_size]
     else:
       all_sweep_params = [pipelining,
+                          partition,
                           unrolling,
                           cycle_time,
                           tlb_entries,
@@ -571,8 +584,8 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                "--sys-clock=1GHz "
                "--cpu-type=timing --caches %(l2cache_flag)s "
                "%(perfect_l1_flag)s "
-               "--aladdin_cfg_file=%(aladdin_cfg_path)s > "
-               "%(output_path)s/stdout 2> %(output_path)s/stderr")
+               "--aladdin_cfg_file=%(aladdin_cfg_path)s "
+               "> %(output_path)s/stdout 2> %(output_path)s/stderr")
   else:
     run_cmd = ("%(aladdin_home)s/common/aladdin "
                "%(output_path)s/%(benchmark_name)s "
