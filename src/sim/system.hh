@@ -316,10 +316,13 @@ class System : public MemObject
         scheduleAccelerator(req, 1);
     }
 
-    /* Add an address tranlation into the datapath TLB between vaddr and paddr. */
-    void insertArrayMapping(int accel_id, Addr paddr, Addr vaddr) {
+    /* Add an address tranlation into the datapath TLB for the specified array.
+     *
+     */
+    void insertArrayMapping(int accel_id, Addr trace_base_addr,
+                            Addr sim_vaddr, Addr sim_paddr) {
         Gem5Datapath* datapath = accelerators[accel_id]->datapath;
-        datapath->insertTLBEntry(vaddr, paddr);
+        datapath->insertTLBEntry(trace_base_addr, sim_vaddr, sim_paddr);
     }
 
     /* Get the base trace address of of the array for the specified accelerator. */
