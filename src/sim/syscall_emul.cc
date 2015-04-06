@@ -591,7 +591,6 @@ fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
     if (process->getObjectFileArch() == ObjectFile::X86_64) {
       word_size = 8;
     }
-    inform("Handling fcntl() syscall for Aladdin array mapping.\n");
     uint8_t* mapping_buf = new uint8_t[sizeof(aladdin_map_t)];
     memProxy.readBlob(mapping_ptr, mapping_buf, sizeof(aladdin_map_t));
     aladdin_map_t mapping;
@@ -612,17 +611,25 @@ fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
     memProxy.readBlob(string_addr, string_buf, 100);
     mapping.array_name = (const char*) string_buf;
 
-    inform("Received mapping for array %s at address %x of length %d.\n",
+    inform("Received mapping for array %s at vaddr %x of length %d.\n",
            mapping.array_name, mapping.addr, mapping.size);
-    int num_pages = ceil(((float)mapping.size) / TheISA::VMPageSize);
     Addr array_base_addr = process->system->getArrayBaseAddress(
         mapping.request_code, mapping.array_name);
+    Addr sim_base_addr = reinterpret_cast<Addr>(mapping.addr);
+
+    // Set up all mappings, taking into account straddling page boundaries.
+    Addr starting_page_offset = sim_base_addr & (TheISA::VMPageSize - 1);
+    int num_pages = ceil(
+        ((float)mapping.size + starting_page_offset) / TheISA::VMPageSize);
     for (int i = 0; i < num_pages; i++) {
       Addr paddr;
       process->pTable->translate(
-          (Addr) mapping.addr + i*TheISA::VMPageSize, paddr);
+          sim_base_addr + i*TheISA::VMPageSize, paddr);
       process->system->insertArrayMapping(
-          mapping.request_code, paddr, array_base_addr + i*TheISA::VMPageSize);
+          mapping.request_code,
+          array_base_addr + i*TheISA::VMPageSize,  // Trace addr.
+          sim_base_addr + i*TheISA::VMPageSize,  // Simulated vaddr.
+          paddr);  // Simulated paddr.
     }
 
     delete mapping_buf;
