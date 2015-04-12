@@ -607,7 +607,9 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
       // will write to when execution is completed.
       Addr paddr;
       process->pTable->translate(finish_flag, paddr);
-      process->system->activateAccelerator(req, paddr);
+      // We need the context and thread id of the calling thread.
+      process->system->activateAccelerator(
+          req, paddr, tc->contextId(), tc->threadId());
       return -ENOTTY;
     }
 
