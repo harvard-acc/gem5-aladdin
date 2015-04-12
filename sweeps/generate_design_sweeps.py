@@ -770,14 +770,14 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
                 "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
-                "-fno-unroll-loops -fno-inline -emit-llvm -o " + obj +
-                " "  + source_file)
+                "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
+                "-o " + obj + " " + source_file)
       # Compile the test harness if applicable.
       if benchmark.test_harness:
         all_objs.append(test_obj)
         os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-                  "-fno-unroll-loops -fno-inline -emit-llvm -o " + test_obj +
-                  " "  + test_file)
+                  "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
+                  "-o " + test_obj + " " + test_file)
 
       # Finish compilation, linking, and then execute the instrumented code to
       # get the dynamic trace.
