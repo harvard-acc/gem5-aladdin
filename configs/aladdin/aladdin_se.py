@@ -327,9 +327,6 @@ if options.ruby:
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
     system.membus = CoherentBus(is_perfect_bus=options.is_perfect_bus)
-    #if options.aladdin:
-      #system.aladdin_membus = CoherentBus(is_perfect_bus=options.is_perfect_mem_bus)
-      #system.datapath.connectAllPorts(system.aladdin_membus)
 
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)

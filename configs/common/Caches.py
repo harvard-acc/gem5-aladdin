@@ -84,3 +84,11 @@ class PageTableWalkerCache(BaseCache):
     tgts_per_mshr = 12
     is_top_level = True
     is_perfect_cache = False
+
+class L1PrefetchCache(L1Cache):
+    prefetch_on_access = 'true'
+    prefetcher = TaggedPrefetcher(degree=8, latency=1)
+
+class L2PrefetchCache(L2Cache):
+    prefetch_on_access = 'true'
+    prefetcher = TaggedPrefetcher(degree=8, latency=1)

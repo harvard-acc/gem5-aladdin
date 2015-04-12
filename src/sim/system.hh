@@ -207,21 +207,17 @@ class System : public MemObject
 
     /* Stores a pointer to a datapath object with any dependencies (other
      * accelerators that must finish execution before this accelerator an
-     * execute) the accelerator has. When the acclerator is finished, a sentinel
-     * value will be written to the address specified by finish_flag.
+     * execute) the accelerator has.
+     * TODO: Deprecate the dependencies method and turn this into simple
+     * Gem5Datapath pointer.
      */
     class AccelData {
         public:
-            AccelData(Gem5Datapath* _datapath,
-                      std::vector<int> _deps,
-                      Addr _finish_flag = 0)
-              : datapath(_datapath),
-                deps(_deps),
-                finish_flag(_finish_flag) {}
+          AccelData(Gem5Datapath *_datapath, std::vector<int> _deps)
+              : datapath(_datapath), deps(_deps) {}
 
             Gem5Datapath* datapath;
             std::vector<int> deps;
-            Addr finish_flag;
     };
 
     /* Maps an accelerator id to an AccelData object. The id can be an IOCTL
@@ -270,14 +266,14 @@ class System : public MemObject
         return 0;
     }
 
-    void registerAcceleratorFinishFlag(int accel_id, Addr finish_flag)
+    void setAcceleratorFinishFlag(int accel_id, Addr finish_flag)
     {
-        accelerators[accel_id]->finish_flag = finish_flag;
+        accelerators[accel_id]->datapath->setFinishFlag(finish_flag);
     }
 
-    Addr getFinishedFlag(int accel_id)
+    void setAcceleratorIds(int accel_id, int context_id, int thread_id)
     {
-        return accelerators[accel_id]->finish_flag;
+        accelerators[accel_id]->datapath->setContextThreadIds(context_id, thread_id);
     }
 
     /* Adds the specified accelerator to the event queue with a given number of
@@ -310,9 +306,11 @@ class System : public MemObject
         return num_deps_remaining;
     }
 
-    void activateAccelerator(unsigned req, Addr finish_flag) {
+    void activateAccelerator(
+            unsigned req, Addr finish_flag, int context_id, int thread_id) {
         DPRINTF(Aladdin, "Activating accelerator id %d\n", req);
-        registerAcceleratorFinishFlag(req, finish_flag);
+        setAcceleratorFinishFlag(req, finish_flag);
+        setAcceleratorIds(req, context_id, thread_id);
         scheduleAccelerator(req, 1);
     }
 

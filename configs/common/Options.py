@@ -103,6 +103,7 @@ def addCommonOptions(parser):
     parser.add_option("--is_perfect_cache", type="int", default=0)
     parser.add_option("--is_perfect_l2_cache", type="int", default=0)
     parser.add_option("--is_perfect_l2_bus", type="int", default=0)
+    parser.add_option("--enable_prefetchers", action="store_true")
     parser.add_option("--l2cache", action="store_true")
     parser.add_option("--fastmem", action="store_true")
     parser.add_option("--num-dirs", type="int", default=1)
