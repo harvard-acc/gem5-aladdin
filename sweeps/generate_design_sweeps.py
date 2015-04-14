@@ -343,7 +343,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     os.makedirs(output_dir)
 
   trace_file = (
-      "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace")
+      "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace.gz")
   config.set(kernel, "memory_type", params["memory_type"])
   config.set(kernel, "input_dir", cur_config_file_dir)
   config.set(kernel, "bench_name",
@@ -786,7 +786,7 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       os.system("llvm-link -o " + full_llvm + " " + " ".join(all_objs) + " " +
                 os.getenv("TRACER_HOME") + "/profile-func/trace_logger.llvm")
       os.system("llc -O0 -disable-fp-elim -filetype=asm -o " + full_s + " " + full_llvm)
-      os.system("gcc -O0 -fno-inline -o " + executable + " " + full_s + " -lm")
+      os.system("gcc -O0 -fno-inline -o " + executable + " " + full_s + " -lm -lz")
       # Change directory so that the dynamic_trace file gets put in the right
       # place.
       os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
