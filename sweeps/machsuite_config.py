@@ -194,7 +194,7 @@ spmv_crs.add_loop("spmv", 50, 0)
 
 spmv_ellpack = Benchmark("spmv-ellpack", "ellpack", "common/harness.c")
 spmv_ellpack.set_kernels(["ellpack"])
-spmv_ellpack.set_kernels(0x00000100)
+spmv_ellpack.set_main_id(0x00000100)
 spmv_ellpack.add_array("nzval", 4940, 8, PARTITION_CYCLIC)
 spmv_ellpack.add_array("cols", 4940, 4, PARTITION_CYCLIC)
 spmv_ellpack.add_array("vec", 494, 8, PARTITION_CYCLIC)
