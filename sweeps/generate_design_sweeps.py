@@ -589,7 +589,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
   else:
     run_cmd = ("%(aladdin_home)s/common/aladdin "
                "%(output_path)s/%(benchmark_name)s "
-               "%(bmk_dir)s/inputs/%(trace_name)s_trace "
+               "%(bmk_dir)s/inputs/%(trace_name)s_trace.gz "
                "%(config_path)s/%(benchmark_name)s.cfg "
                "%(experiment_name)s "
                "> %(output_path)s/%(benchmark_name)s_stdout "
