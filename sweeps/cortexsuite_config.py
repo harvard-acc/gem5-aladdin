@@ -75,11 +75,11 @@ stitch.add_array("temps", 9, 4, PARTITION_CYCLIC)
 stitch.add_array("interestPnts", 27, 4, PARTITION_CYCLIC)
 stitch.add_array("validCount", 1, 4, PARTITION_COMPLETE)
 stitch.add_array("num_interest_pts", 1, 4, PARTITION_COMPLETE)
-stitch.add_loop("getANMS_worker", 121)
 stitch.add_loop("getANMS_worker", 142)
-stitch.add_loop("getANMS_worker", 157)
-stitch.add_loop("getANMS_worker", 180)
-stitch.add_loop("getANMS_worker", 193)
+stitch.add_loop("getANMS_worker", 163)
+stitch.add_loop("getANMS_worker", 178)
+stitch.add_loop("getANMS_worker", 201)
+stitch.add_loop("getANMS_worker", 214)
 stitch.use_local_makefile()
 
 # Input size: sim_fast (16x16)
@@ -214,3 +214,4 @@ mser.use_local_makefile()
 
 CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm, tracking,
                multi_ncut, mser]
+CORTEXSUITE = [stitch]
