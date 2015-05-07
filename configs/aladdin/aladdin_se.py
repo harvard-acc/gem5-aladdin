@@ -182,9 +182,8 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
 
 if np > 0:
   system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
-
-for cpu in system.cpu:
-    cpu.clk_domain = system.cpu_clk_domain
+  for cpu in system.cpu:
+      cpu.clk_domain = system.cpu_clk_domain
 
 if options.aladdin_cfg_file:
   config = ConfigParser.SafeConfigParser()
