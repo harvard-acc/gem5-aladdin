@@ -260,7 +260,6 @@ class System : public MemObject
     {
         if (accelerators.find(id) == accelerators.end())
             return -1;
-        delete accelerators[id]->datapath;
         delete accelerators[id];
         accelerators.erase(id);
         return 0;

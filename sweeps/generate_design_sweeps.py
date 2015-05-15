@@ -579,7 +579,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
-               "--num-cpus=0 --mem-size=2GB "
+               "--num-cpus=0 --mem-size=4GB "
                "%(mem_flag)s "
                "--sys-clock=1GHz "
                "--cpu-type=timing --caches %(l2cache_flag)s "
