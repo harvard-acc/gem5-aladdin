@@ -281,7 +281,7 @@ class System : public MemObject
     void scheduleAccelerator(int id, int delay)
     {
         Gem5Datapath *datapath = accelerators[id]->datapath;
-        datapath->scheduleOnEventQueue(delay);
+        datapath->initializeDatapath(delay);
         DPRINTF(Aladdin, "Scheduling accelerator %d\n", id);
     }
 
@@ -306,20 +306,27 @@ class System : public MemObject
     }
 
     void activateAccelerator(
-            unsigned req, Addr finish_flag, int context_id, int thread_id) {
-        DPRINTF(Aladdin, "Activating accelerator id %d\n", req);
-        setAcceleratorFinishFlag(req, finish_flag);
-        setAcceleratorIds(req, context_id, thread_id);
-        scheduleAccelerator(req, 1);
+            unsigned accel_id, Addr finish_flag, int context_id, int thread_id) {
+        DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
+        setAcceleratorFinishFlag(accel_id, finish_flag);
+        setAcceleratorIds(accel_id, context_id, thread_id);
+        scheduleAccelerator(accel_id, 1);
     }
 
     /* Add an address tranlation into the datapath TLB for the specified array.
      *
      */
-    void insertArrayMapping(int accel_id, Addr trace_base_addr,
+    void insertAddressTranslationMapping(int accel_id,
                             Addr sim_vaddr, Addr sim_paddr) {
         Gem5Datapath* datapath = accelerators[accel_id]->datapath;
-        datapath->insertTLBEntry(trace_base_addr, sim_vaddr, sim_paddr);
+        datapath->insertTLBEntry(sim_vaddr, sim_paddr);
+    }
+
+    /* Add an mapping between array names to the simulated virtual addresses. */
+    void insertArrayLabelMapping(int accel_id, std::string array_label,
+                                  Addr sim_vaddr) {
+        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+        datapath->insertArrayLabelToVirtual(array_label, sim_vaddr);
     }
 
     /* Get the base trace address of of the array for the specified accelerator. */

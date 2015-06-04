@@ -613,9 +613,10 @@ fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
 
     inform("Received mapping for array %s at vaddr %x of length %d.\n",
            mapping.array_name, mapping.addr, mapping.size);
-    Addr array_base_addr = process->system->getArrayBaseAddress(
-        mapping.request_code, mapping.array_name);
     Addr sim_base_addr = reinterpret_cast<Addr>(mapping.addr);
+    process->system->insertArrayLabelMapping(
+          mapping.request_code,
+          mapping.array_name, sim_base_addr);
 
     // Set up all mappings, taking into account straddling page boundaries.
     Addr starting_page_offset = sim_base_addr & (TheISA::VMPageSize - 1);
@@ -625,9 +626,8 @@ fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
       Addr paddr;
       process->pTable->translate(
           sim_base_addr + i*TheISA::VMPageSize, paddr);
-      process->system->insertArrayMapping(
+      process->system->insertAddressTranslationMapping(
           mapping.request_code,
-          array_base_addr + i*TheISA::VMPageSize,  // Trace addr.
           sim_base_addr + i*TheISA::VMPageSize,  // Simulated vaddr.
           paddr);  // Simulated paddr.
     }
