@@ -16,6 +16,11 @@ PARTITION_CYCLIC = 1
 PARTITION_BLOCK = 2
 PARTITION_COMPLETE = 3
 
+# Memory types. Use these for specifying the type of memory to store an array
+# in. Combine via bitwise OR (so hybrid is SPAD | CACHE).
+SPAD = 0x1
+CACHE = 0x2
+
 class SweepParam(namedtuple(
       "SweepParamBase", "name, start, end, step, step_type, short_name, "
       "sweep_per_kernel")):
@@ -45,10 +50,13 @@ class SweepParam(namedtuple(
 # appears in the source file.
 Loop = namedtuple("Loop", "name, line_num, trip_count")
 
-# An array inside a benchmark. Use the array's name and size in the appropriate
-# fields. word_size is the size of each element (for ints it is 4).
-# partition_type should be set to one of the PARTITION_* constants.
-Array = namedtuple("Array", "name, size, word_size, partition_type")
+# An array inside a benchmark.
+#   Use the array's name and size in the appropriate fields.
+#   word_size is the size of each element (for ints it is 4).
+#   partition_type should be set to one of the PARTITION_* constants.
+#   memory_type should be set to either SPAD or CACHE
+Array = namedtuple(
+    "Array", "name, size, word_size, partition_type, memory_type")
 
 class Benchmark(object):
   """ A benchmark description object. """
@@ -91,9 +99,13 @@ class Benchmark(object):
                            line_num=line_num,
                            trip_count=trip_count))
 
-  def add_array(self, name, size, word_size, partition_type):
+  def add_array(self, name, size, word_size, partition_type=PARTITION_CYCLIC,
+                memory_type=SPAD):
     """ Define an array in the benchmark. Size is in words. """
-    self.arrays.append(Array(name=name, size=size, word_size=word_size,
+    self.arrays.append(Array(name=name,
+                             size=size,
+                             word_size=word_size,
+                             memory_type=memory_type,
                              partition_type=partition_type))
 
   def set_kernels(self, kernels):

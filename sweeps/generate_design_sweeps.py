@@ -73,33 +73,55 @@ def generate_smart_config_name(set_params):
     try:
       parameter = globals()[key]
     except KeyError:
-      print "ERR: Did not find sweep parameter called %s." % key
+      continue
     if not parameter.step_type == NO_SWEEP:
       name = name + "%s_%d_" % (parameter.short_name, value)
   return name[:-1]  # Drop the trailing underscore
 
 def write_aladdin_array_configs(benchmark, config_file, params):
-  """ Write the Aladdin array partitioning configurations. """
+  """ Write the Aladdin array partitioning configurations.
+
+  Some complexities arise with hybrid memory mode, so here are the rules:
+
+  1. If the memory_type is SPAD, then all arrays will be specified to be
+     partitioned (with factor 1 if it was not specified in the sweep config).
+  2. If the memory_type is CACHE, then all arrays will be written as cached,
+     and partition factors will be disregarded if provided.
+  3. If the memory_type is SPAD | CACHE (aka HYBRID), then arrays labeled as
+     "spad" will be written as partitioned, and all others will be written as
+     cached.
+  """
+  sweep_memory_type = params["memory_type"]
   if "partition" in params:
     for array in benchmark.arrays:
-      if array.partition_type == PARTITION_CYCLIC:
-        config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
+      if (sweep_memory_type & SPAD and
+          (array.memory_type == SPAD or not (sweep_memory_type & CACHE))):
+        if array.partition_type == PARTITION_CYCLIC:
+          config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
+                            (array.name,
+                             array.size*array.word_size,
+                             array.word_size,
+                             params["partition"]))
+        elif array.partition_type == PARTITION_BLOCK:
+          config_file.write("partition,block,%s,%d,%d,%d\n" %
+                            (array.name,
+                             array.size*array.word_size,
+                             array.word_size,
+                             params["partition"]))
+        elif array.partition_type == PARTITION_COMPLETE:
+          config_file.write("partition,complete,%s,%d\n" %
+                            (array.name, array.size*array.word_size))
+        else:
+          print("Invalid array partitioning configuration for array %s." %
+                array.name)
+          exit(1)
+      elif sweep_memory_type & CACHE:
+        config_file.write("cache,%s,%d,%d\n" %
                           (array.name,
                            array.size*array.word_size,
-                           array.word_size,
-                           params["partition"]))
-      elif array.partition_type == PARTITION_BLOCK:
-        config_file.write("partition,block,%s,%d,%d,%d\n" %
-                          (array.name,
-                           array.size*array.word_size,
-                           array.word_size,
-                           params["partition"]))
-      elif array.partition_type == PARTITION_COMPLETE:
-        config_file.write("partition,complete,%s,%d\n" %
-                          (array.name, array.size*array.word_size))
+                           array.word_size))
       else:
-        print("Invalid array partitioning configuration for array %s." %
-              array.name)
+        print("Invalid memory type for array %s." % array.name)
         exit(1)
 
 def write_benchmark_specific_configs(benchmark, config_file, params):
@@ -344,7 +366,17 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
 
   trace_file = (
       "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace.gz")
-  config.set(kernel, "memory_type", params["memory_type"])
+
+  # This is the only place where the sweep memory type needs to be
+  # disambiguated like so.
+  if params["memory_type"] & SPAD:
+    if params["memory_type"] & CACHE:
+      config.set(kernel, "memory_type", "hybrid")
+    else:
+      config.set(kernel, "memory_type", "spad")
+  else:
+    config.set(kernel, "memory_type", "cache")
+
   config.set(kernel, "input_dir", cur_config_file_dir)
   config.set(kernel, "bench_name",
              "%%(input_dir)s/outputs/%s" % kernel)
@@ -352,7 +384,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
              "%s/inputs/%s" % (benchmark_top_dir, trace_file))
   config.set(kernel, "config_file_name",
              "%%(input_dir)s/%s.cfg" % kernel)
-  if params["memory_type"] == "cache":
+  if params["memory_type"] & CACHE:
     (l1cache_size, l2cache_size) = handle_gem5_cache_config(params)
     config.set(kernel, "cache_size", "%dkB" % l1cache_size)
     config.set(kernel, "l2cache_size", "%dkB" % l2cache_size)
@@ -382,7 +414,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
           config.set(kernel, key, str(value))
 
   for key in GEM5_DEFAULTS.iterkeys():
-    if key in params:
+    if key in params and not config.has_option(kernel, key):
       config.set(kernel, key, str(params[key]))
 
   # Write the accelerator id and dependencies.
@@ -454,12 +486,12 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     # The config will use load_bandwidth as "bandwidth" in the naming since it's
     # probable that even memory-bound accelerators are read-bound and not
     # write-bound.
-    if set_params["memory_type"] == "spad" or set_params["memory_type"] == "dma":
+    if set_params["memory_type"] & SPAD:
       CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d"
       config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                           set_params["unrolling"],
                                           set_params["partition"])
-    elif set_params["memory_type"] == "cache":
+    elif set_params["memory_type"] & CACHE:
       if perfect_l1:
         CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d"
         config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
@@ -469,6 +501,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
                                             set_params["load_queue_size"])
       else:
         config_name = generate_smart_config_name(set_params)
+    # TODO: Get rid of this special case, or handle it better.
     if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
       return
     print "  Configuration %s" % config_name
@@ -490,8 +523,9 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     new_gem5_config = True
     for kernel, loops in kernel_setup.iteritems():
       generate_aladdin_config(benchmark, kernel, set_params, loops)
-      generate_gem5_config(benchmark, kernel, set_params, write_new=new_gem5_config)
-      if set_params["memory_type"] == "cache":
+      generate_gem5_config(
+          benchmark, kernel, set_params, write_new=new_gem5_config)
+      if set_params["memory_type"] & CACHE:
         generate_all_cacti_configs(benchmark.name, kernel, set_params)
       new_gem5_config = False
     if enable_l2:
@@ -503,34 +537,29 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
 def generate_all_configs(
     benchmark, memory_type, experiment_name, perfect_l1, enable_l2):
   """ Generates all the possible configurations for the design sweep. """
-  if memory_type == "spad" or memory_type == "dma":
-    all_sweep_params = [pipelining,
-                        unrolling,
-                        partition,
-                        cycle_time]
-  elif memory_type == "cache":
+  # Start out with these parameters.
+  all_sweep_params = [pipelining,
+                      unrolling,
+                      partition]
+  if memory_type & SPAD:
+    all_sweep_params.extend([cycle_time])
+  if memory_type & CACHE:
     if perfect_l1:
-      all_sweep_params = [pipelining,
-                          partition,
-                          unrolling,
-                          cycle_time,
-                          tlb_entries,
-                          load_bandwidth,
-                          cache_assoc,
-                          load_queue_size]
+      all_sweep_params.extend([cycle_time,
+                               tlb_entries,
+                               load_bandwidth,
+                               cache_assoc,
+                               load_queue_size])
     else:
-      all_sweep_params = [pipelining,
-                          partition,
-                          unrolling,
-                          cycle_time,
-                          tlb_entries,
-                          tlb_bandwidth,
-                          load_bandwidth,
-                          load_queue_size,
-                          cache_hit_latency,
-                          cache_assoc,
-                          cache_line_sz,
-                          cache_size]
+      all_sweep_params.extend([cycle_time,
+                               tlb_entries,
+                               tlb_bandwidth,
+                               load_bandwidth,
+                               load_queue_size,
+                               cache_hit_latency,
+                               cache_assoc,
+                               cache_line_sz,
+                               cache_size])
   # This dict stores a single configuration.
   params = {"memory_type": memory_type, "experiment_name": experiment_name}
   # Recursively generate all possible configurations.
@@ -765,7 +794,7 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       all_objs = [opt_obj]
 
       defines = " "
-      if memory_type == "dma":
+      if memory_type & SPAD:
         defines += "-DDMA_MODE "
       # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
@@ -860,8 +889,8 @@ def main():
       "experiment. ")
   parser.add_argument("--output_dir", required=True, help="Config output "
                       "directory. Required for all modes.")
-  parser.add_argument("--memory_type", help="\"cache\" or \"spad\" or \"dma\". "
-                      "Required for config mode.")
+  parser.add_argument("--memory_type", help="\"cache\",\"spad\" or \"dma\", or "
+      "\"hybrid\" (which combines cache and spad)." "Required for config mode.")
   parser.add_argument("--benchmark_suite", required=True, help="SHOC, "
       "MachSuite, CortexSuite, or CortexSuiteKernels. Required for all modes.")
   parser.add_argument("--source_dir", help="Path to the benchmark suite "
@@ -915,6 +944,15 @@ def main():
     if not os.path.exists(args.output_dir):
       os.makedirs(args.output_dir)
     os.chdir(args.output_dir)
+
+    # Convert memory type to integer flag.
+    if args.memory_type == "spad" or args.memory_type == "dma":
+      args.memory_type = SPAD
+    elif args.memory_type == "cache":
+      args.memory_type = CACHE
+    elif args.memory_type == "hybrid":
+      args.memory_type = SPAD | CACHE
+
     for benchmark in workload:
       write_config_files(benchmark, args.output_dir, args.memory_type,
                          experiment_name=args.experiment_name,
