@@ -426,11 +426,6 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
             "%s was not found in the list of kernels." % kernel)
       exit(1)
   config.set(kernel, "accelerator_id", str(kernel_id))
-  if benchmark.enforce_order and kernel_id != benchmark.main_id:
-    # Kernels depend on the previous kernel, except for the first.
-    config.set(kernel, "accelerator_deps", str(kernel_id + 1))
-  else:
-    config.set(kernel, "accelerator_deps", "")
   if params["experiment_name"]:
     config.set(kernel, "use_db", "True")
     config.set(kernel, "experiment_name", params["experiment_name"])

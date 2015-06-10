@@ -85,9 +85,6 @@ class Benchmark(object):
     # Produce separate Aladdin configuration files for each kernel. This is
     # useful for composability studies.
     self.separate_kernels = False
-    # When kernels are modeled in a composable system and the order of execution
-    # matters, this flag is set to True.
-    self.enforce_order = False
 
   def add_loop(self, loop_name, line_num, trip_count=ALWAYS_UNROLL):
     """ Add a loop, its line number, and its trip count to the benchmark.
@@ -130,9 +127,8 @@ class Benchmark(object):
   def use_local_makefile(self, value=True):
     self.makefile = value
 
-  def generate_separate_kernels(self, separate=True, enforce_order=False):
+  def generate_separate_kernels(self, separate=True):
     self.separate_kernels = separate
-    self.enforce_order = enforce_order
 
   def get_kernel_id(self, kernel):
     """ Returns the index at which @kernel appears in the list of kernels.

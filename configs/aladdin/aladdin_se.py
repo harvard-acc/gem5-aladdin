@@ -209,7 +209,6 @@ if options.aladdin_cfg_file:
         configFileName = config.get(accel, "config_file_name"),
         acceleratorName = "datapath%d" % config.getint(accel, "accelerator_id"),
         acceleratorId = config.getint(accel, "accelerator_id"),
-        acceleratorDeps = config.get(accel, "accelerator_deps"),
         cycleTime = cycleTime,
         useDb = config.getboolean(accel, "use_db"),
         experimentName = config.get(accel, "experiment_name"),
