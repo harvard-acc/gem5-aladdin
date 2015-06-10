@@ -32,7 +32,7 @@ disparity.add_array("retSAD", 12290, 4, PARTITION_CYCLIC)
 disparity.add_array("retSAD", 12290, 4, PARTITION_CYCLIC)
 disparity.add_array("minSAD", 12290, 4, PARTITION_CYCLIC)
 disparity.add_array("retDisp", 12290, 4, PARTITION_CYCLIC)
-disparity.generate_separate_kernels(separate=True, enforce_order=True)
+disparity.generate_separate_kernels(separate=True)
 disparity.use_local_makefile()
 
 localization = Benchmark("localization",
@@ -155,7 +155,7 @@ tracking.add_loop("calcAreaSum_worker", 63, UNROLL_ONE)
 tracking.add_loop("calcAreaSum_worker", 65, UNROLL_FLATTEN)
 tracking.add_loop("calcAreaSum_worker", 70, UNROLL_FLATTEN)
 tracking.add_loop("calcAreaSum_worker", 73, UNROLL_FLATTEN)
-tracking.generate_separate_kernels(separate=True, enforce_order=False)
+tracking.generate_separate_kernels(separate=True)
 tracking.use_local_makefile()
 
 # Input size: test (18x24). Smallest available, yet it still generates a 4GB
@@ -209,7 +209,7 @@ mser.add_loop("fit_ellipses", 743)
 mser.add_loop("fit_ellipses", 750)
 mser.add_loop("fit_ellipses", 758)
 mser.add_loop("fit_ellipses", 766)
-mser.generate_separate_kernels(separate=True, enforce_order=False)
+mser.generate_separate_kernels(separate=True)
 mser.use_local_makefile()
 
 CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm, tracking,
