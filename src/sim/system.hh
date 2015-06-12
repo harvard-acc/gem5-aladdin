@@ -251,8 +251,7 @@ class System : public MemObject
         return 0;
     }
 
-    /**
-     * Marks an accelerator as finished. This returns -1 if the accelerator id
+    /* Marks an accelerator as finished. This returns -1 if the accelerator id
      * was not previously registered with the system. Upon successful
      * completion, returns 0.
      */
@@ -283,26 +282,6 @@ class System : public MemObject
         Gem5Datapath *datapath = accelerators[id]->datapath;
         datapath->initializeDatapath(delay);
         DPRINTF(Aladdin, "Scheduling accelerator %d\n", id);
-    }
-
-    /**
-     * Returns the number of accelerator dependencies that have not yet been
-     * satisfied, or -1 if the accelerator was not registered with the system.
-     */
-    int numAcceleratorDepsRemaining(int accel_id)
-    {
-        if (accelerators.find(accel_id) == accelerators.end())
-            return -1;
-        std::vector<int> deps = accelerators[accel_id]->deps;
-        int num_deps_remaining = deps.size();
-        for (int i = 0; i < deps.size(); i ++)
-        {
-            // If the dependency is not in the list of running accelerators,
-            // then it has been satisfied.
-            if (accelerators.find(deps[i]) == accelerators.end())
-                num_deps_remaining --;
-        }
-        return num_deps_remaining;
     }
 
     void activateAccelerator(
