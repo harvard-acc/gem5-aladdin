@@ -215,7 +215,7 @@ main = Environment(ENV=use_env)
 main.Decider('MD5-timestamp')
 main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
-#FIXME
+#boost
 main.Append(CPPPATH=[use_env['BOOST_ROOT']])
 main.Append(LINKFLAGS='-lboost_graph -lboost_regex')
 
