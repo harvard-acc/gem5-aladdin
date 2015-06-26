@@ -143,8 +143,8 @@ nw_nw.set_kernels(["needwun"])
 nw_nw.set_main_id(0x000000C0)
 nw_nw.add_array("SEQA", 128, 1, PARTITION_CYCLIC)
 nw_nw.add_array("SEQB", 128, 1, PARTITION_CYCLIC)
-nw_nw.add_array("allignedA", 256, 1, PARTITION_CYCLIC)
-nw_nw.add_array("allignedB", 256, 1, PARTITION_CYCLIC)
+nw_nw.add_array("alignedA", 256, 1, PARTITION_CYCLIC)
+nw_nw.add_array("alignedB", 256, 1, PARTITION_CYCLIC)
 nw_nw.add_array("A", 16641, 4, PARTITION_CYCLIC)
 nw_nw.add_array("ptr", 16641, 1, PARTITION_CYCLIC)
 nw_nw.add_loop("needwun", 54, 128)
@@ -237,5 +237,5 @@ viterbi_viterbi.add_loop("viterbi", 58, 1)
 MACH = [ bfs_bulk, sort_merge, spmv_ellpack, bfs_queue,\
          stencil_stencil3d, sort_radix, kmp_kmp, \
          nw_nw, md_grid, fft_strided, aes_aes, md_knn, fft_transpose,\
-         spmv_crs] #, gemm_ncubed, viterbi_viterbi]
-         # gemm_blocked,stencil_stencil2d,
+         gemm_blocked, stencil_stencil2d, \
+         spmv_crs, gemm_ncubed, viterbi_viterbi]
