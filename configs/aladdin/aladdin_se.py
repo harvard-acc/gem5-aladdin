@@ -219,7 +219,6 @@ if options.aladdin_cfg_file:
       datapath.cacheAssoc = config.getint(accel, "cache_assoc")
       datapath.cacheHitLatency = config.getint(accel, "cache_hit_latency")
       datapath.cacheLineSize = config.getint(accel, "cache_line_sz")
-      datapath.l2cacheSize = config.get(accel, "l2cache_size")
       datapath.cactiCacheConfig = config.get(accel, "cacti_cache_config")
       datapath.tlbEntries = config.getint(accel, "tlb_entries")
       datapath.tlbAssoc = config.getint(accel, "tlb_assoc")
