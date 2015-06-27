@@ -221,8 +221,8 @@ main.Append(LINKFLAGS='-lboost_graph -lboost_regex')
 
 if GetOption('use_db'):
   main.Append(CPPPATH=[use_env['MYSQL_HOME']])
-  main.Append(CPPPATH='-DUSE_DB')
-  main.Append(LINKFLAGS='-L%s -lmysqlcppconn' % use_env['MYSQL_HOME'])
+  main.Append(CXXFLAGS='-DUSE_DB')
+  main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
 
 #FIXME
 main_dict_keys = main.Dictionary().keys()
