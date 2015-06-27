@@ -71,11 +71,7 @@ def config_cache(options, system):
         # are not connected using addTwoLevelCacheHierarchy. Use the
         # same clock as the CPUs, and set the L1-to-L2 bus width to 32
         # bytes (256 bits).
-        l2cache_size = 0
-        if options.aladdin_cfg_file:
-          l2cache_size = datapath.l2cacheSize
-        else:
-          l2cache_size = options.l2_size
+        l2cache_size = options.l2_size
         system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
                                    size=l2cache_size,
                                    assoc=options.l2_assoc,
