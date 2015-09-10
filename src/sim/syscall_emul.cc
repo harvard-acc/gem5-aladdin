@@ -614,6 +614,9 @@ fcntlAladdinHandler(LiveProcess *process, ThreadContext *tc)
     inform("Received mapping for array %s at vaddr %x of length %d.\n",
            mapping.array_name, mapping.addr, mapping.size);
     Addr sim_base_addr = reinterpret_cast<Addr>(mapping.addr);
+
+    // TODO: Do we need to delete past mappings of the same array? Would it
+    // cause issues if we don't?
     process->system->insertArrayLabelMapping(
           mapping.request_code,
           mapping.array_name, sim_base_addr);
