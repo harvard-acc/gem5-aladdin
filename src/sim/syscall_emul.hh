@@ -1366,5 +1366,23 @@ timeFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
     return sec;
 }
 
+template <class OS>
+SyscallReturn
+clockGetResFunc(SyscallDesc *desc, int callnum, LiveProcess *p, ThreadContext *tc)
+{
+  typename OS::time_t sec;
+  int index = 1;
+  Addr timespec_addr = (Addr) p->getSyscallArg(tc, index);
+  if (timespec_addr != 0) {
+    SETranslatingPortProxy &proxy = tc->getMemProxy();
+    /* Use a fixed clock precision. */
+    sec = 0;
+    long nsec = 1;
+    proxy.writeBlob(timespec_addr, (uint8_t*)&sec, (int) sizeof(typename OS::time_t));
+    proxy.writeBlob(timespec_addr + sizeof(typename OS::time_t),
+                    (uint8_t *)&nsec, (int)sizeof(long));
+  }
+  return 0;
+}
 
 #endif // __SIM_SYSCALL_EMUL_HH__
