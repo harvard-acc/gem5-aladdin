@@ -397,9 +397,9 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     config.set(kernel, "cacti_sq_config",
                "%%(input_dir)s/%s_%s.cfg" % (kernel, CACTI_SQ_CFG))
 
-    # Store queue is usually half of the size of load queue.
-    params["store_bandwidth"] = params["load_bandwidth"]/2
-    params["store_queue_size"] = params["load_queue_size"]/2
+    # Store queue is usually half of the size of load queue, but can't be zero!
+    params["store_bandwidth"] = max(1, params["load_bandwidth"]/2)
+    params["store_queue_size"] = max(1, params["load_queue_size"]/2)
     # Set max number of tlb outstanding walks the same as TLB sizes
     params["tlb_max_outstanding_walks"] = params["tlb_entries"]
     # Set TLB bandwidth the same as max(load/store_queue_bw)
@@ -736,11 +736,9 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
 
   There are five requirements:
 
-    1. Define the environment variable TARGET_DIR to specify the final
-       destination of the traces to the Makefile.
-    2. Define the environment variable WORKLOAD to specify the kernels being
+    1. Define the environment variable WORKLOAD to specify the kernels being
        traced.
-    3. Define the environment variable ACCEL_NAME to specify the name of the
+    2. Define the environment variable ACCEL_NAME to specify the name of the
        benchmark. This determines into which subfolder the trace is ultimately
        placed.
     3. The Makefile must have a target called "autotrace" which will compile the
