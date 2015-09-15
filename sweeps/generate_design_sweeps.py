@@ -17,6 +17,7 @@ from shoc_config import SHOC
 from machsuite_config import MACH
 from cortexsuite_config import CORTEXSUITE
 from cortexsuite_indep_config import CORTEXSUITE_KERNELS
+from perfectsuite_config import PERFECTSUITE
 
 GEM5_CFG = "gem5.cfg"
 ALADDIN_CFG = "aladdin"
@@ -635,6 +636,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run=False,
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
                "--num-cpus=%(num_cpus)s "
                "--mem-size=4GB "
+               "--enable-stats-dump "
                "%(mem_flag)s "
                "--sys-clock=1GHz "
                "--cpu-type=timing --caches %(l2cache_flag)s "
@@ -927,7 +929,8 @@ def main():
   parser.add_argument("--memory_type", help="\"cache\",\"spad\" or \"dma\", or "
       "\"hybrid\" (which combines cache and spad)." "Required for config mode.")
   parser.add_argument("--benchmark_suite", required=True, help="SHOC, "
-      "MachSuite, CortexSuite, or CortexSuiteKernels. Required for all modes.")
+      "MachSuite, CortexSuite, CortexSuiteKernels, or PerfectSuite. Required "
+      "for all modes.")
   parser.add_argument("--source_dir", help="Path to the benchmark suite "
                       "directory. Required for trace mode.")
   parser.add_argument("--dry", action="store_true", help="Perform a dry run. "
@@ -964,6 +967,8 @@ def main():
     workload = CORTEXSUITE
   elif args.benchmark_suite.upper() == "CORTEXSUITEKERNELS":
     workload = CORTEXSUITE_KERNELS
+  elif args.benchmark_suite.upper() == "PERFECTSUITE":
+    workload = PERFECTSUITE
   else:
     print "Invalid benchmark provided!"
     exit(1)
