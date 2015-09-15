@@ -481,7 +481,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     # The config will use load_bandwidth as "bandwidth" in the naming since it's
     # probable that even memory-bound accelerators are read-bound and not
     # write-bound.
-    if set_params["memory_type"] & SPAD:
+    if set_params["memory_type"] & SPAD and not set_params["memory_type"] & CACHE:
       CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d"
       config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
                                           set_params["unrolling"],
@@ -496,6 +496,8 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
                                             set_params["load_queue_size"])
       else:
         config_name = generate_smart_config_name(set_params)
+    else:
+      raise ValueError("Unrecognized memory_type.")
     # TODO: Get rid of this special case, or handle it better.
     if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
       return
@@ -575,8 +577,8 @@ def write_config_files(benchmark, output_dir, memory_type,
       benchmark, memory_type, experiment_name, perfect_l1, enable_l2)
   os.chdir("..")
 
-def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
-               perfect_l1=False, experiment_name=None):
+def run_sweeps(workload, simulator, output_dir, source_dir, dry_run=False,
+               enable_l2=False, perfect_l1=False, experiment_name=None):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -588,6 +590,7 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
     workload: List of benchmark description objects.
     simulator: Specifies the simulator to use, gem5 or aladdin.
     output_dir: Top-level directory of the configuration files.
+    source_dir: Source code directory.
     dry_run: True for a dry run.
     enable_l2: Use a shared L2 last level cache.
     perfect_l1: Use a perfect L1 cache.
@@ -599,16 +602,22 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
   # Turning on debug outputs for CacheDatapath can incur a huge amount of disk
   # space, most of which is redundant, so we leave that out of the command here.
   run_cmd = ""
-  if simulator == "gem5":
+  num_cpus = 0
+  if simulator.startswith("gem5"):
+    if "cpu" in simulator:
+      num_cpus = 1
+    simulator = "gem5"  # We can drop the cpu/cache part now to avoid calling startswith().
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
-               "--num-cpus=0 --mem-size=4GB "
+               "--num-cpus=%(num_cpus)s "
+               "--mem-size=4GB "
                "%(mem_flag)s "
                "--sys-clock=1GHz "
                "--cpu-type=timing --caches %(l2cache_flag)s "
                "%(perfect_l1_flag)s "
                "--aladdin_cfg_file=%(aladdin_cfg_path)s "
+               "%(executable)s %(run_args)s "
                "> %(output_path)s/stdout 2> %(output_path)s/stderr")
   else:
     run_cmd = ("%(aladdin_home)s/common/aladdin "
@@ -640,6 +649,12 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
     bmk_dir = "%s/%s/%s" % (cwd, output_dir, benchmark.name)
     configs = [file for file in os.listdir(bmk_dir)
                if os.path.isdir("%s/%s" % (bmk_dir, file))]
+    executable = ""
+    run_args = ""
+    expansion_args = {"source_dir": source_dir}
+    if simulator == "gem5":
+      executable = "-c %s" % (benchmark.expand_exec_cmd(expansion_args))
+      run_args = "-o \"%s\"" % (benchmark.expand_run_args(expansion_args))
     for config in configs:
       config_path = "%s/%s" % (bmk_dir, config)
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
@@ -652,9 +667,12 @@ def run_sweeps(workload, simulator, output_dir, dry_run=False, enable_l2=False,
                          "output_path": abs_output_path,
                          "aladdin_cfg_path": abs_cfg_path,
                          "outdir": outdir,
+                         "num_cpus": num_cpus,
                          "l2cache_flag": l2cache_flag,
                          "mem_flag": mem_flag,
-                         "perfect_l1_flag" : perfect_l1_flag}
+                         "perfect_l1_flag" : perfect_l1_flag,
+                         "executable": executable,
+                         "run_args": run_args}
       else:
         if not experiment_name:
           experiment_name = ""
@@ -822,13 +840,13 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
          source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
       os.chdir(cwd)
 
-def generate_condor_scripts(workload, simulator, output_dir, username,
+def generate_condor_scripts(workload, simulator, output_dir, source_dir, username,
                             enable_l2=False, perfect_l1=False,
                             experiment_name=None):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
-  run_sweeps(workload, simulator, output_dir, True, enable_l2, perfect_l1,
-             experiment_name)
+  run_sweeps(workload, simulator, output_dir, source_dir, True, enable_l2,
+             perfect_l1, experiment_name)
   cwd = os.getcwd()
   os.chdir("..")
   basicCondor = [
@@ -852,7 +870,7 @@ def generate_condor_scripts(workload, simulator, output_dir, username,
   else:
     condor_file_name = "submit.con"
     run_file = "run.sh"
-  f = open("%s/%s" % (cwd, condor_file_name), "w")
+  f = open("%s/%s/%s" % (cwd, output_dir, condor_file_name), "w")
   for b in basicCondor:
     f.write(b + " \n")
 
@@ -866,6 +884,7 @@ def generate_condor_scripts(workload, simulator, output_dir, username,
         continue
       f.write("InitialDir = %s/%s/\n" % (bmk_dir, config))
       f.write("Arguments = %s/%s/%s\n" % (bmk_dir, config, run_file))
+      f.write("Log = %s/%s/log\n" % (bmk_dir, config))
       f.write("Queue\n\n")
   f.close()
   os.chdir(cwd)
@@ -909,8 +928,10 @@ def main():
       "simulation output to be dumped to a directory called outputs/perfect_l1."
       "Without this flag, GEM5 output is stored to outputs/no_L2. If "
       "generating Condor scripts, this flag will run perfect l1 simulations.")
-  parser.add_argument("--simulator", choices=["gem5", "aladdin"],
-      default="aladdin", help="Select the simulator to use, gem5 or aladdin.")
+  parser.add_argument("--simulator", choices=["aladdin", "gem5-cache", "gem5-cpu"],
+      default="aladdin", help="Select the simulator to use, gem5 or aladdin. "
+      "If selecting gem5, decide whether to include a CPU or just use the memory "
+      "hierarchy.")
   args = parser.parse_args()
 
   workload = []
@@ -970,8 +991,8 @@ def main():
       print "Missing benchmark_suite parameter! See help documentation (-h)"
       exit(1)
     run_sweeps(
-        workload, args.simulator, args.output_dir, dry_run=args.dry,
-        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
+        workload, args.simulator, args.output_dir, args.source_dir,
+        dry_run=args.dry, enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
         experiment_name=args.experiment_name)
 
   if args.mode == "condor" or args.mode == "all":
@@ -983,7 +1004,7 @@ def main():
       args.username = getpass.getuser()
       print "Username was not specified for Condor. Using %s." % args.username
     generate_condor_scripts(
-        workload, args.simulator, args.output_dir, args.username,
+        workload, args.simulator, args.output_dir, args.source_dir, args.username,
         enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
         experiment_name=args.experiment_name)
 
