@@ -23,7 +23,7 @@ CACHE = 0x2
 
 class SweepParam(namedtuple(
       "SweepParamBase", "name, start, end, step, step_type, short_name, "
-      "sweep_per_kernel")):
+      "sweep_per_kernel, link_with")):
   """ SweepParam: A description of a parameter to sweep.
 
   Args:
@@ -38,13 +38,18 @@ class SweepParam(namedtuple(
     sweep_per_kernel: Optional. For multi-kernel accelerators, set this to True
       to sweep this parameter within the kernels themselves, rather than
       applying the value globally.
+    link_with: The name of the parameter that this parameter is linked with.
+      Linking this parameter with another means that it assumes the same
+      values as the linked parameter. The sweep type of this parameter is
+      ignored. Be careful with this option - no checking of circular
+      references is performed.
   """
   def __new__(cls, name, start, end, step, step_type, short_name=None,
-              sweep_per_kernel=False):
+              sweep_per_kernel=False, link_with=None):
     if not short_name:
       short_name = name
     return super(SweepParam, cls).__new__(
-        cls, name, start, end, step, step_type, short_name, sweep_per_kernel)
+        cls, name, start, end, step, step_type, short_name, sweep_per_kernel, link_with)
 
 # A loop inside a benchmark. It is given a name and a line number in which it
 # appears in the source file.
