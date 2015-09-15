@@ -75,6 +75,10 @@ class Benchmark(object):
     self.arrays = []
     self.kernels = []
     self.main_id = 0
+    # Command to execute the binary under gem5..
+    self.exec_cmd = ""
+    # If being run as a binary under gem5, use these arguments to execute the binary.
+    self.run_args = ""
     # Test harness, if applicable. If used, test_harness is assumed to contain
     # main(); otherwise, source_file is used, and test_harness MUST be the empty
     # string "".
@@ -124,6 +128,12 @@ class Benchmark(object):
   def set_test_harness(self, test_harness):
     self.test_harness = test_harness
 
+  def set_exec_cmd(self, cmd):
+    self.exec_cmd = cmd
+
+  def set_run_args(self, args):
+    self.run_args = args
+
   def use_local_makefile(self, value=True):
     self.makefile = value
 
@@ -139,6 +149,22 @@ class Benchmark(object):
       if self.kernels[i] == kernel:
         return self.main_id - i
     return -1
+
+  def expand_exec_cmd(self, values):
+    value_subset = {}
+    # Only expand the string for keys that exist.
+    for key, value in values.iteritems():
+      if "%(" + key + ")s" in self.exec_cmd:
+        value_subset[key] = value
+    return self.exec_cmd % value_subset
+
+  def expand_run_args(self, values):
+    value_subset = {}
+    # Only expand the string for keys that exist.
+    for key, value in values.iteritems():
+      if "%(" + key + ")s" in self.run_args:
+        value_subset[key] = value
+    return self.run_args % value_subset
 
 if __name__ == "__main__":
   main()
