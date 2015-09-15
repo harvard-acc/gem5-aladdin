@@ -212,6 +212,7 @@ if options.aladdin_cfg_file:
         cycleTime = cycleTime,
         useDb = config.getboolean(accel, "use_db"),
         experimentName = config.get(accel, "experiment_name"),
+        enableStatsDump = options.enable_stats_dump,
         executeStandalone = (np == 0))
     if memory_type == "cache" or memory_type == "hybrid":
       options.cacheline_size = config.getint(accel, "cache_line_sz")

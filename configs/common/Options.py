@@ -212,6 +212,10 @@ def addCommonOptions(parser):
         help="""Treat value of --checkpoint-restore or --take-checkpoint as a
                 number of instructions.""")
 
+    # Stats options.
+    parser.add_option("--enable-stats-dump", action="store_true", default=False,
+        help="Dump stats if sim loop exits with cause \"dump statistics\".")
+
 def addSEOptions(parser):
     # Benchmark options
     parser.add_option("-c", "--cmd", default="",
