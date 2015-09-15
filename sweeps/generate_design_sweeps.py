@@ -458,9 +458,32 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     next_param = local_sweep_params.pop()
     value_range = []
     # Generate all values of this parameter as set by the sweep start, end, and
-    # step. If the parameter was set to NO_SWEEP, then we just use the start
-    # value.
-    if next_param.step_type == NO_SWEEP:
+    # step. If the parameter is linked to other, just use that other
+    # parameter's value. If the parameter was set to NO_SWEEP, then we just use
+    # the start value.
+    if next_param.link_with:
+      # We can only assign it the linked value if the linked parameter was
+      # already assigned a value. If it was not, move this parameter to the end
+      # of the list and keep going. If that parameter doesn't even exist, then
+      # throw an error.
+      linked_param = next_param.link_with
+      if linked_param in set_params:
+        value_range = [set_params[linked_param]]
+      else:
+        found_linked_param = False
+        for p in local_sweep_params:
+          if p.name == linked_param:
+            local_sweep_params.insert(0, next_param)
+            found_linked_param = True
+            break
+        if found_linked_param:
+          generate_configs_recurse(benchmark, set_params, local_sweep_params,
+                                   perfect_l1, enable_l2)
+        else:
+          raise KeyError("The linked parameter %s on %s does not exist." %
+                         (linked_param, next_param.name))
+
+    elif next_param.step_type == NO_SWEEP:
       value_range = [next_param.start]
     else:
       if next_param.step_type == LINEAR_SWEEP:
