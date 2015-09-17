@@ -48,8 +48,12 @@ class SweepParam(namedtuple(
               sweep_per_kernel=False, link_with=None):
     if not short_name:
       short_name = name
-    return super(SweepParam, cls).__new__(
-        cls, name, start, end, step, step_type, short_name, sweep_per_kernel, link_with)
+    self = super(SweepParam, cls).__new__(
+        cls, name, start, end, step, step_type, short_name, sweep_per_kernel,
+        link_with)
+    # The name of the parameter whose value is controlled by this parameter.
+    self.linked_to = None
+    return self
 
 # A loop inside a benchmark. It is given a name and a line number in which it
 # appears in the source file.

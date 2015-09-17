@@ -483,7 +483,6 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
         else:
           raise KeyError("The linked parameter %s on %s does not exist." %
                          (linked_param, next_param.name))
-
     elif next_param.step_type == NO_SWEEP:
       value_range = [next_param.start]
     else:
@@ -496,6 +495,10 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
                                         next_param.step))+1)]
     for value in value_range:
       set_params[next_param.name] = value
+      if next_param.linked_to in set_params:
+        # This parameter is linked to another parameter. When we change this
+        # one, we have to change the other one too.
+        set_params[next_param.linked_to] = value
       generate_configs_recurse(benchmark, set_params, local_sweep_params,
                                perfect_l1, enable_l2)
   else:
@@ -585,6 +588,14 @@ def generate_all_configs(
   params = {"memory_type": memory_type, "experiment_name": experiment_name}
   # Recursively generate all possible configurations.
   print benchmark.kernels
+  # Create bidirectional mapping for all linked parameters.
+  for curr_param in all_sweep_params:
+    if curr_param.link_with:
+      # Find the linked parameter.
+      for other_param in all_sweep_params:
+        if curr_param.link_with == other_param.name:
+          other_param.linked_to = curr_param.name
+
   generate_configs_recurse(benchmark, params, all_sweep_params,
                            perfect_l1, enable_l2)
 
