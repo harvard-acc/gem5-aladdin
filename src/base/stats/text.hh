@@ -72,7 +72,10 @@ class Text : public Output
 
     // Implement Output
     virtual bool valid() const;
-    virtual void begin();
+    // @desc is a string that will be printed at the end of the
+    // beginning marker and is used to add helpful information about
+    // what this stat dump describes.
+    virtual void begin(std::string desc="");
     virtual void end();
 };
 

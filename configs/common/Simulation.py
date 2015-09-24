@@ -219,12 +219,18 @@ def scriptCheckpoints(options, maxtick, cptdir):
 def dumpStatsInterval(options, maxtick):
     exit_event = m5.simulate(maxtick - m5.curTick())
     exit_cause = exit_event.getCause()
+    exit_dump_stats = exit_cause.startswith("statistics_dump:")
+    exit_reset_stats = exit_cause.startswith("statistics_reset:")
 
-    while exit_cause == "dump statistics":
-        m5.stats.dump()
+    while exit_dump_stats or exit_reset_stats:
+        if exit_dump_stats:
+          stats_desc = exit_cause[len("statistics_dump:"):]
+          m5.stats.dump(stats_desc)
         m5.stats.reset()
         exit_event = m5.simulate(maxtick - m5.curTick())
         exit_cause = exit_event.getCause()
+        exit_dump_stats = exit_cause.startswith("statistics_dump:")
+        exit_reset_stats = exit_cause.startswith("statistics_reset:")
 
     return exit_event
 
