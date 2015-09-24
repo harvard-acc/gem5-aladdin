@@ -48,7 +48,7 @@ class SparseHistInfo; // Sparse histogram
 struct Output
 {
     virtual ~Output() {}
-    virtual void begin() = 0;
+    virtual void begin(std::string desc="") = 0;
     virtual void end() = 0;
     virtual bool valid() const = 0;
 

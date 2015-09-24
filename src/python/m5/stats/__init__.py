@@ -92,7 +92,7 @@ def prepare():
         stat.prepare()
 
 lastDump = 0
-def dump():
+def dump(stats_desc=""):
     '''Dump all statistics data to the registered outputs'''
 
     curTick = m5.curTick()
@@ -109,7 +109,7 @@ def dump():
 
     for output in outputList:
         if output.valid():
-            output.begin()
+            output.begin(stats_desc)
             for stat in stats_list:
                 output.visit(stat)
             output.end()

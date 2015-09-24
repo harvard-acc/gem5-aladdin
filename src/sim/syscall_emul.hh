@@ -66,6 +66,7 @@
 #include "mem/se_translating_port_proxy.hh"
 #include "sim/byteswap.hh"
 #include "sim/process.hh"
+#include "sim/sim_exit.hh"
 #include "sim/syscallreturn.hh"
 #include "sim/system.hh"
 
@@ -589,7 +590,6 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
     int index = 0;
     int fd = process->getSyscallArg(tc, index);
     unsigned req = process->getSyscallArg(tc, index);
-    Addr finish_flag = (Addr) process->getSyscallArg(tc, index);
 
     DPRINTF(SyscallVerbose, "ioctl(%d, 0x%x, ...)\n", fd, req);
 
@@ -603,13 +603,41 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
     }
 
     if (isValidRequestCode(req)) {
-      // Translate the finish flag pointer to a physical address that Aladdin
-      // will write to when execution is completed.
-      Addr paddr;
-      process->pTable->translate(finish_flag, paddr);
-      // We need the context and thread id of the calling thread.
-      process->system->activateAccelerator(
-          req, paddr, tc->contextId(), tc->threadId());
+      if (req == DUMP_STATS || req == RESET_STATS) {
+        size_t max_desc_len = 100;
+
+        // Read the description string out of simulated memory.  We make the
+        // char buffer one character longer than the max length so that we can
+        // set the last character to the terminating character in case the
+        // string actually exceeds the max length allowed.
+        Addr desc_addr = (Addr) process->getSyscallArg(tc, index);
+        std::string stat_final_desc;
+        if (desc_addr != 0) {
+          SETranslatingPortProxy& memProxy = tc->getMemProxy();
+          uint8_t* desc_buf = new uint8_t[max_desc_len+2];
+          memProxy.readBlob(desc_addr, desc_buf, max_desc_len);
+          desc_buf[max_desc_len] = static_cast<uint8_t>(0);
+
+          char* stats_desc = (char*) desc_buf;
+          stat_final_desc = stats_desc;
+        }
+
+        // Create the final string to pass to exitSimLoop.
+        std::string exit_sim_loop_reason = (req == DUMP_STATS) ?
+            DUMP_STATS_EXIT_SIM_SIGNAL + stat_final_desc :
+            RESET_STATS_EXIT_SIM_SIGNAL + stat_final_desc;
+
+        exitSimLoop(exit_sim_loop_reason);
+      } else {
+        // Translate the finish flag pointer to a physical address that Aladdin
+        // will write to when execution is completed.
+        Addr paddr;
+        Addr finish_flag = (Addr) process->getSyscallArg(tc, index);
+        process->pTable->translate(finish_flag, paddr);
+        // We need the context and thread id of the calling thread.
+        process->system->activateAccelerator(
+            req, paddr, tc->contextId(), tc->threadId());
+      }
       return -ENOTTY;
     }
 
@@ -691,7 +719,7 @@ sysinfoFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
 
     int index = 0;
     TypedBufferArg<typename OS::tgt_sysinfo>
-        sysinfo(process->getSyscallArg(tc, index));   
+        sysinfo(process->getSyscallArg(tc, index));
 
     sysinfo->uptime=seconds_since_epoch;
     sysinfo->totalram=process->system->memSize();
@@ -790,7 +818,7 @@ mremapFunc(SyscallDesc *desc, int callnum, LiveProcess *process, ThreadContext *
                 return -ENOMEM;
             } else {
                 process->pTable->remap(start, old_length, process->mmap_end);
-                warn("mremapping to totally new vaddr %08p-%08p, adding %d\n", 
+                warn("mremapping to totally new vaddr %08p-%08p, adding %d\n",
                         process->mmap_end, process->mmap_end + new_length, new_length);
                 start = process->mmap_end;
                 // add on the remaining unallocated pages
