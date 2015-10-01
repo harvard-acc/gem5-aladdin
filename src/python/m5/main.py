@@ -82,6 +82,9 @@ def parse_options():
     group("Statistics Options")
     option("--stats-file", metavar="FILE", default="stats.txt",
         help="Sets the output file for statistics [Default: %default]")
+    option("--stats-db-file", metavar="FILE", default="",
+        help = "Sets the output database file for statistics [Default: \
+            %default]")
 
     # Configuration Options
     group("Configuration Options")
@@ -173,7 +176,7 @@ def main(*args):
     import stats
     import trace
 
-    from util import fatal
+    from util import fatal, warn
 
     if len(args) == 0:
         options, arguments = parse_options()
@@ -312,7 +315,15 @@ def main(*args):
     sys.path[0:0] = options.path
 
     # set stats options
-    stats.initText(options.stats_file)
+    if options.stats_db_file:
+        stats.init_SQL(options.outdir, options.stats_db_file)
+
+    if options.stats_file:
+        stats.initText(options.stats_file)
+
+    # Check that at least one stats output format is enabled
+    if not stats.stats_output_enabled():
+        warn("Unable to output statistics.")
 
     # set debugging options
     debug.setRemoteGDBPort(options.remote_gdb_port)
