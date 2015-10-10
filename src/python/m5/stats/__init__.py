@@ -54,9 +54,9 @@ STATS_OUTPUT_ENABLED = False
 dump_count = 0
 
 class OutputSQL(object):
-  """ Class which outputs the stats to a database. """
+    """ Class which outputs the stats to a database. """
     def __init__(self, filename):
-      """ Create the database and add the tables used to store the stats. """
+        """ Create the database and add the tables used to store the stats. """
         self.filename = filename
         self.db = m5sql.create_database(self.filename)
         Session = sessionmaker(bind = self.db)
@@ -64,11 +64,11 @@ class OutputSQL(object):
         self.session = Session()
 
     def visit(self, stat):
-      """ Write the stats to the database.
+        """ Write the stats to the database.
 
-      On the first dump we also write the information about the stats to the
-      database. This is only done once.
-      """
+        On the first dump we also write the information about the stats to the
+        database. This is only done once.
+        """
         global dump_count
 
         if dump_count == 0:
@@ -95,15 +95,15 @@ class OutputSQL(object):
         self.session.commit()
 
     def valid(self):
-      """ Checks if the database file exists at the specified location. """
-      return os.path.exists(self.filename)
+        """ Checks if the database file exists at the specified location. """
+        return os.path.exists(self.filename)
 
     def begin(self, desc):
         m5sql.store_dump_desc(self.session, desc, dump_count)
 
     def end(self):
-      """ Commits all the data at once. """
-      self.session.commit()
+        """ Commits all the data at once. """
+        self.session.commit()
 
 outputList = []
 def initText(filename, desc=True):
