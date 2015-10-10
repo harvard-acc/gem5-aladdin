@@ -39,25 +39,29 @@
 try:
     from sqlalchemy import *
     from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.ext.declarative import declarative_base
 except:
     print "Unable to import sqlalchemy!"
     raise
+
+import os
 
 from m5.util import fatal, panic
 from m5.internal.stats import \
     ScalarInfo, VectorInfo, Vector2dInfo, FormulaInfo, DistInfo, \
     Deviation, Dist, Hist
 
+Base = declarative_base()
+
 def create_database(filename):
-  """ Create the database used to store the stats. If it exists, delete it.
+    """ Create the database used to store the stats. If it exists, delete it.
 
-  Args:
-    filename: The filename usd to store the stats.
+    Args:
+      filename: The filename usd to store the stats.
 
-  Return:
-    A handle to the database.
-  """
-    import os
+    Return:
+      A handle to the database.
+    """
 
     if os.path.exists(filename):
         os.remove(filename)
@@ -71,11 +75,11 @@ def create_database(filename):
 
 
 def create_tables(db):
-  """Create the tables used to store the stats and information about them.
+    """Create the tables used to store the stats and information about them.
 
-  Args:
-    db: The database in which to create the tables.
-  """
+    Args:
+      db: The database in which to create the tables.
+    """
     metadata = MetaData(db)
 
     # Stores the information about the stats
@@ -136,12 +140,8 @@ def create_tables(db):
     metadata.create_all()
 
 
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
 class StatsInfoClass(Base):
-  """ Class used to insert the information about stats into the database. """
+    """ Class used to insert the information about stats into the database. """
 
     __tablename__ = 'stats'
 
@@ -202,7 +202,7 @@ class StatsInfoClass(Base):
 
 
 class ScalarValueClass(Base):
-  """ Class used to insert scalar stats into the database. """
+    """ Class used to insert scalar stats into the database. """
 
     __tablename__ = 'scalarValue'
 
@@ -219,7 +219,7 @@ class ScalarValueClass(Base):
         return "<User('%d','%d','%f')>" % (self.id, self.dump, self.value)
 
 class VectorValueClass(Base):
-  """ Class used to insert vector stats into the database. """
+    """ Class used to insert vector stats into the database. """
 
     __tablename__ = 'vectorValue'
 
@@ -239,7 +239,7 @@ class VectorValueClass(Base):
 
 
 class DistValueClass(Base):
-  """ Class used to insert dictribution stats into the database. """
+    """ Class used to insert dictribution stats into the database. """
 
     __tablename__ = 'distValue'
 
@@ -269,7 +269,7 @@ class DistValueClass(Base):
             self.min_val, self.max_val, self.underflow, self.overflow)
 
 class DumpDescValueClass(Base):
-  """ Class that stores the description of a stats dump. """
+    """ Class that stores the description of a stats dump. """
     __tablename__ = 'dumpDesc'
 
     id = Column(Integer, primary_key = True)
@@ -283,25 +283,25 @@ class DumpDescValueClass(Base):
         return "<User('%d','%s')>" % (self.id, self.desc)
 
 def add_stat_info(stat, session):
-  """ Add the information about a stat.
+    """ Add the information about a stat.
 
-  Args:
-    name: The name of the stat.
-    stat: The stat itself.
-    session: The session associated with the database.
-  """
+    Args:
+      name: The name of the stat.
+      stat: The stat itself.
+      session: The session associated with the database.
+    """
     temp = StatsInfoClass(stat)
     session.add(temp)
 
 def store_stat_value(stat, session, dumpCount):
-  """ Stores the value of a stat.
+    """ Stores the value of a stat.
 
-  Args:
-     stat: The stat itself.
-     session: The session associated with the database.
-     dumpCount: The number of dumps that have occured. Used to store multiple
-       stats dumps in one database.
-  """
+    Args:
+       stat: The stat itself.
+       session: The session associated with the database.
+       dumpCount: The number of dumps that have occured. Used to store multiple
+         stats dumps in one database.
+    """
     if isinstance(stat, ScalarInfo):
         temp = ScalarValueClass(id = stat.id, dump = dumpCount,
                                 value = stat.value())
@@ -347,6 +347,6 @@ def store_stat_value(stat, session, dumpCount):
         panic("Unable to output stat %s. Unsupported stat type!", stat)
 
 def store_dump_desc(session, desc, dump_count):
-  """ Stores the description of this dump. """
-  temp = DumpDescValueClass(id=dump_count, desc=desc)
-  session.add(temp)
+    """ Stores the description of this dump. """
+    temp = DumpDescValueClass(id=dump_count, desc=desc)
+    session.add(temp)
