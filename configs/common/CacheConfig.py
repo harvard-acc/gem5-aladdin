@@ -121,9 +121,10 @@ def config_cache(options, system):
             hit_latency=datapath.cacheHitLatency,
             response_latency=datapath.cacheHitLatency,
             is_perfect_cache=options.is_perfect_cache)
-        datapath.addPrivateL1Dcache(aladdin_dcache)
         if options.l2cache:
-          datapath.connectAllPorts(system.tol2bus, system.membus)
+          datapath.addPrivateL1Dcache(aladdin_dcache, system.tol2bus)
+          datapath.connectPrivateScratchpad(system.tol2bus)
         else:
-          datapath.connectAllPorts(system.membus)
+          datapath.addPrivateL1Dcache(aladdin_dcache, system.membus)
+          datapath.connectPrivateScratchpad(system.membus)
     return system
