@@ -45,6 +45,9 @@ import m5
 from m5.objects import *
 from Caches import *
 
+def prefetcher_names():
+    return ["tagged", "ghb", "stride"]
+
 def config_cache(options, system):
     if options.cpu_type == "arm_detailed":
         try:
@@ -57,8 +60,21 @@ def config_cache(options, system):
             O3_ARM_v7a_DCache, O3_ARM_v7a_ICache, O3_ARM_v7aL2
     else:
         if options.enable_prefetchers:
-            dcache_class, icache_class, l2_cache_class = \
-                L1PrefetchCache, L1PrefetchCache, L2PrefetchCache
+            if options.prefetcher_type == "stride":
+                # We still set the instruction prefetcher with a tagged
+                # prefetcher since instructions are usually fetched
+                # sequentially.
+                dcache_class, icache_class, l2_cache_class = \
+                    L1StridePrefetchCache, L1TaggedPrefetchCache, \
+                    L2StridePrefetchCache
+            else:
+                # Default prefetcher: tagged
+                dcache_class, icache_class, l2_cache_class = \
+                    L1TaggedPrefetchCache, L1TaggedPrefetchCache, \
+                    L2StridePrefetchCache
+                # There is a known issue with LLC w/ tagged prefetcher in gem5
+                # (https://www.mail-archive.com/gem5-users@gem5.org/msg10439.html)
+                # For now we always use strided prefetcher for LLC.
         else:
             dcache_class, icache_class, l2_cache_class = \
                 L1Cache, L1Cache, L2Cache

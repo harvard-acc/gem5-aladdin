@@ -44,6 +44,7 @@ from m5.objects import *
 from Benchmarks import *
 
 import CpuConfig
+import CacheConfig
 import MemConfig
 
 def _listCpuTypes(option, opt, value, parser):
@@ -104,6 +105,9 @@ def addCommonOptions(parser):
     parser.add_option("--is_perfect_l2_cache", type="int", default=0)
     parser.add_option("--is_perfect_l2_bus", type="int", default=0)
     parser.add_option("--enable_prefetchers", action="store_true")
+    parser.add_option("--prefetcher-type", type="choice", default="tagged",
+                      choices=CacheConfig.prefetcher_names(),
+                      help = "type of cache prefetcher to use")
     parser.add_option("--l2cache", action="store_true")
     parser.add_option("--fastmem", action="store_true")
     parser.add_option("--num-dirs", type="int", default=1)
