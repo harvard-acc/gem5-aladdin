@@ -81,10 +81,18 @@ class PageTableWalkerCache(BaseCache):
     tgts_per_mshr = 12
     is_top_level = True
 
-class L1PrefetchCache(L1Cache):
+class L1TaggedPrefetchCache(L1Cache):
     prefetch_on_access = 'true'
     prefetcher = TaggedPrefetcher(degree=8, latency=1)
 
-class L2PrefetchCache(L2Cache):
+class L2TaggedPrefetchCache(L2Cache):
     prefetch_on_access = 'true'
     prefetcher = TaggedPrefetcher(degree=8, latency=1)
+
+class L1StridePrefetchCache(L1Cache):
+    prefetch_on_access = 'true'
+    prefetcher = StridePrefetcher(degree=8, latency=1)
+
+class L2StridePrefetchCache(L2Cache):
+    prefetch_on_access = 'true'
+    prefetcher = StridePrefetcher(degree=8, latency=1)
