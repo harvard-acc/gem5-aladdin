@@ -117,7 +117,13 @@ def write_aladdin_array_configs(benchmark, config_file, params):
                 array.name)
           exit(1)
       elif sweep_memory_type & CACHE:
-        config_file.write("cache,%s,%d,%d\n" %
+        # In the cache mode, if an array is not completely partitioned, access
+        # it with cache.
+        if array.partition_type == PARTITION_COMPLETE:
+          config_file.write("partition,complete,%s,%d\n" %
+                            (array.name, array.size*array.word_size))
+        else:
+          config_file.write("cache,%s,%d,%d\n" %
                           (array.name,
                            array.size*array.word_size,
                            array.word_size))
@@ -246,7 +252,7 @@ def write_cacti_config(config_file, params):
       "-Cache level (L2/L3) - \"L2\"\n"
       "-Add ECC - \"true\"\n"
       "-Print level (DETAILED, CONCISE) - \"DETAILED\"\n"
-      "-Print input parameters - \"true\"\n"
+      "-Print input parameters - \"false\"\n"
       "-Force cache config - \"false\"\n"
       "-Ndwl 1\n"
       "-Ndbl 1\n"
@@ -272,15 +278,15 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   cache_params = {"cache_size": cache_size,
                   "cache_assoc": cache_assoc,
                   "rw_ports": 0,
-                  "exw_ports": params["load_bandwidth"], # Two exclusive write ports
-                  "exr_ports": params["store_bandwidth"], # Two exclusive read ports
+                  "exr_ports": params["load_bandwidth"],
+                  "exw_ports": params["store_bandwidth"],
                   "line_size": cache_line_sz,
-                  "banks" : 2, # Two banks
+                  "banks" : 1, # One bank
                   "cache_type": "cache",
                   "search_ports": 0,
                   # Note for future reference - this may have to change per
                   # benchmark.
-                  "io_bus_width" : cache_line_sz * 8}
+                  "io_bus_width" : 16 * 8}
   write_cacti_config(config_file, cache_params)
   config_file.close()
 
@@ -366,7 +372,11 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     os.makedirs(output_dir)
 
   trace_file = (
-      "%s_trace" % kernel if benchmark.separate_kernels else "dynamic_trace.gz")
+      "%s_dynamic_trace.gz" % kernel if benchmark.separate_kernels else "dynamic_trace.gz")
+
+  for key in GEM5_DEFAULTS.iterkeys():
+    if key in params:
+      config.set(kernel, key, str(params[key]))
 
   # This is the only place where the sweep memory type needs to be
   # disambiguated like so.
@@ -413,10 +423,6 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
           config.set(kernel, key, str(params[key]))
         else:
           config.set(kernel, key, str(value))
-
-  for key in GEM5_DEFAULTS.iterkeys():
-    if key in params and not config.has_option(kernel, key):
-      config.set(kernel, key, str(params[key]))
 
   # Write the accelerator id and dependencies.
   kernel_id = benchmark.main_id  # By default.
@@ -643,11 +649,13 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run=False,
       num_cpus = 1
     simulator = "gem5"  # We can drop the cpu/cache part now to avoid calling startswith().
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
+               "--stats-db-file=stats.db "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
                "--num-cpus=%(num_cpus)s "
                "--mem-size=4GB "
                "--enable-stats-dump "
+               "--enable_prefetchers --prefetcher-type=stride "
                "%(mem_flag)s "
                "--sys-clock=1GHz "
                "--cpu-type=timing --caches %(l2cache_flag)s "
@@ -919,6 +927,7 @@ def generate_condor_scripts(workload, simulator, output_dir, source_dir, usernam
       f.write("InitialDir = %s/%s/\n" % (bmk_dir, config))
       f.write("Arguments = %s/%s/%s\n" % (bmk_dir, config, run_file))
       f.write("Log = %s/%s/log\n" % (bmk_dir, config))
+      f.write("request_cpus=3\n")
       f.write("Queue\n\n")
   f.close()
   os.chdir(cwd)
