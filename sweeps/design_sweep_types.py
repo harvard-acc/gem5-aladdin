@@ -83,6 +83,7 @@ class Benchmark(object):
     self.loops = []
     self.arrays = []
     self.kernels = []
+    self.kernel_ids = {}
     self.main_id = 0
     # Command to execute the binary under gem5..
     self.exec_cmd = ""
@@ -134,6 +135,9 @@ class Benchmark(object):
     """
     self.main_id = main_id
 
+  def set_kernel_id(self, kernel, kernel_id):
+    self.kernel_ids[kernel] = kernel_id
+
   def set_test_harness(self, test_harness):
     self.test_harness = test_harness
 
@@ -148,16 +152,18 @@ class Benchmark(object):
 
   def generate_separate_kernels(self, separate=True):
     self.separate_kernels = separate
-
   def get_kernel_id(self, kernel):
     """ Returns the index at which @kernel appears in the list of kernels.
 
     If not found, this returns -1.
     """
-    for i in range(0, len(self.kernels)):
-      if self.kernels[i] == kernel:
-        return self.main_id - i
-    return -1
+    if kernel in self.kernel_ids:
+      return self.kernel_ids[kernel]
+    else:
+      for i in range(0, len(self.kernels)):
+        if self.kernels[i] == kernel:
+          return self.main_id + i + 1
+      return -1
 
   def expand_exec_cmd(self, values):
     value_subset = {}
