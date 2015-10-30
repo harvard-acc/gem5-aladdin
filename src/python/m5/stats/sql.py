@@ -309,7 +309,7 @@ def store_stat_value(stat, session, dumpCount):
 
     elif isinstance(stat, VectorInfo) or isinstance(stat, FormulaInfo):
         temp = VectorValueClass(id = stat.id, dump = dumpCount,
-                                value = stat.value())
+                                value = stat.result())
         session.add(temp)
 
     elif isinstance(stat, Vector2dInfo):
