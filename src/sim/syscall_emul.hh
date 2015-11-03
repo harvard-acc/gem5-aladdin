@@ -45,6 +45,7 @@
 #ifdef __CYGWIN32__
 #include <sys/fcntl.h>  // for O_BINARY
 #endif
+#include <math.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
@@ -1115,6 +1116,14 @@ writevFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
 }
 
 
+/* madvise syscall that just ignores the advice given. */
+template <class OS>
+SyscallReturn
+madviseFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
+{
+  return 0;
+}
+
 /// Target mmap() handler.
 ///
 /// We don't really handle mmap().  If the target is mmaping an
@@ -1132,7 +1141,7 @@ mmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
     index++; // int prot = p->getSyscallArg(tc, index);
     int flags = p->getSyscallArg(tc, index);
     int tgt_fd = p->getSyscallArg(tc, index);
-    // int offset = p->getSyscallArg(tc, index);
+    int offset = p->getSyscallArg(tc, index);
 
     if (length > 0x100000000ULL)
         warn("mmap length argument %#x is unreasonably large.\n", length);
@@ -1200,6 +1209,31 @@ mmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
     }
 
     p->allocateMem(start, length, clobber);
+
+    // Copy the file contents to the simulated memory space.
+    int sim_fd = p->sim_fd(tgt_fd);
+    if (tgt_fd != -1 && sim_fd != -1) {
+      DPRINTF(SyscallVerbose, "mmap sim_fd = %d, tgt_fd = %d. Allocated "
+              "memory from %#x-%#x.\n", sim_fd, tgt_fd, start, start+length);
+      int npages = divCeil(length, (int64_t)TheISA::VMPageSize);
+      uint8_t* buf = new uint8_t[npages * TheISA::VMPageSize];
+
+      // We need to preserve the user's view of the file descriptor's offset,
+      // so we get the current offset, move the fd to the mmap argument's
+      // offset, read the whole file, and then restore the original offset.
+      off_t curr_fd_offset = lseek(sim_fd, 0, SEEK_CUR);
+      lseek(sim_fd, offset, SEEK_SET);
+      read(sim_fd, buf, npages * TheISA::VMPageSize);
+      lseek(sim_fd, curr_fd_offset, SEEK_SET);
+
+      // Write to simulated memory space.
+      SETranslatingPortProxy& memProxy = tc->getMemProxy();
+      memProxy.writeBlob(start, buf, npages * TheISA::VMPageSize);
+      delete[] buf;
+    } else {
+      DPRINTF(SyscallVerbose, "mmap sim_fd = %d, tgt_fd = %d, so "
+              "file contents are not being copied.\n", sim_fd, tgt_fd);
+    }
 
     return start;
 }
