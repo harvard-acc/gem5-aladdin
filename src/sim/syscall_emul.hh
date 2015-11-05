@@ -234,10 +234,6 @@ SyscallReturn lseekFunc(SyscallDesc *desc, int num,
 SyscallReturn _llseekFunc(SyscallDesc *desc, int num,
                         LiveProcess *p, ThreadContext *tc);
 
-/// Target munmap() handler.
-SyscallReturn munmapFunc(SyscallDesc *desc, int num,
-                         LiveProcess *p, ThreadContext *tc);
-
 /// Target gethostname() handler.
 SyscallReturn gethostnameFunc(SyscallDesc *desc, int num,
                               LiveProcess *p, ThreadContext *tc);
@@ -1236,6 +1232,35 @@ mmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
     }
 
     return start;
+}
+
+
+/// Target munmap() handler.
+template <class OS>
+SyscallReturn
+munmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
+{
+    int index = 0;
+    Addr addr = p->getSyscallArg(tc, index);
+    size_t len = p->getSyscallArg(tc, index);
+
+    if (addr % TheISA::VMPageSize != 0 ||
+        len % TheISA::VMPageSize != 0) {
+        warn("mmap failing: arguments not page-aligned: "
+             "start 0x%x length 0x%x", addr, len);
+        return -EINVAL;
+    }
+    DPRINTF(SyscallVerbose, "munmap region from %#x-%#x.\n", addr, addr+len);
+
+    // Remove entries from the page table.
+    p->pTable->unmap(addr, len);
+
+    // We can't reclaim space from the "mmap region" because another mmap call
+    // could have incremented the head pointer, and moving the head pointer
+    // could then cause collisions with regions that are already mapped. gem5
+    // does't do mmap correctly, basically, and for the size of inputs that
+    // we're using, this won't matter.
+    return 0;
 }
 
 /// Target getrlimit() handler.

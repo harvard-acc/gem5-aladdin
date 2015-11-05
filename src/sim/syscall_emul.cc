@@ -294,14 +294,6 @@ _llseekFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
 }
 
 
-SyscallReturn
-munmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
-{
-    // given that we don't really implement mmap, munmap is really easy
-    return 0;
-}
-
-
 const char *hostname = "m5.eecs.umich.edu";
 
 SyscallReturn

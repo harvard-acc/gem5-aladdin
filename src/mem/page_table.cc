@@ -70,7 +70,7 @@ PageTable::map(Addr vaddr, Addr paddr, int64_t size, bool clobber)
     // starting address must be page aligned
     assert(pageOffset(vaddr) == 0);
 
-    DPRINTF(MMU, "PageTabel: Allocating Page: %#x-%#x\n", vaddr, vaddr+ size);
+    DPRINTF(MMU, "PageTable: Allocating Page: %#x-%#x\n", vaddr, vaddr+ size);
 
     for (; size > 0; size -= pageSize, vaddr += pageSize, paddr += pageSize) {
         if (!clobber && (pTable.find(vaddr) != pTable.end())) {
