@@ -64,6 +64,26 @@ InstFetchU::InstFetchU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  //Assuming all L1 caches are virtually idxed physically tagged.
 	  //cache
 
+    // Backups for existing parameters in the global interface_ip state that I
+    // want to change for the icache. Super hacky...
+    int dd = interface_ip.delay_dev;
+    int ctd = interface_ip.cycle_time_dev;
+    int ad = interface_ip.area_dev;
+    int wimt = interface_ip.wire_is_mat_type;
+    int womt = interface_ip.wire_os_mat_type;
+    bool eccb = interface_ip.add_ecc_b_;
+    double shv = interface_ip.specific_hp_vdd;
+    double slsv = interface_ip.specific_lstp_vdd;
+    double slv = interface_ip.specific_lop_vdd;
+    double icache_vcs = 1.11;
+    if (icache_vcs == 0) {
+      switch (XML->sys.device_type) {
+        case 0: icache_vcs = shv; break;
+        case 1: icache_vcs = slsv; break;
+        case 2: icache_vcs = slv; break;
+      }
+    }
+
 	  size                             = (int)XML->sys.core[ithCore].icache.icache_config[0];
 	  line                             = (int)XML->sys.core[ithCore].icache.icache_config[1];
 	  assoc                            = (int)XML->sys.core[ithCore].icache.icache_config[2];
@@ -83,14 +103,25 @@ InstFetchU::InstFetchU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  interface_ip.is_cache			 = true;
 	  interface_ip.pure_cam			 = false;
 	  interface_ip.pure_ram			 = false;
-	//  interface_ip.obj_func_dyn_energy = 0;
-	//  interface_ip.obj_func_dyn_power  = 0;
-	//  interface_ip.obj_func_leak_power = 0;
-	//  interface_ip.obj_func_cycle_t    = 1;
+	  interface_ip.obj_func_dyn_energy = 0;
+	  interface_ip.obj_func_dyn_power  = 0;
+	  interface_ip.obj_func_leak_power = 0;
+	  interface_ip.obj_func_cycle_t    = 0;
 	  interface_ip.num_rw_ports    = debug?1:XML->sys.core[ithCore].number_instruction_fetch_ports;
 	  interface_ip.num_rd_ports    = 0;
 	  interface_ip.num_wr_ports    = 0;
+    /* TODO: May need to move to my model with separate read/write ports... */
 	  interface_ip.num_se_rd_ports = 0;
+    interface_ip.wire_is_mat_type = 1;
+    interface_ip.wire_os_mat_type = 1;
+    interface_ip.delay_dev = 0;
+    interface_ip.cycle_time_dev = 100;
+    interface_ip.area_dev = 100;
+    interface_ip.add_ecc_b_ = false;
+    interface_ip.specific_hp_vdd = icache_vcs;
+    interface_ip.specific_lstp_vdd = icache_vcs;
+    interface_ip.specific_lop_vdd = icache_vcs;
+
 	  icache.caches = new ArrayST(&interface_ip, "icache", Core_device, coredynp.opt_local, coredynp.core_ty);
 	  scktRatio = g_tp.sckt_co_eff;
 	  chip_PR_overhead = g_tp.chip_layout_overhead;
@@ -99,6 +130,14 @@ InstFetchU::InstFetchU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  area.set_area(area.get_area()+ icache.caches->local_result.area);
 	  //output_data_csv(icache.caches.local_result);
 
+    // Restore (some) backups...
+    interface_ip.delay_dev = dd;
+    interface_ip.cycle_time_dev = ctd;
+    interface_ip.area_dev = ad;
+    interface_ip.add_ecc_b_ = eccb;
+    interface_ip.specific_hp_vdd = shv;
+    interface_ip.specific_lstp_vdd = slsv;
+    interface_ip.specific_lop_vdd = slv;
 
 	  /*
 	   *iCache controllers
@@ -217,6 +256,10 @@ InstFetchU::InstFetchU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  IB->area.set_area(IB->area.get_area()+ IB->local_result.area);
 	  area.set_area(area.get_area()+ IB->local_result.area);
 	  //output_data_csv(IB.IB.local_result);
+
+    // Restore some more backups...
+    interface_ip.wire_is_mat_type = wimt;
+    interface_ip.wire_os_mat_type = womt;
 
 	  //	  inst_decoder.opcode_length = XML->sys.core[ithCore].opcode_width;
 	  //	  inst_decoder.init_decoder(is_default, &interface_ip);
@@ -362,46 +405,50 @@ BranchPredictor::BranchPredictor(ParseXML* XML_interface, int ithCore_, InputPar
 	area.set_area(area.get_area()+ globalBPT->local_result.area);
 
 	//Local BPT (Level 1)
-	data							 = int(ceil(XML->sys.core[ithCore].predictor.local_predictor_size[0]/8.0));
-	interface_ip.line_sz             = data;
-	interface_ip.cache_sz            = data*XML->sys.core[ithCore].predictor.local_predictor_entries;
-	interface_ip.nbanks              = 1;
-	interface_ip.out_w               = interface_ip.line_sz*8;
-	interface_ip.access_mode         = 2;
-	interface_ip.throughput          = 1.0/clockRate;
-	interface_ip.latency             = 1.0/clockRate;
-	interface_ip.obj_func_dyn_energy = 0;
-	interface_ip.obj_func_dyn_power  = 0;
-	interface_ip.obj_func_leak_power = 0;
-	interface_ip.obj_func_cycle_t    = 1;
-	interface_ip.num_rw_ports    = 0;
-	interface_ip.num_rd_ports    = coredynp.predictionW;
-	interface_ip.num_wr_ports    = coredynp.predictionW;
-	interface_ip.num_se_rd_ports = 0;
-	L1_localBPT = new ArrayST(&interface_ip, "L1 local Predictor", Core_device, coredynp.opt_local, coredynp.core_ty);
-	L1_localBPT->area.set_area(L1_localBPT->area.get_area()+ L1_localBPT->local_result.area);
-	area.set_area(area.get_area()+ L1_localBPT->local_result.area);
+  data							 = int(ceil(XML->sys.core[ithCore].predictor.local_predictor_size[0]/8.0));
+  interface_ip.line_sz             = data;
+  interface_ip.cache_sz            = data*XML->sys.core[ithCore].predictor.local_predictor_entries;
+  interface_ip.nbanks              = 1;
+  interface_ip.out_w               = interface_ip.line_sz*8;
+  interface_ip.access_mode         = 2;
+  interface_ip.throughput          = 1.0/clockRate;
+  interface_ip.latency             = 1.0/clockRate;
+  interface_ip.obj_func_dyn_energy = 0;
+  interface_ip.obj_func_dyn_power  = 0;
+  interface_ip.obj_func_leak_power = 0;
+  interface_ip.obj_func_cycle_t    = 1;
+  interface_ip.num_rw_ports    = 0;
+  interface_ip.num_rd_ports    = coredynp.predictionW;
+  interface_ip.num_wr_ports    = coredynp.predictionW;
+  interface_ip.num_se_rd_ports = 0;
+  L1_localBPT = new ArrayST(&interface_ip, "L1 local Predictor", Core_device, coredynp.opt_local, coredynp.core_ty);
+  if (XML->sys.core[ithCore].predictor.local_predictor_size[0] != 0) {
+    L1_localBPT->area.set_area(L1_localBPT->area.get_area()+ L1_localBPT->local_result.area);
+    area.set_area(area.get_area()+ L1_localBPT->local_result.area);
+  }
 
 	//Local BPT (Level 2)
-	data							 = int(ceil(XML->sys.core[ithCore].predictor.local_predictor_size[1]/8.0));
-	interface_ip.line_sz             = data;
-	interface_ip.cache_sz            = data*XML->sys.core[ithCore].predictor.local_predictor_entries;
-	interface_ip.nbanks              = 1;
-	interface_ip.out_w               = interface_ip.line_sz*8;
-	interface_ip.access_mode         = 2;
-	interface_ip.throughput          = 1.0/clockRate;
-	interface_ip.latency             = 1.0/clockRate;
-	interface_ip.obj_func_dyn_energy = 0;
-	interface_ip.obj_func_dyn_power  = 0;
-	interface_ip.obj_func_leak_power = 0;
-	interface_ip.obj_func_cycle_t    = 1;
-	interface_ip.num_rw_ports    = 0;
-	interface_ip.num_rd_ports    = coredynp.predictionW;
-	interface_ip.num_wr_ports    = coredynp.predictionW;
-	interface_ip.num_se_rd_ports = 0;
-	L2_localBPT = new ArrayST(&interface_ip, "L2 local Predictor", Core_device, coredynp.opt_local, coredynp.core_ty);
-	L2_localBPT->area.set_area(L2_localBPT->area.get_area()+ L2_localBPT->local_result.area);
-	area.set_area(area.get_area()+ L2_localBPT->local_result.area);
+  data							 = int(ceil(XML->sys.core[ithCore].predictor.local_predictor_size[1]/8.0));
+  interface_ip.line_sz             = data;
+  interface_ip.cache_sz            = data*XML->sys.core[ithCore].predictor.local_predictor_entries;
+  interface_ip.nbanks              = 1;
+  interface_ip.out_w               = interface_ip.line_sz*8;
+  interface_ip.access_mode         = 2;
+  interface_ip.throughput          = 1.0/clockRate;
+  interface_ip.latency             = 1.0/clockRate;
+  interface_ip.obj_func_dyn_energy = 0;
+  interface_ip.obj_func_dyn_power  = 0;
+  interface_ip.obj_func_leak_power = 0;
+  interface_ip.obj_func_cycle_t    = 1;
+  interface_ip.num_rw_ports    = 0;
+  interface_ip.num_rd_ports    = coredynp.predictionW;
+  interface_ip.num_wr_ports    = coredynp.predictionW;
+  interface_ip.num_se_rd_ports = 0;
+  L2_localBPT = new ArrayST(&interface_ip, "L2 local Predictor", Core_device, coredynp.opt_local, coredynp.core_ty);
+  if (XML->sys.core[ithCore].predictor.local_predictor_size[1] != 0) {
+    L2_localBPT->area.set_area(L2_localBPT->area.get_area()+ L2_localBPT->local_result.area);
+    area.set_area(area.get_area()+ L2_localBPT->local_result.area);
+  }
 
 	//Chooser
 	data							 = int(ceil(XML->sys.core[ithCore].predictor.chooser_predictor_bits/8.0));
@@ -629,7 +676,13 @@ SchedulerU::SchedulerU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 			 */
 
 			int robExtra = int(ceil(5 + log2(coredynp.num_hthreads)));
-			data = int(ceil((robExtra+coredynp.pc_width + ((coredynp.rm_ty ==RAMbased)? (coredynp.phy_ireg_width + coredynp.phy_freg_width) : fmax(coredynp.phy_ireg_width, coredynp.phy_freg_width)) + ((coredynp.scheu_ty==PhysicalRegFile)? 0 :  coredynp.fp_data_width ))/8.0));
+			data = int(ceil(
+                (robExtra + coredynp.pc_width + (
+                    (coredynp.rm_ty == RAMbased) ?
+                        (coredynp.phy_ireg_width + coredynp.phy_freg_width) :
+                        fmax(coredynp.phy_ireg_width, coredynp.phy_freg_width)) + (
+                            (coredynp.scheu_ty==PhysicalRegFile) ?
+                            0 :  coredynp.fp_data_width ))/8.0));
 			/*
 			 * 	5 bits are: busy, Issued, Finished, speculative, valid;
 			 * 	PC is to id the instruction for recover exception/mis-prediction.
@@ -730,6 +783,20 @@ LoadStoreU::LoadStoreU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  interface_ip.is_cache			   = true;
 	  interface_ip.pure_cam            = false;
 	  interface_ip.pure_ram            = false;
+
+    // Backups again...(just like for icache)
+    int dd = interface_ip.delay_dev;
+    int ctd = interface_ip.cycle_time_dev;
+    int ad = interface_ip.area_dev;
+    int wimt = interface_ip.wire_is_mat_type;
+    int womt = interface_ip.wire_os_mat_type;
+    bool eccb = interface_ip.add_ecc_b_;
+    int dw = interface_ip.delay_wt;
+    int dpd = interface_ip.dynamic_power_dev;
+    int dpw = interface_ip.dynamic_power_wt;
+    int lpd = interface_ip.leakage_power_dev;
+    int ed = interface_ip.ed;
+
 	  //Dcache
 	  size                             = (int)XML->sys.core[ithCore].dcache.dcache_config[0];
 	  line                             = (int)XML->sys.core[ithCore].dcache.dcache_config[1];
@@ -756,6 +823,17 @@ LoadStoreU::LoadStoreU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 	  interface_ip.num_rd_ports    = 0;
 	  interface_ip.num_wr_ports    = 0;
 	  interface_ip.num_se_rd_ports = 0;
+    interface_ip.wire_is_mat_type = 1;
+    interface_ip.wire_os_mat_type = 1;
+    interface_ip.delay_wt = 0;
+    interface_ip.delay_dev = 0;
+    interface_ip.dynamic_power_dev = 100000;
+    interface_ip.leakage_power_dev = 100000;
+    interface_ip.dynamic_power_wt = 0;
+    interface_ip.cycle_time_dev = 100000;
+    interface_ip.area_dev = 100000;
+    interface_ip.add_ecc_b_ = false;
+    interface_ip.ed = 0;
 	  dcache.caches = new ArrayST(&interface_ip, "dcache", Core_device, coredynp.opt_local, coredynp.core_ty);
 	  dcache.area.set_area(dcache.area.get_area()+ dcache.caches->local_result.area);
 	  area.set_area(area.get_area()+ dcache.caches->local_result.area);
@@ -869,6 +947,21 @@ LoadStoreU::LoadStoreU(ParseXML* XML_interface, int ithCore_, InputParameter* in
 		  area.set_area(area.get_area()+ dcache.wbb->local_result.area);
 		  //output_data_csv(dcache.wbb.local_result);
 	  }
+
+    // Restore (some) backups...
+    interface_ip.delay_dev = dd;
+    interface_ip.cycle_time_dev = ctd;
+    interface_ip.area_dev = ad;
+    interface_ip.add_ecc_b_ = eccb;
+    interface_ip.delay_wt = dw;
+    interface_ip.dynamic_power_dev = dpd;
+    interface_ip.dynamic_power_wt = dpw;
+    interface_ip.leakage_power_dev = lpd;
+    interface_ip.ed = ed;
+
+    // Restore some more backups...
+    interface_ip.wire_is_mat_type = wimt;
+    interface_ip.wire_os_mat_type = womt;
 
 	  /*
 	   * LSU--in-order processors do not have separate load queue: unified lsq
@@ -1045,8 +1138,10 @@ RegFU::RegFU(ParseXML* XML_interface, int ithCore_, InputParameter* interface_ip
 	interface_ip.obj_func_leak_power = 0;
 	interface_ip.obj_func_cycle_t    = 1;
 	interface_ip.num_rw_ports    = 1;//this is the transfer port for saving/restoring states when exceptions happen.
-	interface_ip.num_rd_ports    = 2*coredynp.peak_issueW;
-	interface_ip.num_wr_ports    = coredynp.peak_issueW;
+	// interface_ip.num_rd_ports    = 2*coredynp.peak_issueW;
+	// interface_ip.num_wr_ports    = coredynp.peak_issueW;
+	interface_ip.num_rd_ports    = 6;
+	interface_ip.num_wr_ports    = 3;
 	interface_ip.num_se_rd_ports = 0;
 	IRF = new ArrayST(&interface_ip, "Integer Register File", Core_device, coredynp.opt_local, coredynp.core_ty);
 	IRF->area.set_area(IRF->area.get_area()+ IRF->local_result.area*coredynp.num_pipelines*cdb_overhead*((coredynp.scheu_ty==ReservationStation)?XML->sys.core[ithCore].number_hardware_threads:1));
@@ -1072,8 +1167,10 @@ RegFU::RegFU(ParseXML* XML_interface, int ithCore_, InputParameter* interface_ip
 	interface_ip.obj_func_leak_power = 0;
 	interface_ip.obj_func_cycle_t    = 1;
 	interface_ip.num_rw_ports    = 1;//this is the transfer port for saving/restoring states when exceptions happen.
-	interface_ip.num_rd_ports    = 2*XML->sys.core[ithCore].issue_width;
-	interface_ip.num_wr_ports    = XML->sys.core[ithCore].issue_width;
+	// interface_ip.num_rd_ports    = 2*XML->sys.core[ithCore].issue_width;
+	// interface_ip.num_wr_ports    = XML->sys.core[ithCore].issue_width;
+	interface_ip.num_rd_ports    = 6;
+	interface_ip.num_wr_ports    = 3;
 	interface_ip.num_se_rd_ports = 0;
 	FRF = new ArrayST(&interface_ip, "Floating point Register File", Core_device, coredynp.opt_local, coredynp.core_ty);
 	FRF->area.set_area(FRF->area.get_area()+ FRF->local_result.area*coredynp.num_fp_pipelines*cdb_overhead*((coredynp.scheu_ty==ReservationStation)?XML->sys.core[ithCore].number_hardware_threads:1));
@@ -1858,15 +1955,17 @@ Core::Core(ParseXML* XML_interface, int ithCore_, InputParameter* interface_ip_)
   if (coredynp.core_ty==OOO)
   {
 	  pipeline_area_per_unit    = (corepipe->area.get_area()*coredynp.num_pipelines)/5.0;
-	  if (rnu->exist)
-	  {
-		  rnu->area.set_area(rnu->area.get_area() + pipeline_area_per_unit);
-	  }
   }
   else {
 	  pipeline_area_per_unit    = (corepipe->area.get_area()*coredynp.num_pipelines)/4.0;
   }
-
+  cout << "Pipeline area per unit: " << pipeline_area_per_unit/1e6 << endl;
+  cout << "Resetting pipeline area to zero." << endl;
+  pipeline_area_per_unit = 0;
+  if (rnu->exist)
+  {
+    rnu->area.set_area(rnu->area.get_area() + pipeline_area_per_unit);
+  }
   //area.set_area(area.get_area()+ corepipe->area.get_area());
   if (ifu->exist)
   {
@@ -2254,20 +2353,41 @@ void InstFetchU::computeEnergy(bool is_tdp)
     			icache.prefetchb->local_result.power)*pppm_lkg;
 
     	IB->rt_power = IB->power_t + IB->local_result.power*pppm_lkg;
+
+      cout << "Before adding cache: \n"
+           << "  IFU power: " << rt_power.readOp.dynamic/executionTime << "\n"
+           << "  icache: " << icache.rt_power.readOp.dynamic/executionTime << "\n"
+           << "  BTB: " << BTB->rt_power.readOp.dynamic/executionTime << endl;
     	rt_power     = rt_power + icache.rt_power + IB->rt_power;
     	if (coredynp.predictionW>0)
     	{
     		BTB->rt_power = BTB->power_t + BTB->local_result.power*pppm_lkg;
     		rt_power     = rt_power + BTB->rt_power + BPT->rt_power;
     	}
+      cout << "After adding cache: \n"
+           << "  IFU power: " << rt_power.readOp.dynamic/executionTime << "\n"
+           << "  icache: " << icache.rt_power.readOp.dynamic/executionTime << "\n"
+           << "  BTB: " << BTB->rt_power.readOp.dynamic/executionTime << endl;
 
     	ID_inst->rt_power.readOp.dynamic    = ID_inst->power_t.readOp.dynamic*ID_inst->rtp_stats.readAc.access;
     	ID_operand->rt_power.readOp.dynamic = ID_operand->power_t.readOp.dynamic * ID_operand->rtp_stats.readAc.access;
     	ID_misc->rt_power.readOp.dynamic    = ID_misc->power_t.readOp.dynamic * ID_misc->rtp_stats.readAc.access;
 
+      cout << "Before decoder: \n"
+           << "  IFU power: " << rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_inst: " << ID_inst->rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_operand: " << ID_operand->rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_misc: " << ID_misc->rt_power.readOp.dynamic/executionTime << endl;
+
     	rt_power = rt_power + (ID_inst->rt_power +
 							ID_operand->rt_power +
 							ID_misc->rt_power);
+
+      cout << "After decoder: \n"
+           << "  IFU power: " << rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_inst: " << ID_inst->rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_operand: " << ID_operand->rt_power.readOp.dynamic/executionTime << "\n"
+           << "  ID_misc: " << ID_misc->rt_power.readOp.dynamic/executionTime << endl;
     }
 }
 
@@ -3879,7 +3999,8 @@ void Core::computeEnergy(bool is_tdp)
 		{
 			num_units = 5.0;
 			rnu->computeEnergy(is_tdp);
-			set_pppm(pppm_t, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units);//User need to feed a duty cycle to improve accuracy
+			// set_pppm(pppm_t, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units);//User need to feed a duty cycle to improve accuracy
+			set_pppm(pppm_t, 0, 0, 0, 0);
 			if (rnu->exist)
 			{
 				rnu->power = rnu->power + corepipe->power*pppm_t;
@@ -3890,12 +4011,8 @@ void Core::computeEnergy(bool is_tdp)
 		if (ifu->exist)
 		{
 			set_pppm(pppm_t, coredynp.num_pipelines/num_units*coredynp.IFU_duty_cycle, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units, coredynp.num_pipelines/num_units);
-//			cout << "IFU = " << ifu->power.readOp.dynamic*clockRate  << " W" << endl;
 			ifu->power = ifu->power + corepipe->power*pppm_t;
-//			cout << "IFU = " << ifu->power.readOp.dynamic*clockRate  << " W" << endl;
-//			cout << "1/4 pipe = " << corepipe->power.readOp.dynamic*clockRate/num_units  << " W" << endl;
 			power     = power + ifu->power;
-//			cout << "core = " << power.readOp.dynamic*clockRate  << " W" << endl;
 		}
 		if (lsu->exist)
 		{

@@ -1306,6 +1306,9 @@ uca_org_t cacti_interface(
 }
 
 
+bool InputParameter::should_skip() {
+  return (line_sz == 0 || cache_sz == 0);
+}
 
 bool InputParameter::error_checking()
 {

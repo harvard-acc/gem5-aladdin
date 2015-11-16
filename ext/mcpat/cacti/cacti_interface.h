@@ -121,6 +121,7 @@ class InputParameter
     InputParameter();
     void parse_cfg(const string & infile);
 
+    bool should_skip();
     bool error_checking();  // return false if the input parameters are problematic
     void display_ip();
 

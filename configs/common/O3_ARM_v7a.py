@@ -135,10 +135,13 @@ class O3_ARM_v7a_3(DerivO3CPU):
     trapLatency = 13
     backComSize = 5
     forwardComSize = 5
-    numPhysIntRegs = 128
-    numPhysFloatRegs = 128
-    numIQEntries = 32
-    numROBEntries = 40
+    # A15 shares a physical register file of 128 entries for NEON/FP and Int registers.
+    numPhysIntRegs = 64
+    numPhysFloatRegs = 64
+    # numIQEntries refers to integer from now on.
+    numIQEntries = 24
+    numFPIQEntries = 8
+    numROBEntries = 128
 
     switched_out = False
     branchPred = O3_ARM_v7a_BP()
@@ -157,7 +160,7 @@ class O3_ARM_v7a_ICache(BaseCache):
 class O3_ARM_v7a_DCache(BaseCache):
     hit_latency = 2
     response_latency = 2
-    mshrs = 6
+    mshrs = 2
     tgts_per_mshr = 8
     size = '32kB'
     assoc = 2
