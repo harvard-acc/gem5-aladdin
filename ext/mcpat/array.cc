@@ -55,11 +55,21 @@ ArrayST::ArrayST(const InputParameter *configure_interface,
  is_default(_is_default)
     {
 
-	if (l_ip.cache_sz<64) l_ip.cache_sz=64;
-	if (l_ip.power_gating && (l_ip.assoc==0)) {l_ip.power_gating = false;}
-	l_ip.error_checking();//not only do the error checking but also fill some missing parameters
-	optimize_array();
-
+  if (l_ip.should_skip()) {
+    cout << "Skipping " << _name << endl;
+    // Set the relevant fields to zero so we don't seg fault and don't get
+    // garbage output.
+    local_result.tag_array2 = new mem_array();
+    local_result.tag_array2->power.reset();
+    local_result.data_array2 = new mem_array();
+    local_result.data_array2->power.reset();
+  } else {
+    cout << "Generating " << _name << endl;
+    if (l_ip.cache_sz<64) l_ip.cache_sz=64;
+    if (l_ip.power_gating && (l_ip.assoc==0)) {l_ip.power_gating = false;}
+    l_ip.error_checking(); //not only do the error checking but also fill some missing parameters
+    optimize_array();
+  }
 }
 
 
