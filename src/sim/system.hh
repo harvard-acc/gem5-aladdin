@@ -239,38 +239,44 @@ class System : public MemObject
     }
 
     /* Registers the datapath pointer and list of dependencies with the system.
-     * Returns -1 if the accelerator id already exists, 0 otherwise.
+     * If the accelerator already exists, the simulation ends with a fatal
+     * message.
      */
-    int registerAccelerator(
+    void registerAccelerator(
         int id, Gem5Datapath* accelerator, std::vector<int> accel_deps)
     {
         if (accelerators.find(id) != accelerators.end())
-            return -1;
+            fatal("Unable to register accelerator: accelerator with id %#x "
+                  "already exists.", id);
         accelerators[id] = new AccelData(accelerator, accel_deps);
         DPRINTF(Aladdin, "Registered accelerator %d\n", id);
-        return 0;
     }
 
-    /* Marks an accelerator as finished. This returns -1 if the accelerator id
-     * was not previously registered with the system. Upon successful
-     * completion, returns 0.
-     */
-    int deregisterAccelerator(int id)
+    /* Marks an accelerator as finished by erasing it from the registered list. */
+    void deregisterAccelerator(int id)
     {
         if (accelerators.find(id) == accelerators.end())
-            return -1;
+            fatal("Unable to deregister accelerator: No accelerator with id %#x.", id);
         delete accelerators[id];
         accelerators.erase(id);
-        return 0;
     }
 
-    void setAcceleratorFinishFlag(int accel_id, Addr finish_flag)
+    /* Register a pointer to use for communication between accelerator and CPU. */
+    void setAcceleratorFinishFlag(int id, Addr finish_flag)
     {
-        accelerators[accel_id]->datapath->setFinishFlag(finish_flag);
+        if (accelerators.find(id) == accelerators.end())
+            fatal("Unable to set finish flag: No accelerator with id %#x.", id);
+        accelerators[id]->datapath->setFinishFlag(finish_flag);
     }
 
+    /* Sets context and thread ids for a given accelerator. These are needed
+     * for supporting cache prefetchers.
+     */
     void setAcceleratorIds(int accel_id, int context_id, int thread_id)
     {
+        if (accelerators.find(accel_id) == accelerators.end())
+            fatal("Unable to set context thread ids: No accelerator with id %#x.",
+                  accel_id);
         accelerators[accel_id]->datapath->setContextThreadIds(context_id, thread_id);
     }
 
@@ -279,11 +285,14 @@ class System : public MemObject
      */
     void scheduleAccelerator(int id, int delay)
     {
+        if (accelerators.find(id) == accelerators.end())
+            fatal("Unable to schedule accelerator: No accelerator with id %#x.", id);
         Gem5Datapath *datapath = accelerators[id]->datapath;
         datapath->initializeDatapath(delay);
         DPRINTF(Aladdin, "Scheduling accelerator %d\n", id);
     }
 
+    /* Activates an accelerator with the provided parameters. */
     void activateAccelerator(
             unsigned accel_id, Addr finish_flag, int context_id, int thread_id) {
         DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
@@ -292,25 +301,30 @@ class System : public MemObject
         scheduleAccelerator(accel_id, 1);
     }
 
-    /* Add an address tranlation into the datapath TLB for the specified array.
-     *
-     */
-    void insertAddressTranslationMapping(int accel_id,
-                            Addr sim_vaddr, Addr sim_paddr) {
-        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+    /* Add an address tranlation into the datapath TLB for the specified array. */
+    void insertAddressTranslationMapping(int id, Addr sim_vaddr, Addr sim_paddr) {
+        if (accelerators.find(id) == accelerators.end())
+            fatal("Unable to add address mapping: No accelerator with id %#x.",
+                  id);
+        Gem5Datapath* datapath = accelerators[id]->datapath;
         datapath->insertTLBEntry(sim_vaddr, sim_paddr);
     }
 
     /* Add an mapping between array names to the simulated virtual addresses. */
-    void insertArrayLabelMapping(int accel_id, std::string array_label,
-                                  Addr sim_vaddr) {
-        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+    void insertArrayLabelMapping(int id, std::string array_label, Addr sim_vaddr) {
+        if (accelerators.find(id) == accelerators.end())
+            fatal("Unable to add array label mapping: No accelerator with id %#x.",
+                  id);
+        Gem5Datapath* datapath = accelerators[id]->datapath;
         datapath->insertArrayLabelToVirtual(array_label, sim_vaddr);
     }
 
     /* Get the base trace address of of the array for the specified accelerator. */
-    Addr getArrayBaseAddress(int accel_id, const char* array_name) {
-        Gem5Datapath* datapath = accelerators[accel_id]->datapath;
+    Addr getArrayBaseAddress(int id, const char* array_name) {
+        if (accelerators.find(id) == accelerators.end())
+            fatal("Unable to get array base address: No accelerator with id %#x.",
+                  id);
+        Gem5Datapath* datapath = accelerators[id]->datapath;
         return datapath->getBaseAddress(std::string(array_name));
     }
 
