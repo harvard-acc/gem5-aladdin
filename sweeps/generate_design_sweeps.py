@@ -6,18 +6,14 @@ import math
 import os
 import sys
 
+from benchmark_configs import benchmarks
+
 try:
   from sweep_config import *
 except ImportError:
   sys.exit("ERROR: Missing sweep_config.py.\n"
            "You must define a sweep_config.py script. Please look at "
            "sweep_config_example.py for an example and further instructions.")
-
-from shoc_config import SHOC
-from machsuite_config import MACH
-from cortexsuite_config import CORTEXSUITE
-from cortexsuite_indep_config import CORTEXSUITE_KERNELS
-from perfectsuite_config import PERFECTSUITE
 
 GEM5_CFG = "gem5.cfg"
 ALADDIN_CFG = "aladdin"
@@ -830,9 +826,9 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
         os.makedirs(trace_output_dir)
       print benchmark.name
       os.chdir(trace_output_dir)
-      if workload == SHOC:
+      if workload == benchmarks["SHOC"]:
         source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
-      elif workload == MACH:
+      elif workload == benchmarks["MACHSUITE"]:
         source_file_prefix = "%s/%s/%s/%s" % (source_dir, \
           benchmark.name.split('-')[0], benchmark.name.split('-')[1], benchmark.source_file)
       output_file_prefix = ("%s/%s/%s/inputs/%s" %
@@ -874,9 +870,9 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       # Change directory so that the dynamic_trace file gets put in the right
       # place.
       os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
-      if workload == SHOC:
+      if workload == benchmarks["SHOC"]:
         os.system(executable)
-      elif workload == MACH:
+      elif workload == benchmarks["MACHSUITE"]:
         os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
          (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
          source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
@@ -947,10 +943,11 @@ def main():
   parser.add_argument("--output_dir", required=True, help="Config output "
                       "directory. Required for all modes.")
   parser.add_argument("--memory_type", help="\"cache\",\"spad\" or \"dma\", or "
-      "\"hybrid\" (which combines cache and spad)." "Required for config mode.")
-  parser.add_argument("--benchmark_suite", required=True, help="SHOC, "
-      "MachSuite, CortexSuite, CortexSuiteKernels, or PerfectSuite. Required "
-      "for all modes.")
+      "\"hybrid\" (which combines cache and spad). Required for config mode.")
+  parser.add_argument("--benchmark_suite", required=True, help="The name of "
+      "the benchmark suite which for to a run sweep. The benchmark must have a "
+      "config script under the benchmark_configs/ directory. Required for all "
+      "modes.")
   parser.add_argument("--source_dir", help="Path to the benchmark suite "
                       "directory. Required for trace mode.")
   parser.add_argument("--dry", action="store_true", help="Perform a dry run. "
@@ -979,18 +976,13 @@ def main():
   args = parser.parse_args()
 
   workload = []
-  if args.benchmark_suite.upper() == "SHOC":
-    workload = SHOC
-  elif args.benchmark_suite.upper() == "MACHSUITE":
-    workload = MACH
-  elif args.benchmark_suite.upper() == "CORTEXSUITE":
-    workload = CORTEXSUITE
-  elif args.benchmark_suite.upper() == "CORTEXSUITEKERNELS":
-    workload = CORTEXSUITE_KERNELS
-  elif args.benchmark_suite.upper() == "PERFECTSUITE":
-    workload = PERFECTSUITE
+  if args.benchmark_suite.upper() in benchmarks:
+    workload = benchmarks[args.benchmark_suite.upper()]
   else:
-    print "Invalid benchmark provided!"
+    print ("Unrecognized benchmark suite %s. Available benchmark suites are: "
+           % args.benchmark_suite)
+    for benchmark in benchmarks.iterkeys():
+      print "  ", benchmark
     exit(1)
 
   if args.mode == "all":
@@ -999,7 +991,7 @@ def main():
   if args.mode == "configs" or args.mode == "all":
     if (not args.memory_type or
         not args.benchmark_suite):
-      print "Missing some required inputs! See help documentation (-h)."
+      print "Missing memory_type or benchmark_suite arguments. See help documentation (-h)."
       exit(1)
 
     current_dir = os.getcwd()

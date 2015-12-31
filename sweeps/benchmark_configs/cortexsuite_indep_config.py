@@ -52,5 +52,6 @@ findDisparity.add_array("minSAD", 27106, 4, PARTITION_CYCLIC)
 findDisparity.add_array("retDisp", 27106, 4, PARTITION_CYCLIC)
 findDisparity.use_local_makefile()
 
-CORTEXSUITE_KERNELS = [computeSAD, integralImage2D2D, correlateSAD_2D,
-                       finalSAD, findDisparity]
+_BENCHMARKS = [computeSAD, integralImage2D2D, correlateSAD_2D, finalSAD,
+               findDisparity]
+_SUITE_NAME = "CORTEXSUITE_KERNELS"

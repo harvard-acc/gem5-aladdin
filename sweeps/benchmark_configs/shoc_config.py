@@ -129,4 +129,5 @@ triad.add_array("a", 2048, 4, PARTITION_CYCLIC)
 triad.add_array("b", 2048, 4, PARTITION_CYCLIC)
 triad.add_array("c", 2048, 4, PARTITION_CYCLIC)
 
-SHOC = [bb_gemm, fft, md, pp_scan, reduction, ss_sort, stencil, triad]
+_BENCHMARKS = [bb_gemm, fft, md, pp_scan, reduction, ss_sort, stencil, triad]
+_SUITE_NAME = "SHOC"

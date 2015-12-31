@@ -234,8 +234,9 @@ viterbi_viterbi.add_loop("viterbi", 46, 32)
 viterbi_viterbi.add_loop("viterbi", 47, 0)
 viterbi_viterbi.add_loop("viterbi", 58, 1)
 
-MACH = [ bfs_bulk, sort_merge, spmv_ellpack, bfs_queue,\
-         stencil_stencil3d, sort_radix, kmp_kmp, \
-         nw_nw, md_grid, fft_strided, aes_aes, md_knn, fft_transpose,\
-         gemm_blocked, stencil_stencil2d, \
-         spmv_crs, gemm_ncubed, viterbi_viterbi]
+_BENCHMARKS = [bfs_bulk, sort_merge, spmv_ellpack, bfs_queue,
+               stencil_stencil3d, sort_radix, kmp_kmp,
+               nw_nw, md_grid, fft_strided, aes_aes, md_knn, fft_transpose,
+               gemm_blocked, stencil_stencil2d,
+               spmv_crs, gemm_ncubed, viterbi_viterbi]
+_SUITE_NAME = "MACHSUITE"

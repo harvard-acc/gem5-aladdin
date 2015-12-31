@@ -205,6 +205,6 @@ mser.add_loop("fit_ellipses", 766)
 mser.generate_separate_kernels(separate=True)
 mser.use_local_makefile()
 
-COMPLETE_CORTEXSUITE = [disparity, localization, sift, stitch, texture, svm,
-                        tracking, multi_ncut, mser]
-CORTEXSUITE = [tracking]
+_BENCHMARKS = [disparity, localization, sift, stitch, texture, svm,
+               tracking, multi_ncut, mser]
+_SUITE_NAME = "CORTEXSUITE"

@@ -22,4 +22,5 @@ lucas_kanade.set_run_args(
 lucas_kanade.set_main_id(0x00000290)
 lucas_kanade.use_local_makefile()
 
-PERFECTSUITE = [lucas_kanade]
+_BENCHMARKS = [lucas_kanade]
+_SUITE_NAME = "PERFECTSUITE"
