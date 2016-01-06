@@ -23,7 +23,7 @@ CACHE = 0x2
 
 class SweepParam(namedtuple(
       "SweepParamBase", "name, start, end, step, step_type, short_name, "
-      "sweep_per_kernel, link_with")):
+      "link_with")):
   """ SweepParam: A description of a parameter to sweep.
 
   Args:
@@ -35,9 +35,6 @@ class SweepParam(namedtuple(
       @step; For exponential the parameter value is multiplied by the step
       amount instead.
     short_name: Abbreviated name to use for file naming. Defaults to full name.
-    sweep_per_kernel: Optional. For multi-kernel accelerators, set this to True
-      to sweep this parameter within the kernels themselves, rather than
-      applying the value globally.
     link_with: The name of the parameter that this parameter is linked with.
       Linking this parameter with another means that it assumes the same
       values as the linked parameter. The sweep type of this parameter is
@@ -45,12 +42,11 @@ class SweepParam(namedtuple(
       references is performed.
   """
   def __new__(cls, name, start, end, step, step_type, short_name=None,
-              sweep_per_kernel=False, link_with=None):
+              link_with=None):
     if not short_name:
       short_name = name
     self = super(SweepParam, cls).__new__(
-        cls, name, start, end, step, step_type, short_name, sweep_per_kernel,
-        link_with)
+        cls, name, start, end, step, step_type, short_name, link_with)
     # The name of the parameter whose value is controlled by this parameter.
     self.linked_to = None
     return self
