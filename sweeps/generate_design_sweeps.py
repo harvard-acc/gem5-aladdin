@@ -975,6 +975,11 @@ def main():
       "hierarchy.")
   args = parser.parse_args()
 
+  if not args.benchmark_suite:
+    sys.exit("You must specify a benchmark suite to use for the sweep!")
+  if not args.output_dir:
+    sys.exit("You must specify an output directory to contain the sweep!")
+
   workload = []
   if args.benchmark_suite.upper() in benchmarks:
     workload = benchmarks[args.benchmark_suite.upper()]
@@ -983,16 +988,14 @@ def main():
            % args.benchmark_suite)
     for benchmark in benchmarks.iterkeys():
       print "  ", benchmark
-    exit(1)
+    sys.exit(1)
 
   if args.mode == "all":
     args.dry = True
 
   if args.mode == "configs" or args.mode == "all":
-    if (not args.memory_type or
-        not args.benchmark_suite):
-      print "Missing memory_type or benchmark_suite arguments. See help documentation (-h)."
-      exit(1)
+    if not args.memory_type:
+      sys.exit("Missing memory_type argument. See help documentation (-h).")
 
     current_dir = os.getcwd()
     if not os.path.exists(args.output_dir):
@@ -1014,33 +1017,22 @@ def main():
     os.chdir(current_dir)
 
   if args.mode == "trace" or args.mode == "all":
-    if (not args.benchmark_suite):
-      print "Missing benchmark_suite parameter! See help documentation (-h)"
-      exit(1)
-
     if not args.source_dir:
-      print "Need to specify the benchmark suite source directory!"
-      exit(1)
-    generate_traces(
-        workload, args.output_dir, args.source_dir, args.memory_type)
+      sys.exit("Need to specify the benchmark suite source directory!")
+    generate_traces(workload, args.output_dir, args.source_dir,
+                    args.memory_type, args.simulator)
 
   if args.mode == "run":
-    if not args.benchmark_suite:
-      print "Missing benchmark_suite parameter! See help documentation (-h)"
-      exit(1)
     run_sweeps(
         workload, args.simulator, args.output_dir, args.source_dir,
         dry_run=args.dry, enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
         experiment_name=args.experiment_name)
 
   if args.mode == "condor" or args.mode == "all":
-    if not args.benchmark_suite:
-      print "Missing benchmark_suite parameter! See help documentation (-h)"
-      exit(1)
-
     if not args.username:
       args.username = getpass.getuser()
       print "Username was not specified for Condor. Using %s." % args.username
+
     generate_condor_scripts(
         workload, args.simulator, args.output_dir, args.source_dir, args.username,
         enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
