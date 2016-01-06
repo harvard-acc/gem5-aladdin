@@ -4,9 +4,6 @@
 # THIS IS AN EXAMPLE OF SUCH A FILE. This example should list all the parameters
 # that we currently support sweeping. To use, make a copy of this file and call
 # it sweep_config.py.
-#
-# To dynamically change the set of swept parameters, edit the
-# generate_all_configs() function inside generate_design_sweeps.py.
 
 from design_sweep_types import *
 
@@ -42,7 +39,7 @@ store_queue_size = SweepParam(
     short_name="stq")
 cache_size = SweepParam(
      "cache_size", start=32768, end=32768, step=2, step_type=NO_SWEEP,
-     sweep_per_kernel=False, short_name="cache")
+     short_name="cache")
 cache_hit_latency = SweepParam(
     "cache_hit_latency", start=1, end=1, step=1, step_type=NO_SWEEP,
     short_name="lat")
@@ -58,4 +55,3 @@ dma_setup_latency = SweepParam(
 l2cache_size = SweepParam(
     "l2cache_size", start=131072, end=262144, step=2, step_type=NO_SWEEP,
     short_name="l2cache")
-SWEEP_PER_KERNEL = True
