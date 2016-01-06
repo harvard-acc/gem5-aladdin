@@ -602,8 +602,7 @@ def generate_all_configs(
                            perfect_l1, enable_l2)
 
 def write_config_files(benchmark, output_dir, memory_type,
-                       experiment_name=None, perfect_l1=False,
-                       enable_l2=False):
+                       experiment_name, perfect_l1, enable_l2):
   """ Create the directory structure and config files for a benchmark. """
   # This assumes we're already in output_dir.
   if not os.path.exists(benchmark.name):
@@ -614,8 +613,8 @@ def write_config_files(benchmark, output_dir, memory_type,
       benchmark, memory_type, experiment_name, perfect_l1, enable_l2)
   os.chdir("..")
 
-def run_sweeps(workload, simulator, output_dir, source_dir, dry_run=False,
-               enable_l2=False, perfect_l1=False, experiment_name=None):
+def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
+               perfect_l1, experiment_name):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -794,7 +793,7 @@ def handle_local_makefile(benchmark, output_dir, source_dir):
   os.chdir(cwd)
   return
 
-def generate_traces(workload, output_dir, source_dir, memory_type):
+def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
   """ Generates dynamic traces for each workload.
 
   If the workloads do not have local Makefiles and were not configured as such,
@@ -820,6 +819,10 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
     if benchmark.makefile:
       handle_local_makefile(benchmark, output_dir, source_dir)
     else:
+      if not memory_type:
+        sys.exit("For SHOC and MachSuite, you need to specify the memory type.")
+      if not simulator:
+        sys.exit("For SHOC and MachSuite, you need to specify the simulator.")
       trace_output_dir = "%s/%s/%s/%s" % (
           cwd, output_dir, benchmark.name, trace_dir)
       if not os.path.exists(trace_output_dir):
@@ -845,7 +848,8 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
       all_objs = [opt_obj]
 
       defines = " "
-      if memory_type & SPAD:
+      if (memory_type & SPAD and
+          (simulator == "gem5-cpu" or simulator == "gem5-cache")):
         defines += "-DDMA_MODE "
       # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
@@ -878,9 +882,8 @@ def generate_traces(workload, output_dir, source_dir, memory_type):
          source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
       os.chdir(cwd)
 
-def generate_condor_scripts(workload, simulator, output_dir, source_dir, username,
-                            enable_l2=False, perfect_l1=False,
-                            experiment_name=None):
+def generate_condor_scripts(workload, simulator, output_dir, source_dir,
+                            username, enable_l2, perfect_l1, experiment_name):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
   run_sweeps(workload, simulator, output_dir, source_dir, True, enable_l2,
@@ -896,7 +899,6 @@ def generate_condor_scripts(workload, simulator, output_dir, source_dir, usernam
       "# This forces the jobs to be run on the less crowded server",
       "Requirements    = (OpSys == \"LINUX\") && (Arch == \"X86_64\") && ( TotalMemory > 128000)",
       "# Change the email address to suit yourself",
-      "Notify_User     = %s@eecs.harvard.edu" % username,
       "Notification    = Error",
       "Executable = /bin/bash"]
   if enable_l2:
@@ -923,10 +925,50 @@ def generate_condor_scripts(workload, simulator, output_dir, source_dir, usernam
       f.write("InitialDir = %s/%s/\n" % (bmk_dir, config))
       f.write("Arguments = %s/%s/%s\n" % (bmk_dir, config, run_file))
       f.write("Log = %s/%s/log\n" % (bmk_dir, config))
-      f.write("request_cpus=3\n")
       f.write("Queue\n\n")
   f.close()
   os.chdir(cwd)
+
+def check_arguments(args):
+  """ Preliminary checking on command-line arguments. """
+  # Required arguments for all modes.
+  if not args.output_dir:
+    sys.exit("You must specify an output directory to contain the sweep!")
+  if not args.benchmark_suite:
+    sys.exit("You must specify a benchmark suite to use for the sweep!")
+  if not args.benchmark_suite.upper() in benchmarks:
+    print ("Unrecognized benchmark suite %s. Available benchmark suites are: "
+           % args.benchmark_suite)
+    for benchmark in benchmarks.iterkeys():
+      print "  ", benchmark
+    sys.exit(1)
+
+  # Convert memory type to integer flag.
+  if args.memory_type == "spad" or args.memory_type == "dma":
+    args.memory_type = SPAD
+  elif args.memory_type == "cache":
+    args.memory_type = CACHE
+  elif args.memory_type == "hybrid":
+    args.memory_type = SPAD | CACHE
+
+  # Per mode requirements
+  if args.mode == "all":
+    args.dry = True
+
+  if args.mode == "configs" or args.mode == "all":
+    if not args.memory_type:
+      sys.exit("Missing memory_type argument. See help documentation (-h).")
+
+  if args.mode == "trace" or args.mode == "all":
+    if not args.source_dir:
+      sys.exit("Need to specify the benchmark suite source directory!")
+    if not args.memory_type:
+      sys.exit("Missing memory_type argument. See help documentation (-h).")
+
+  if args.mode == "condor" or args.mode == "all":
+    if not args.username:
+      args.username = getpass.getuser()
+      print "Username was not specified for Condor. Using %s." % args.username
 
 def main():
   parser = argparse.ArgumentParser(
@@ -943,7 +985,7 @@ def main():
   parser.add_argument("--output_dir", required=True, help="Config output "
                       "directory. Required for all modes.")
   parser.add_argument("--memory_type", help="\"cache\",\"spad\" or \"dma\", or "
-      "\"hybrid\" (which combines cache and spad). Required for config mode.")
+      "\"hybrid\" (which combines cache and spad).")
   parser.add_argument("--benchmark_suite", required=True, help="The name of "
       "the benchmark suite which for to a run sweep. The benchmark must have a "
       "config script under the benchmark_configs/ directory. Required for all "
@@ -974,69 +1016,32 @@ def main():
       "If selecting gem5, decide whether to include a CPU or just use the memory "
       "hierarchy.")
   args = parser.parse_args()
+  check_arguments(args)
 
-  if not args.benchmark_suite:
-    sys.exit("You must specify a benchmark suite to use for the sweep!")
-  if not args.output_dir:
-    sys.exit("You must specify an output directory to contain the sweep!")
-
-  workload = []
-  if args.benchmark_suite.upper() in benchmarks:
-    workload = benchmarks[args.benchmark_suite.upper()]
-  else:
-    print ("Unrecognized benchmark suite %s. Available benchmark suites are: "
-           % args.benchmark_suite)
-    for benchmark in benchmarks.iterkeys():
-      print "  ", benchmark
-    sys.exit(1)
-
-  if args.mode == "all":
-    args.dry = True
-
+  workload = benchmarks[args.benchmark_suite.upper()]
   if args.mode == "configs" or args.mode == "all":
-    if not args.memory_type:
-      sys.exit("Missing memory_type argument. See help documentation (-h).")
-
     current_dir = os.getcwd()
     if not os.path.exists(args.output_dir):
       os.makedirs(args.output_dir)
     os.chdir(args.output_dir)
 
-    # Convert memory type to integer flag.
-    if args.memory_type == "spad" or args.memory_type == "dma":
-      args.memory_type = SPAD
-    elif args.memory_type == "cache":
-      args.memory_type = CACHE
-    elif args.memory_type == "hybrid":
-      args.memory_type = SPAD | CACHE
-
     for benchmark in workload:
       write_config_files(benchmark, args.output_dir, args.memory_type,
-                         experiment_name=args.experiment_name,
-                         perfect_l1=args.perfect_l1, enable_l2=args.enable_l2)
+                         args.experiment_name, args.perfect_l1, args.enable_l2)
     os.chdir(current_dir)
 
   if args.mode == "trace" or args.mode == "all":
-    if not args.source_dir:
-      sys.exit("Need to specify the benchmark suite source directory!")
     generate_traces(workload, args.output_dir, args.source_dir,
                     args.memory_type, args.simulator)
 
   if args.mode == "run":
-    run_sweeps(
-        workload, args.simulator, args.output_dir, args.source_dir,
-        dry_run=args.dry, enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
-        experiment_name=args.experiment_name)
+    run_sweeps(workload, args.simulator, args.output_dir, args.source_dir,
+               args.dry, args.enable_l2, args.perfect_l1, args.experiment_name)
 
   if args.mode == "condor" or args.mode == "all":
-    if not args.username:
-      args.username = getpass.getuser()
-      print "Username was not specified for Condor. Using %s." % args.username
-
     generate_condor_scripts(
         workload, args.simulator, args.output_dir, args.source_dir, args.username,
-        enable_l2=args.enable_l2, perfect_l1=args.perfect_l1,
-        experiment_name=args.experiment_name)
+        args.enable_l2, args.perfect_l1, args.experiment_name)
 
 if __name__ == "__main__":
   main()
