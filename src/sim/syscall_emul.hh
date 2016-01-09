@@ -599,7 +599,7 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
         return -ENOTTY;
     }
 
-    if (isValidRequestCode(req)) {
+    if (fd == ALADDIN_FD) {
       if (req == DUMP_STATS || req == RESET_STATS) {
         size_t max_desc_len = 100;
 
