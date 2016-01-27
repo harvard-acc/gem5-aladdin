@@ -134,27 +134,23 @@ def write_benchmark_specific_configs(benchmark, config_file, params):
   """
   # md-grid specific unrolling config
   if benchmark.name == "md-grid":
+    config_file.write("flatten,md,52\n")
+    config_file.write("flatten,md,56\n")
+    config_file.write("flatten,md,62\n")
     config_file.write("unrolling,md,46,1\n")
     config_file.write("unrolling,md,47,1\n")
-    config_file.write("unrolling,md,48,1\n")
-    config_file.write("unrolling,md,50,1\n")
-    config_file.write("unrolling,md,51,1\n")
-    config_file.write("unrolling,md,52,1\n")
     if params["unrolling"] <= 4:
-      config_file.write("unrolling,md,56,1\n")
-      config_file.write("unrolling,md,62,%d\n" %(params["unrolling"]))
+      config_file.write("unrolling,md,48,1\n")
+      config_file.write("unrolling,md,50,1\n")
+      config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]))
     elif params["unrolling"] <=16:
-      config_file.write("unrolling,md,56,%d\n" %(params["unrolling"]/4))
-      config_file.write("flatten,md,62\n")
-    return True
-  # md-knn specific unrolling config
-  elif benchmark.name == "md-knn":
-    if params["unrolling"] <= 16:
-      config_file.write("unrolling,md,51,1\n")
-      config_file.write("unrolling,md,58,%d\n" %(params["unrolling"]))
-    else:
-      config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]/16))
-      config_file.write("flatten,md,58\n")
+      config_file.write("unrolling,md,48,1\n")
+      config_file.write("unrolling,md,50,%d\n" %(params["unrolling"]/4))
+      config_file.write("flatten,md,51\n")
+    elif params["unrolling"] <=32:
+      config_file.write("unrolling,md,48,%d\n" %(params["unrolling"]/16))
+      config_file.write("flatten,md,50\n")
+      config_file.write("flatten,md,51\n")
     return True
   return False
 
@@ -511,10 +507,7 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     # probable that even memory-bound accelerators are read-bound and not
     # write-bound.
     if set_params["memory_type"] & SPAD and not set_params["memory_type"] & CACHE:
-      CONFIG_NAME_FORMAT = "pipe%d_unr_%d_part_%d"
-      config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
-                                          set_params["unrolling"],
-                                          set_params["partition"])
+      config_name = generate_smart_config_name(set_params)
     elif set_params["memory_type"] & CACHE:
       if perfect_l1:
         CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d"
@@ -527,9 +520,6 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
         config_name = generate_smart_config_name(set_params)
     else:
       raise ValueError("Unrecognized memory_type.")
-    # TODO: Get rid of this special case, or handle it better.
-    if benchmark.name == "md-grid" and set_params["unrolling"] > 16:
-      return
     print "  Configuration %s" % config_name
     if not os.path.exists(config_name):
       os.makedirs(config_name)
@@ -639,10 +629,9 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
   # space, most of which is redundant, so we leave that out of the command here.
   run_cmd = ""
   num_cpus = 0
+  if "cpu" in simulator:
+    num_cpus = 1
   if simulator.startswith("gem5"):
-    if "cpu" in simulator:
-      num_cpus = 1
-    simulator = "gem5"  # We can drop the cpu/cache part now to avoid calling startswith().
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
                "--stats-db-file=stats.db "
                "--outdir=%(output_path)s/%(outdir)s "
@@ -653,7 +642,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
                "--enable_prefetchers --prefetcher-type=stride "
                "%(mem_flag)s "
                "--sys-clock=1GHz "
-               "--cpu-type=timing --caches %(l2cache_flag)s "
+               "--cpu-type=detailed --caches %(l2cache_flag)s "
                "%(perfect_l1_flag)s "
                "--aladdin_cfg_file=%(aladdin_cfg_path)s "
                "%(executable)s %(run_args)s "
@@ -691,9 +680,10 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
     executable = ""
     run_args = ""
     expansion_args = {"source_dir": source_dir}
-    if simulator == "gem5":
+    if simulator == "gem5-cpu":
       executable = "-c %s" % (benchmark.expand_exec_cmd(expansion_args))
       run_args = "-o \"%s\"" % (benchmark.expand_run_args(expansion_args))
+    simulator = "gem5"  # We can drop the cpu/cache part now to avoid calling startswith().
     for config in configs:
       config_path = "%s/%s" % (bmk_dir, config)
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
@@ -851,6 +841,12 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
       if (memory_type & SPAD and
           (simulator == "gem5-cpu" or simulator == "gem5-cache")):
         defines += "-DDMA_MODE "
+        dma_file = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.c"
+        dma_obj = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.llvm"
+        os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
+                  "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
+                  "-o " + dma_obj + " " + dma_file)
+        all_objs.append(dma_obj)
       # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
                 "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
@@ -860,6 +856,7 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
       if benchmark.test_harness:
         all_objs.append(test_obj)
         os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
+                  "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
                   "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
                   "-o " + test_obj + " " + test_file)
 
