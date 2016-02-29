@@ -143,7 +143,6 @@ class O3_ARM_v7a_3(DerivO3CPU):
     numPhysFloatRegs = 64
     # numIQEntries refers to integer from now on.
     numIQEntries = 24
-    numFPIQEntries = 8
     numROBEntries = 128
 
     switched_out = False

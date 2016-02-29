@@ -180,11 +180,14 @@ def process(file_segment, mcpat_out_fname, out_dir, phase=None, aggregate=False)
     file. Otherwise, it should start from zero.
     """
     stats = parse_segment(file_segment)
-    if not phase == None and not aggregate:
+    if phase == None or not aggregate:
         ext_idx = mcpat_out_fname.rfind(".")
         prefix = mcpat_out_fname[:ext_idx]
         ext = mcpat_out_fname[ext_idx+1:]
-        new_name = "%s.%d.%s" % (prefix, phase, ext)
+        if phase == None:
+          new_name = "%s.%s" % (prefix, ext)
+        else:
+          new_name = "%s.%d.%s" % (prefix, phase, ext)
         mcpat_out_fname = os.path.join(out_dir, new_name)
         dumpMcpatOut(stats, mcpat_out_fname)
     else:
