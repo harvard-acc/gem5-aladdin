@@ -7,7 +7,7 @@
     <param name="number_of_L2Directories" value="0"/>
     <param name="number_of_L2s" value="1"/> <!-- This number means how many L2 clusters in each cluster there can be multiple banks/ports -->
     <param name="Private_L2" value="0"/><!--1 Private, 0 shared/coherent -->
-    <param name="number_of_L3s" value="1"/> <!-- This number means how many L3 clusters -->
+    <param name="number_of_L3s" value="0"/> <!-- This number means how many L3 clusters -->
     <param name="number_of_NoCs" value="1"/>
     <param name="homogeneous_cores" value="1"/><!--1 means homo -->
     <param name="homogeneous_L2s" value="1"/>
@@ -174,7 +174,7 @@
        multiplier. The fpu accesses should include accesses to multiplier and divider  -->
       <stat name="ialu_accesses" value="stats.system.cpu.iq.int_alu_accesses"/>
       <stat name="fpu_accesses" value="stats.system.cpu.iq.fp_alu_accesses"/>
-      <stat name="mul_accesses" value="0"/>
+      <stat name="mul_accesses" value="stats.system.cpu.iq.FU_type_0::IntMult"/>
       <stat name="cdb_alu_accesses" value="0"/>
       <stat name="cdb_mul_accesses" value="0"/>
       <stat name="cdb_fpu_accesses" value="0"/>
@@ -273,7 +273,7 @@
         <!-- the parameters are capacity,block_width, associativity,bank, throughput w.r.t. core clock, latency w.r.t. core clock,-->
           <param name="buffer_sizes" value="8, 8, 8, 8"/>
         <!-- all the buffer related are optional -->
-          <param name="clockrate" value="3400"/>
+          <param name="clockrate" value="1e-6/config.system.cpu_clk_domain.clock"/>
           <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
           <param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
         <param name="ports" value="1,1,1"/>
@@ -295,7 +295,7 @@
         <!-- the parameters are capacity,block_width, associativity,bank, throughput w.r.t. core clock, latency w.r.t. core clock,-->
           <param name="buffer_sizes" value="8, 8, 8, 8"/>
         <!-- all the buffer related are optional -->
-          <param name="clockrate" value="3400"/>
+          <param name="clockrate" value="1e-6/config.system.cpu_clk_domain.clock"/>
           <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
           <param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
           <param name="ports" value="1,1,1"/>
@@ -316,7 +316,7 @@
         <!-- the parameters are capacity,block_width, associativity, bank, throughput w.r.t. core clock, latency w.r.t. core clock,output_width, cache policy -->
         <param name="buffer_sizes" value="config.system.l2.mshrs, config.system.l2.write_buffers, 16, 16"/>
         <!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->
-        <param name="clockrate" value="3400"/>
+        <param name="clockrate" value="1e-6/config.system.cpu_clk_domain.clock"/>
         <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
         <param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
         <param name="ports" value="1,1,1"/>
@@ -331,27 +331,8 @@
     </component>
 
 <!--**********************************************************************-->
-<component id="system.L30" name="L30">
-        <param name="L3_config" value="16777216,64,16, 16, 16, 100,1"/>
-        <!-- the parameters are capacity,block_width, associativity,bank, throughput w.r.t. core clock, latency w.r.t. core clock,-->
-        <param name="clockrate" value="850"/>
-        <param name="ports" value="1,1,1"/>
-        <!-- number of r, w, and rw ports -->
-        <param name="device_type" value="0"/>
-        <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
-        <param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
-        <param name="buffer_sizes" value="16, 16, 16, 16"/>
-        <!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->
-        <stat name="read_accesses" value="11824"/>
-        <stat name="write_accesses" value="11276"/>
-        <stat name="read_misses" value="1632"/>
-        <stat name="write_misses" value="183"/>
-        <stat name="conflicts" value="0"/>
-        <stat name="duty_cycle" value="1"/>
-    </component>
-<!--**********************************************************************-->
     <component id="system.NoC0" name="noc0">
-      <param name="clockrate" value="3400"/>
+      <param name="clockrate" value="1e-6/config.system.clk_domain.clock"/>
       <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->
       <param name="power_gating_vcc" value="-1"/><!-- "-1" means using default power gating virtual power supply voltage constrained by technology and computed automatically -->
       <param name="type" value="0"/>
