@@ -641,7 +641,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
                "--enable-stats-dump "
                "--enable_prefetchers --prefetcher-type=stride "
                "%(mem_flag)s "
-               "--sys-clock=1GHz "
+               "--sys-clock=100MHz "
                "--cpu-type=detailed --caches %(l2cache_flag)s "
                "%(perfect_l1_flag)s "
                "--aladdin_cfg_file=%(aladdin_cfg_path)s "
@@ -683,7 +683,6 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
     if simulator == "gem5-cpu":
       executable = "-c %s" % (benchmark.expand_exec_cmd(expansion_args))
       run_args = "-o \"%s\"" % (benchmark.expand_run_args(expansion_args))
-    simulator = "gem5"  # We can drop the cpu/cache part now to avoid calling startswith().
     for config in configs:
       config_path = "%s/%s" % (bmk_dir, config)
       abs_cfg_path = "%s/%s/%s" % (bmk_dir, config, GEM5_CFG)
@@ -691,7 +690,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
         continue
       abs_output_path = "%s/%s/outputs" % (bmk_dir, config)
       cmd = ""
-      if simulator == "gem5":
+      if simulator.startswith("gem5"):
         cmd = run_cmd % {"gem5_home": gem5_home,
                          "output_path": abs_output_path,
                          "aladdin_cfg_path": abs_cfg_path,
