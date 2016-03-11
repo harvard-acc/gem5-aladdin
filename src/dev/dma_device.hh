@@ -140,7 +140,7 @@ class DmaPort : public MasterPort
     unsigned numOfOutstandingRequests;
   protected:
 
-    bool recvTimingResp(PacketPtr pkt);
+    virtual bool recvTimingResp(PacketPtr pkt);
     void recvRetry() ;
 
     void queueDma(PacketPtr pkt);

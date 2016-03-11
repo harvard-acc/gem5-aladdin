@@ -35,9 +35,9 @@ L1CACHE_DEFAULTS = {
   "cache_size": 16384,
   "cache_assoc": 4,
   "cache_hit_latency": 1,
-  "cache_line_sz" : 64,
+  "cache_line_sz" : 32,
   "tlb_hit_latency": 0,
-  "tlb_miss_latency": 100,
+  "tlb_miss_latency": 20,
   "tlb_page_size": 4096,
   "tlb_entries": 0,
   "tlb_max_outstanding_walks": 0,
@@ -165,6 +165,8 @@ def generate_aladdin_config(benchmark, kernel, params, loops):
     loops: The list of loops to include in the config file.
   """
   config_file = open("%s.cfg" % kernel, "wb")
+  if "ready_mode" in params:
+    config_file.write("ready_mode,%d\n" % params["ready_mode"])
   if "pipelining" in params:
     config_file.write("pipelining,%d\n" % params["pipelining"])
   if "cycle_time" in params:
@@ -258,20 +260,20 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   if "cache_assoc" in params:
     cache_assoc = params["cache_assoc"]
   else:
-    cache_assoc = GEM5_DEFAULTS["cache_assoc"]
+    cache_assoc = L1CACHE_DEFAULTS["cache_assoc"]
   if "cache_line_sz" in params:
     cache_line_sz = params["cache_line_sz"]
   else:
-    cache_line_sz = GEM5_DEFAULTS["cache_line_sz"]
+    cache_line_sz = L1CACHE_DEFAULTS["cache_line_sz"]
   if "cache_size" in params:
     cache_size = params["cache_size"]
   else:
-    cache_size = GEM5_DEFAULTS["cache_size"]
+    cache_size = L1CACHE_DEFAULTS["cache_size"]
   cache_params = {"cache_size": cache_size,
                   "cache_assoc": cache_assoc,
-                  "rw_ports": 0,
-                  "exr_ports": params["load_bandwidth"],
-                  "exw_ports": params["store_bandwidth"],
+                  "rw_ports": params["tlb_bandwidth"],
+                  "exr_ports": 0, #params["load_bandwidth"],
+                  "exw_ports": 0, #params["store_bandwidth"],
                   "line_size": cache_line_sz,
                   "banks" : 1, # One bank
                   "cache_type": "cache",
@@ -283,8 +285,7 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
   config_file.close()
 
   config_file = open("%s_%s.cfg" % (kernel, CACTI_TLB_CFG), "wb")
-  # Set TLB bandwidth the same as max(load/store_queue_bw)
-  params["tlb_bandwidth"] = min(params["load_bandwidth"],
+  params["tlb_bandwidth"] = min(params["tlb_bandwidth"],
                                 params["tlb_entries"])
   tlb_params = {"cache_size": params["tlb_entries"]*4,
                 "cache_assoc": 0,  # fully associative
@@ -334,7 +335,7 @@ def handle_gem5_cache_config(params):
   if "cache_size" in params:
     l1cache_size = params["cache_size"]/1024
   else:
-    l1cache_size = GEM5_DEFAULTS["cache_size"]/1024
+    l1cache_size = L1CACHE_DEFAULTS["cache_size"]/1024
   if "l2cache_size" in params:
     l2cache_size = params["l2cache_size"]/1024
   return (int(l1cache_size), int(l2cache_size))
@@ -405,8 +406,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     params["store_queue_size"] = max(1, params["load_queue_size"]/2)
     # Set max number of tlb outstanding walks the same as TLB sizes
     params["tlb_max_outstanding_walks"] = params["tlb_entries"]
-    # Set TLB bandwidth the same as max(load/store_queue_bw)
-    params["tlb_bandwidth"] = min(params["load_bandwidth"],
+    params["tlb_bandwidth"] = min(params["tlb_bandwidth"],
                                   params["tlb_entries"])
 
     for key, value in L1CACHE_DEFAULTS.iteritems():
@@ -554,21 +554,19 @@ def generate_all_configs(
     benchmark, memory_type, experiment_name, perfect_l1, enable_l2):
   """ Generates all the possible configurations for the design sweep. """
   # Start out with these parameters.
-  all_sweep_params = [pipelining,
-                      unrolling,
-                      partition]
+  all_sweep_params = [cycle_time,
+                      pipelining,
+                      unrolling]
   if memory_type & SPAD:
-    all_sweep_params.extend([cycle_time])
+    all_sweep_params.extend([partition, ready_mode])
   if memory_type & CACHE:
     if perfect_l1:
-      all_sweep_params.extend([cycle_time,
-                               tlb_entries,
+      all_sweep_params.extend([tlb_entries,
+                               tlb_bandwidth,
                                load_bandwidth,
-                               cache_assoc,
                                load_queue_size])
     else:
-      all_sweep_params.extend([cycle_time,
-                               tlb_entries,
+      all_sweep_params.extend([tlb_entries,
                                tlb_bandwidth,
                                load_bandwidth,
                                load_queue_size,
