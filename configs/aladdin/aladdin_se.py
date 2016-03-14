@@ -227,7 +227,6 @@ if options.aladdin_cfg_file:
       datapath.tlbMissLatency = config.getint(accel, "tlb_miss_latency")
       datapath.tlbCactiConfig = config.get(accel, "cacti_tlb_config")
       datapath.tlbPageBytes = config.getint(accel, "tlb_page_size")
-      datapath.isPerfectTLB = config.getboolean(accel, "is_perfect_tlb")
       datapath.numOutStandingWalks = config.getint(
           accel, "tlb_max_outstanding_walks")
       datapath.loadQueueSize = config.getint(accel, "load_queue_size")

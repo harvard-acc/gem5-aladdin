@@ -43,7 +43,6 @@ L1CACHE_DEFAULTS = {
   "tlb_max_outstanding_walks": 0,
   "tlb_assoc": 0,
   "tlb_bandwidth": 1,
-  "is_perfect_tlb": False,
   "load_bandwidth": 1,
   "load_queue_size": 16,
   "store_bandwidth": 1,
