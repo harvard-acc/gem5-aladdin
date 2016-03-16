@@ -184,6 +184,8 @@ AddLocalOption('--verbose', dest='verbose', action='store_true',
                help='Print full tool command lines')
 AddLocalOption('--use_db', dest='use_db', action='store_true',
                help='Compile with support for writing to MySQL DB.')
+AddLocalOption('--debug-aladdin', dest='debug_aladdin', action='store_true',
+               help='Compile with Aladdin debugging output.')
 
 termcap = get_termcap(GetOption('use_colors'))
 
@@ -223,6 +225,9 @@ if GetOption('use_db'):
   main.Append(CPPPATH=[use_env['MYSQL_HOME']])
   main.Append(CXXFLAGS='-DUSE_DB')
   main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
+
+if GetOption('debug_aladdin'):
+  main.Append(CCFLAGS = '-DDEBUG')
 
 #FIXME
 main_dict_keys = main.Dictionary().keys()
