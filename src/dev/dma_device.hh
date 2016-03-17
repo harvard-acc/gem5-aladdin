@@ -45,6 +45,7 @@
 #define __DEV_DMA_DEVICE_HH__
 
 #include <deque>
+#include <vector>
 
 #include "dev/io_device.hh"
 #include "params/DmaDevice.hh"
@@ -54,6 +55,8 @@
 //Modification of DMA for Aladdin simulation
 #define MAX_DMA_REQUEST 64
 
+/* Maximum of DMA channels*/
+#define MAX_CHANNELS 8
 class DmaPort : public MasterPort
 {
   private:
@@ -99,19 +102,25 @@ class DmaPort : public MasterPort
         /** Number of bytes that have been acked for this transaction. */
         Addr numBytes;
 
+        /** Base DMA request address for this transaction. */
+        Addr baseAddr;
+
         /** Amount to delay completion of dma by */
         const Tick delay;
 
-        DmaReqState(Event *ce, Addr tb, Tick _delay)
-            : completionEvent(ce), totBytes(tb), numBytes(0), delay(_delay)
+        DmaReqState(Event *ce, Addr tb, Addr base, Tick _delay)
+            : completionEvent(ce), totBytes(tb),
+              numBytes(0), baseAddr(base), delay(_delay)
         {}
     };
 
     /** The device that owns this port. */
     MemObject *device;
 
-    /** Use a deque as we never do any insertion or removal in the middle */
-    std::deque<PacketPtr> transmitList;
+    /** Each deque represents a memory channel that never does any insertion or
+     * removal in the middle. A vector of deques are used to represent
+     * multi-chanel DMAs that requests across channels can be interleaved. */
+    std::vector< std::deque<PacketPtr> > transmitList;
 
     /** Event used to schedule a future sending from the transmit list. */
     EventWrapper<DmaPort, &DmaPort::sendDma> sendEvent;
@@ -138,16 +147,30 @@ class DmaPort : public MasterPort
 
     /** Number of outstanding requests*/
     unsigned numOfOutstandingRequests;
+
+    /** Keep track of the current channel index to send DMA request. */
+    int curr_channel_idx;
+
+    /** DMA transaction chunk size. */
+    unsigned ChunkSize;
+
+    /** True if we want to interleave DMA requests from different channels.*/
+    bool multi_channel;
   protected:
 
     virtual bool recvTimingResp(PacketPtr pkt);
     void recvRetry() ;
 
-    void queueDma(PacketPtr pkt);
+    void queueDma(unsigned channel_index, PacketPtr pkt);
+
+    Addr getPacketBaseAddr(PacketPtr pkt);
 
   public:
 
     DmaPort(MemObject *dev, System *s, unsigned max_req);
+
+    DmaPort(MemObject *dev, System *s, unsigned max_req, unsigned chunk_size,
+            bool interleave=false);
 
     void dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                    uint8_t *data, Tick delay, Request::Flags flag = 0);
