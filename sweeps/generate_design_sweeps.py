@@ -27,8 +27,10 @@ GEM5_DEFAULTS = {
   "cycle_time": 1,
   "memory_type": "cache",
   "spad_ports": 1,
-  "dma_setup_latency" : 100,
   "max_dma_requests" : 16,
+  "dma_setup_latency" : 100,
+  "dma_multi_channel" : False,
+  "dma_chunk_size" : 64,
 }
 
 L1CACHE_DEFAULTS = {
@@ -88,43 +90,43 @@ def write_aladdin_array_configs(benchmark, config_file, params):
      cached.
   """
   sweep_memory_type = params["memory_type"]
-  if "partition" in params:
-    for array in benchmark.arrays:
-      if (sweep_memory_type & SPAD and
-          (array.memory_type == SPAD or not (sweep_memory_type & CACHE))):
-        if array.partition_type == PARTITION_CYCLIC:
-          config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
-                            (array.name,
-                             array.size*array.word_size,
-                             array.word_size,
-                             params["partition"]))
-        elif array.partition_type == PARTITION_BLOCK:
-          config_file.write("partition,block,%s,%d,%d,%d\n" %
-                            (array.name,
-                             array.size*array.word_size,
-                             array.word_size,
-                             params["partition"]))
-        elif array.partition_type == PARTITION_COMPLETE:
-          config_file.write("partition,complete,%s,%d\n" %
-                            (array.name, array.size*array.word_size))
-        else:
-          print("Invalid array partitioning configuration for array %s." %
-                array.name)
-          exit(1)
-      elif sweep_memory_type & CACHE:
-        # In the cache mode, if an array is not completely partitioned, access
-        # it with cache.
-        if array.partition_type == PARTITION_COMPLETE:
-          config_file.write("partition,complete,%s,%d\n" %
-                            (array.name, array.size*array.word_size))
-        else:
-          config_file.write("cache,%s,%d,%d\n" %
+  # Always set array configs.
+  for array in benchmark.arrays:
+    if (sweep_memory_type & SPAD and
+        (array.memory_type == SPAD or not (sweep_memory_type & CACHE))):
+      if array.partition_type == PARTITION_CYCLIC:
+        config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
                           (array.name,
                            array.size*array.word_size,
-                           array.word_size))
+                           array.word_size,
+                           params["partition"]))
+      elif array.partition_type == PARTITION_BLOCK:
+        config_file.write("partition,block,%s,%d,%d,%d\n" %
+                          (array.name,
+                           array.size*array.word_size,
+                           array.word_size,
+                           params["partition"]))
+      elif array.partition_type == PARTITION_COMPLETE:
+        config_file.write("partition,complete,%s,%d\n" %
+                          (array.name, array.size*array.word_size))
       else:
-        print("Invalid memory type for array %s." % array.name)
+        print("Invalid array partitioning configuration for array %s." %
+              array.name)
         exit(1)
+    elif sweep_memory_type & CACHE:
+      # In the cache mode, if an array is not completely partitioned, access
+      # it with cache.
+      if array.partition_type == PARTITION_COMPLETE:
+        config_file.write("partition,complete,%s,%d\n" %
+                          (array.name, array.size*array.word_size))
+      else:
+        config_file.write("cache,%s,%d,%d\n" %
+                        (array.name,
+                         array.size*array.word_size,
+                         array.word_size))
+    else:
+      print("Invalid memory type for array %s." % array.name)
+      exit(1)
 
 def write_benchmark_specific_configs(benchmark, config_file, params):
   """ Writes benchmark specific loop configurations.
@@ -557,7 +559,9 @@ def generate_all_configs(
                       pipelining,
                       unrolling]
   if memory_type & SPAD:
-    all_sweep_params.extend([partition, ready_mode])
+    all_sweep_params.extend([partition])
+  if memory_type & DMA:
+    all_sweep_params.extend([ready_mode, dma_multi_channel])
   if memory_type & CACHE:
     if perfect_l1:
       all_sweep_params.extend([tlb_entries,
@@ -937,13 +941,14 @@ def check_arguments(args):
     sys.exit(1)
 
   # Convert memory type to integer flag.
-  if args.memory_type == "spad" or args.memory_type == "dma":
+  if args.memory_type == "spad":
     args.memory_type = SPAD
+  elif args.memory_type == "dma":
+    args.memory_type = DMA | SPAD
   elif args.memory_type == "cache":
     args.memory_type = CACHE
   elif args.memory_type == "hybrid":
     args.memory_type = SPAD | CACHE
-
   # Per mode requirements
   if args.mode == "all":
     args.dry = True

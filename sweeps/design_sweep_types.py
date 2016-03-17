@@ -20,6 +20,7 @@ PARTITION_COMPLETE = 3
 # in. Combine via bitwise OR (so hybrid is SPAD | CACHE).
 SPAD = 0x1
 CACHE = 0x2
+DMA = 0x4
 
 class SweepParam(namedtuple(
       "SweepParamBase", "name, start, end, step, step_type, short_name, "

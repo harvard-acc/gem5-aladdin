@@ -240,6 +240,8 @@ if options.aladdin_cfg_file:
       datapath.spadPorts = config.getint(accel, "spad_ports")
       datapath.dmaSetupLatency = config.getint(accel, "dma_setup_latency")
       datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
+      datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel");
+      datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
     if (memory_type != "cache" and memory_type != "spad" and
         memory_type != "dma" and memory_type != "hybrid"):
       fatal("Aladdin configuration file specified invalid memory type %s for "

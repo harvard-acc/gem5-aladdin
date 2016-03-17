@@ -48,14 +48,22 @@
 #include "dev/dma_device.hh"
 #include "sim/system.hh"
 
-DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req)
+DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
+                 unsigned _ChunkSize, bool multi_channel)
     : MasterPort(dev->name() + ".dma", dev), device(dev), sendEvent(this),
       sys(s), masterId(s->getMasterId(dev->name())),
       pendingCount(0), drainManager(NULL),
-      inRetry(false), maxRequests(max_req)
-{ 
+      inRetry(false), maxRequests(max_req),
+      ChunkSize(_ChunkSize),
+      multi_channel(multi_channel)
+{
   numOfOutstandingRequests = 0;
+  curr_channel_idx = 0;
+  DPRINTF(DMA, "Setting up DMA with transaction chunk size %d\n", ChunkSize);
 }
+
+DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req)
+    : DmaPort(dev, s, max_req, sys->cacheLineSize(), false) {}
 
 void
 DmaPort::handleResp(PacketPtr pkt, Tick delay)
@@ -68,12 +76,13 @@ DmaPort::handleResp(PacketPtr pkt, Tick delay)
     DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
     assert(state);
 
-    DPRINTF(DMA, "Received response %s for addr: %#x size: %d nb: %d,"  \
+    DPRINTF(DMA, "Received response %s for base addr: %#x, addr: %#x size: %d nb: %d,"  \
             " tot: %d sched %d outstanding:%u\n",
-            pkt->cmdString(), pkt->getAddr(), pkt->req->getSize(),
+            pkt->cmdString(), state->baseAddr,
+            pkt->getAddr(), pkt->req->getSize(),
             state->numBytes, state->totBytes,
             state->completionEvent ?
-            state->completionEvent->scheduled() : 0, 
+            state->completionEvent->scheduled() : 0,
             numOfOutstandingRequests);
 
     assert(pendingCount != 0);
@@ -163,11 +172,22 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // one DMA request sender state for every action, that is then
     // split into many requests and packets based on the block size,
     // i.e. cache line size
-    DmaReqState *reqState = new DmaReqState(event, size, delay);
+    DmaReqState *reqState = new DmaReqState(event, size, addr, delay);
 
     DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n", addr, size,
             event ? event->scheduled() : -1);
-    for (ChunkGenerator gen(addr, size, sys->cacheLineSize());
+    /* TODO: Ideally the number of DMA channels should be a fixed hardware
+     * constraint, instead of growing up and down at runtime. A better way to do
+     * this is to allocate a fixed-number of channels when we initialize the DMA
+     * device. We will swtich to that after MICRO. */
+    transmitList.push_back(std::deque<PacketPtr>());
+    assert (transmitList.size() < MAX_CHANNELS);
+    /* TODO: Currently as we dynamically add channels, the channel ID is the
+     * last channel that is just added. If we switch to the fixed-number of
+     * channels model, we can let users to pick which channel they want to use,
+     * or automatically pick the empty channel. */
+    unsigned channel_idx = transmitList.size() - 1;
+    for (ChunkGenerator gen(addr, size, ChunkSize);
          !gen.done(); gen.next()) {
         Request *req = new Request(gen.addr(), gen.size(), flag, masterId);
         req->taskId(ContextSwitchTaskId::DMA);
@@ -179,9 +199,9 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
 
         pkt->senderState = reqState;
 
-        DPRINTF(DMA, "--Queuing DMA for addr: %#x size: %d\n", gen.addr(),
-                gen.size());
-        queueDma(pkt);
+        DPRINTF(DMA, "--Queuing DMA for addr: %#x size: %d in channel %d\n", gen.addr(),
+                gen.size(), channel_idx);
+        queueDma(channel_idx, pkt);
     }
 
     // in zero time also initiate the sending of the packets we have
@@ -191,9 +211,9 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
 }
 
 void
-DmaPort::queueDma(PacketPtr pkt)
+DmaPort::queueDma(unsigned channel_idx, PacketPtr pkt)
 {
-    transmitList.push_back(pkt);
+    transmitList[channel_idx].push_back(pkt);
 
     // remember that we have another packet pending, this will only be
     // decremented once a response comes back
@@ -205,23 +225,59 @@ DmaPort::trySendTimingReq()
 {
     // send the first packet on the transmit list and schedule the
     // following send if it is successful
-    PacketPtr pkt = transmitList.front();
+    assert(transmitList[curr_channel_idx].size());
+    PacketPtr pkt = transmitList[curr_channel_idx].front();
 
-    DPRINTF(DMA, "Trying to send %s addr %#x\n", pkt->cmdString(),
-            pkt->getAddr());
+    DPRINTF(DMA, "Trying to send %s addr %#x of size %d\n", pkt->cmdString(),
+            pkt->getAddr(), pkt->req->getSize());
 
     inRetry = !sendTimingReq(pkt);
     if (!inRetry) {
-        transmitList.pop_front();
+        // pop the first packet in the current channel
+        transmitList[curr_channel_idx].pop_front();
+        DPRINTF(DMA,
+               "Sent %s addr %#x with size %d from channel %d. \n",
+                pkt->cmdString(),
+                pkt->getAddr(),
+                pkt->req->getSize());
+        // Find next_channel_id
+        int next_channel_idx;
+        unsigned num_channels = transmitList.size();
+        // If the current channel is empty, or DMA is in multi-channel mode,
+        // move on to the next channel.
+        if (transmitList[curr_channel_idx].empty() || multi_channel) {
+          next_channel_idx = (curr_channel_idx + 1) % num_channels;
+          // Check whether next channel is empty
+          while (transmitList[next_channel_idx].empty()) {
+            if (next_channel_idx == curr_channel_idx) {
+              // no more packet after this one.
+              next_channel_idx = -1;
+              break;
+            } else {
+              next_channel_idx = (next_channel_idx + 1) % num_channels;
+            }
+          }
+        } else {
+          // DMA is not interleaving, and there are more packets to send in curr
+          // channel.
+          next_channel_idx = curr_channel_idx;
+        }
+        // assign channel id.
+        curr_channel_idx = next_channel_idx;
         DPRINTF(DMA, "-- Done\n");
         numOfOutstandingRequests ++;
         // if there is more to do, then do so
-        if (!transmitList.empty())
+        if (curr_channel_idx != -1) {
             // this should ultimately wait for as many cycles as the
             // device needs to send the packet, but currently the port
             // does not have any known width so simply wait a single
             // cycle
             device->schedule(sendEvent, device->clockEdge(Cycles(1)));
+        } else {
+          // Reset the channel idx for the next transfer.
+          curr_channel_idx = 0;
+          transmitList.clear();
+        }
     } else {
         DPRINTF(DMA, "-- Failed, waiting for retry\n");
     }
@@ -255,18 +311,26 @@ DmaPort::sendDma()
         trySendTimingReq();
     } else if (sys->isAtomicMode()) {
         // send everything there is to send in zero time
-        while (!transmitList.empty()) {
-            PacketPtr pkt = transmitList.front();
-            transmitList.pop_front();
-
+        for (auto it : transmitList) {
+          while(!it.empty()){
+            PacketPtr pkt = it.front();
+            it.pop_front();
             DPRINTF(DMA, "Sending  DMA for addr: %#x size: %d\n",
                     pkt->req->getPaddr(), pkt->req->getSize());
             Tick lat = sendAtomic(pkt);
 
             handleResp(pkt, lat);
+          }
         }
     } else
         panic("Unknown memory mode.");
+}
+
+Addr
+DmaPort::getPacketBaseAddr(PacketPtr pkt) {
+
+  DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
+  return state->baseAddr;
 }
 
 BaseMasterPort &
