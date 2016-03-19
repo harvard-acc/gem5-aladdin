@@ -28,9 +28,10 @@ GEM5_DEFAULTS = {
   "memory_type": "cache",
   "spad_ports": 1,
   "max_dma_requests" : 16,
-  "dma_setup_latency" : 100,
+  "dma_setup_latency" : 40,
   "dma_multi_channel" : False,
   "dma_chunk_size" : 64,
+  "issue_dma_ops_asap": False
 }
 
 L1CACHE_DEFAULTS = {
@@ -644,6 +645,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
                "%(mem_flag)s "
                "--sys-clock=100MHz "
                "--cpu-type=detailed --caches %(l2cache_flag)s "
+               "--cacheline_size=32 "
                "%(perfect_l1_flag)s "
                "--aladdin_cfg_file=%(aladdin_cfg_path)s "
                "%(executable)s %(run_args)s "
