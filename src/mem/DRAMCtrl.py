@@ -910,3 +910,26 @@ class GDDR5_4000_x64(DRAMCtrl):
     # Default different rank bus delay to 2 CK, @1000 MHz = 2 ns
     tCS = '2ns'
     tREFI = '3.9us'
+
+# Based on Micron MT41K128M16HA-15E at 1066Mbps (16 Meg x 16 x 8 banks).
+# This is used in the Zedboard.
+class MicronDDR3_1066_x32(DRAMCtrl):
+    device_size = "256MB"
+    device_bus_width = 32
+    burst_length = 8
+    devices_per_rank = 16  # 16 x 8 banks, so 16 devices.
+    ranks_per_channel = 1  # Single rank.
+    banks_per_rank = 8     # Per the name.
+    device_rowbuffer_size = '4kB'
+
+    tCL = '13.1ns'
+    tRCD = '13.1ns'
+    tRP = '13.1ns'
+    tRAS = '37.5ns'
+    tBURST = '7.5ns'  # 8 bursts / 2 per clk = 4 clocks at 533MHz.
+    tRRD = '11.25ns'  # 6 cycles.
+    tRFC = '161.25ns'  # 86 cycles.
+    tXAW = '50ns'  # 27 cycles.
+    tREFI = '7.8us'
+    tWTR = '7.5ns'  # Greater of 4 CLKs or 7.5ns, and 4 CLKs = 7.5ns.
+    activation_limit = 4  # Guessing.
