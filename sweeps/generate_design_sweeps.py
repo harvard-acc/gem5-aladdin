@@ -31,7 +31,8 @@ GEM5_DEFAULTS = {
   "dma_setup_latency" : 40,
   "dma_multi_channel" : False,
   "dma_chunk_size" : 64,
-  "issue_dma_ops_asap": False
+  "issue_dma_ops_asap": False,
+  "ignore_cache_flush": False,
 }
 
 L1CACHE_DEFAULTS = {
@@ -120,6 +121,24 @@ def write_aladdin_array_configs(benchmark, config_file, params):
       if array.partition_type == PARTITION_COMPLETE:
         config_file.write("partition,complete,%s,%d\n" %
                           (array.name, array.size*array.word_size))
+      elif array.name == "sbox" or array.name == "queue" :
+        config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
+                          (array.name,
+                           array.size*array.word_size,
+                           array.word_size,
+                           4))
+      elif benchmark.name == "fft-transpose":
+        if array.name != "work_x" and array.name != "work_y":
+          config_file.write("partition,cyclic,%s,%d,%d,%d\n" %
+                            (array.name,
+                             array.size*array.word_size,
+                             array.word_size,
+                             4))
+        else:
+          config_file.write("cache,%s,%d,%d\n" %
+                          (array.name,
+                           array.size*array.word_size,
+                           array.word_size))
       else:
         config_file.write("cache,%s,%d,%d\n" %
                         (array.name,
@@ -167,6 +186,8 @@ def generate_aladdin_config(benchmark, kernel, params, loops):
     loops: The list of loops to include in the config file.
   """
   config_file = open("%s.cfg" % kernel, "wb")
+  if "scratchpad_ports" in params:
+    config_file.write("scratchpad_ports,%d\n" % params["scratchpad_ports"])
   if "ready_mode" in params:
     config_file.write("ready_mode,%d\n" % params["ready_mode"])
   if "pipelining" in params:
@@ -230,7 +251,7 @@ def write_cacti_config(config_file, params):
       "-tag size (b) \"default\"\n"
       "-access mode (normal, sequential, fast) - \"normal\"\n"
       "-design objective (weight delay, dynamic power, leakage power, "
-          "cycle time, area) 0:0:0:100:0\n"
+          "cycle time, area) 0:0:100:0:0\n"
       "-deviate (delay, dynamic power, leakage power, cycle time, area) "
           "20:100000:100000:100000:100000\n"
       "-NUCAdesign objective (weight delay, dynamic power, leakage power, "
@@ -246,7 +267,7 @@ def write_cacti_config(config_file, params):
       "-Interconnect projection - \"conservative\"\n"
       "-Core count 1\n"
       "-Cache level (L2/L3) - \"L2\"\n"
-      "-Add ECC - \"true\"\n"
+      "-Add ECC - \"false\"\n"
       "-Print level (DETAILED, CONCISE) - \"DETAILED\"\n"
       "-Print input parameters - \"false\"\n"
       "-Force cache config - \"false\"\n"
@@ -271,9 +292,13 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
     cache_size = params["cache_size"]
   else:
     cache_size = L1CACHE_DEFAULTS["cache_size"]
+  if params["tlb_bandwidth"] == 0:
+    rw_ports = 1
+  else:
+    rw_ports = params["tlb_bandwidth"]
   cache_params = {"cache_size": cache_size,
                   "cache_assoc": cache_assoc,
-                  "rw_ports": params["tlb_bandwidth"],
+                  "rw_ports": rw_ports,
                   "exr_ports": 0, #params["load_bandwidth"],
                   "exw_ports": 0, #params["store_bandwidth"],
                   "line_size": cache_line_sz,
@@ -293,11 +318,11 @@ def generate_all_cacti_configs(benchmark_name, kernel, params):
                 "cache_assoc": 0,  # fully associative
                 "rw_ports": 0,
                 "exw_ports":  1,  # One write port for miss returns.
-                "exr_ports": params["tlb_bandwidth"],
+                "exr_ports": rw_ports,
                 "line_size": 4,  # 32b per TLB entry. in bytes
                 "banks" : 1,
                 "cache_type": "cache",
-                "search_ports": params["tlb_bandwidth"],
+                "search_ports": rw_ports,
                 "io_bus_width" : 32}
   write_cacti_config(config_file, tlb_params)
   config_file.close()
@@ -511,15 +536,15 @@ def generate_configs_recurse(benchmark, set_params, sweep_params,
     if set_params["memory_type"] & SPAD and not set_params["memory_type"] & CACHE:
       config_name = generate_smart_config_name(set_params)
     elif set_params["memory_type"] & CACHE:
-      if perfect_l1:
-        CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d"
-        config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
-                                            set_params["unrolling"],
-                                            set_params["tlb_entries"],
-                                            set_params["load_bandwidth"],
-                                            set_params["load_queue_size"])
-      else:
-        config_name = generate_smart_config_name(set_params)
+      #if perfect_l1:
+        #CONFIG_NAME_FORMAT = "pipe%d_unr_%d_tlb_%d_ldbw_%d_ldq_%d"
+        #config_name = CONFIG_NAME_FORMAT % (set_params["pipelining"],
+                                            #set_params["unrolling"],
+                                            #set_params["tlb_entries"],
+                                            #set_params["load_bandwidth"],
+                                            #set_params["load_queue_size"])
+      #else:
+      config_name = generate_smart_config_name(set_params)
     else:
       raise ValueError("Unrecognized memory_type.")
     print "  Configuration %s" % config_name
@@ -560,13 +585,16 @@ def generate_all_configs(
                       pipelining,
                       unrolling]
   if memory_type & SPAD:
-    all_sweep_params.extend([partition])
+    all_sweep_params.extend([partition, scratchpad_ports])
   if memory_type & DMA:
-    all_sweep_params.extend([ready_mode, dma_multi_channel])
+    all_sweep_params.extend([ready_mode,
+                             dma_multi_channel,
+                             issue_dma_ops_asap,
+                             ignore_cache_flush])
   if memory_type & CACHE:
     if perfect_l1:
-      all_sweep_params.extend([tlb_entries,
-                               tlb_bandwidth,
+      all_sweep_params.extend([tlb_bandwidth,
+                               tlb_entries,
                                load_bandwidth,
                                load_queue_size])
     else:
@@ -606,7 +634,7 @@ def write_config_files(benchmark, output_dir, memory_type,
   os.chdir("..")
 
 def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
-               perfect_l1, experiment_name):
+               perfect_l1, perfect_bus, experiment_name):
   """ Run the design sweep on the given workloads.
 
   This function will also write a convenience Bash script to the configuration
@@ -635,7 +663,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
     num_cpus = 1
   if simulator.startswith("gem5"):
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
-               "--stats-db-file=stats.db "
+               #"--stats-db-file=stats.db "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
                "--num-cpus=%(num_cpus)s "
@@ -643,10 +671,12 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
                "--enable-stats-dump "
                "--enable_prefetchers --prefetcher-type=stride "
                "%(mem_flag)s "
-               "--sys-clock=100MHz "
-               "--cpu-type=detailed --caches %(l2cache_flag)s "
+               "--sys-clock=%(sys_clock)s "
+               #"--l1d_size=4MB --l1d_assoc=16 "
+               "--cpu-type=timing --caches %(l2cache_flag)s "
                "--cacheline_size=32 "
                "%(perfect_l1_flag)s "
+               "%(perfect_bus_flag)s "
                "--aladdin_cfg_file=%(aladdin_cfg_path)s "
                "%(executable)s %(run_args)s "
                "> %(output_path)s/stdout 2> %(output_path)s/stderr")
@@ -665,6 +695,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
   l2cache_flag = "--l2cache" if enable_l2 else ""
   mem_flag = "--mem-latency=0ns --mem-type=simple_mem " if perfect_l1 else "--mem-type=ddr3_1600_x64 "
   perfect_l1_flag = "--is_perfect_cache=1 --is_perfect_bus=1 " if perfect_l1 else ""
+  perfect_bus_flag = "--is_perfect_bus=1 " if perfect_bus  else ""
   if enable_l2:
     file_name = "run_L2.sh"
     outdir = "with_L2"
@@ -694,6 +725,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
       abs_output_path = "%s/%s/outputs" % (bmk_dir, config)
       cmd = ""
       if simulator.startswith("gem5"):
+        sys_clock = "100MHz"
         cmd = run_cmd % {"gem5_home": gem5_home,
                          "output_path": abs_output_path,
                          "aladdin_cfg_path": abs_cfg_path,
@@ -702,8 +734,10 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
                          "l2cache_flag": l2cache_flag,
                          "mem_flag": mem_flag,
                          "perfect_l1_flag" : perfect_l1_flag,
+                         "perfect_bus_flag" : perfect_bus_flag,
                          "executable": executable,
-                         "run_args": run_args}
+                         "run_args": run_args,
+                         "sys_clock": sys_clock}
       else:
         if not experiment_name:
           experiment_name = ""
@@ -848,7 +882,7 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
         os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
                   "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
                   "-o " + dma_obj + " " + dma_file)
-        all_objs.append(dma_obj)
+        all_objs.insert(0, dma_obj)
       # Compile the source file.
       os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
                 "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
@@ -882,11 +916,11 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
       os.chdir(cwd)
 
 def generate_condor_scripts(workload, simulator, output_dir, source_dir,
-                            username, enable_l2, perfect_l1, experiment_name):
+                            username, enable_l2, perfect_l1, perfect_bus, experiment_name):
   """ Generate a single Condor script for the complete design sweep. """
   # First, generate all the runscripts.
   run_sweeps(workload, simulator, output_dir, source_dir, True, enable_l2,
-             perfect_l1, experiment_name)
+             perfect_l1, perfect_bus, experiment_name)
   cwd = os.getcwd()
   os.chdir("..")
   basicCondor = [
@@ -1011,6 +1045,8 @@ def main():
       "simulation output to be dumped to a directory called outputs/perfect_l1."
       "Without this flag, GEM5 output is stored to outputs/no_L2. If "
       "generating Condor scripts, this flag will run perfect l1 simulations.")
+  parser.add_argument("--perfect_bus", action="store_true", help="Enable the "
+      "perfect memory bus during simulations if applicable. ")
   parser.add_argument("--simulator", choices=["aladdin", "gem5-cache", "gem5-cpu"],
       default="aladdin", help="Select the simulator to use, gem5 or aladdin. "
       "If selecting gem5, decide whether to include a CPU or just use the memory "
@@ -1036,12 +1072,12 @@ def main():
 
   if args.mode == "run":
     run_sweeps(workload, args.simulator, args.output_dir, args.source_dir,
-               args.dry, args.enable_l2, args.perfect_l1, args.experiment_name)
+               args.dry, args.enable_l2, args.perfect_l1, args.perfect_bus, args.experiment_name)
 
   if args.mode == "condor" or args.mode == "all":
     generate_condor_scripts(
         workload, args.simulator, args.output_dir, args.source_dir, args.username,
-        args.enable_l2, args.perfect_l1, args.experiment_name)
+        args.enable_l2, args.perfect_l1, args.perfect_bus, args.experiment_name)
 
 if __name__ == "__main__":
   main()
