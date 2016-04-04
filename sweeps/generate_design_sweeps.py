@@ -33,6 +33,7 @@ GEM5_DEFAULTS = {
   "dma_chunk_size" : 64,
   "issue_dma_ops_asap": False,
   "ignore_cache_flush": False,
+  "ready_mode": False,
 }
 
 L1CACHE_DEFAULTS = {
@@ -155,23 +156,23 @@ def write_benchmark_specific_configs(benchmark, config_file, params):
   """
   # md-grid specific unrolling config
   if benchmark.name == "md-grid":
-    config_file.write("flatten,md,52\n")
-    config_file.write("flatten,md,56\n")
-    config_file.write("flatten,md,62\n")
-    config_file.write("unrolling,md,46,1\n")
-    config_file.write("unrolling,md,47,1\n")
+    config_file.write("flatten,md,61\n")
+    config_file.write("flatten,md,65\n")
+    config_file.write("flatten,md,71\n")
+    config_file.write("unrolling,md,55,1\n")
+    config_file.write("unrolling,md,56,1\n")
     if params["unrolling"] <= 4:
-      config_file.write("unrolling,md,48,1\n")
-      config_file.write("unrolling,md,50,1\n")
-      config_file.write("unrolling,md,51,%d\n" %(params["unrolling"]))
+      config_file.write("unrolling,md,57,1\n")
+      config_file.write("unrolling,md,59,1\n")
+      config_file.write("unrolling,md,60,%d\n" %(params["unrolling"]))
     elif params["unrolling"] <=16:
-      config_file.write("unrolling,md,48,1\n")
-      config_file.write("unrolling,md,50,%d\n" %(params["unrolling"]/4))
-      config_file.write("flatten,md,51\n")
+      config_file.write("unrolling,md,57,1\n")
+      config_file.write("unrolling,md,59,%d\n" %(params["unrolling"]/4))
+      config_file.write("flatten,md,60\n")
     elif params["unrolling"] <=32:
-      config_file.write("unrolling,md,48,%d\n" %(params["unrolling"]/16))
-      config_file.write("flatten,md,50\n")
-      config_file.write("flatten,md,51\n")
+      config_file.write("unrolling,md,57,%d\n" %(params["unrolling"]/16))
+      config_file.write("flatten,md,59\n")
+      config_file.write("flatten,md,60\n")
     return True
   return False
 
@@ -663,6 +664,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
     num_cpus = 1
   if simulator.startswith("gem5"):
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
+               "--debug-flags=HybridDatapath,DMA "
                #"--stats-db-file=stats.db "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
@@ -693,7 +695,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
   # parameters specific to it so we can quickly run experiments with and without
   # it. We should reimplement this later so it's more general.
   l2cache_flag = "--l2cache" if enable_l2 else ""
-  mem_flag = "--mem-latency=0ns --mem-type=simple_mem " if perfect_l1 else "--mem-type=ddr3_1600_x64 "
+  mem_flag = "--mem-latency=0ns --mem-type=simple_mem " if perfect_l1 else "--mem-type=DDR3_1600_x64 "
   perfect_l1_flag = "--is_perfect_cache=1 --is_perfect_bus=1 " if perfect_l1 else ""
   perfect_bus_flag = "--is_perfect_bus=1 " if perfect_bus  else ""
   if enable_l2:
@@ -874,8 +876,8 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
       all_objs = [opt_obj]
 
       defines = " "
-      if (memory_type & SPAD and
-          (simulator == "gem5-cpu" or simulator == "gem5-cache")):
+      if (memory_type & DMA or (memory_type & SPAD and
+          (simulator == "gem5-cpu" or simulator == "gem5-cache"))):
         defines += "-DDMA_MODE "
         dma_file = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.c"
         dma_obj = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.llvm"
@@ -910,6 +912,9 @@ def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
       if workload == benchmarks["SHOC"]:
         os.system(executable)
       elif workload == benchmarks["MACHSUITE"]:
+        print (executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
+         (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
+         source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
         os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
          (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
          source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))

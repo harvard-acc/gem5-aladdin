@@ -167,13 +167,13 @@ DmaPort::recvReqRetry()
 }
 
 RequestPtr
-DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
-                   uint8_t *data, Tick delay, Request::Flags flag)
+DmaPort::dmaAction(Packet::Command cmd, Addr base_addr, int offset, int size,
+                   Event *event, uint8_t *data, Tick delay, Request::Flags flag)
 {
     // one DMA request sender state for every action, that is then
     // split into many requests and packets based on the block size,
     // i.e. cache line size
-    DmaReqState *reqState = new DmaReqState(event, size, addr, delay);
+    DmaReqState *reqState = new DmaReqState(event, size, base_addr, offset, delay);
 
     // (functionality added for Table Walker statistics)
     // We're only interested in this when there will only be one request.
@@ -181,8 +181,9 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // the only request in that case.
     RequestPtr req = NULL;
 
-    DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n", addr, size,
-            event ? event->scheduled() : -1);
+    DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n",
+            base_addr + offset, size, event ? event->scheduled() : -1);
+
     /* TODO: Ideally the number of DMA channels should be a fixed hardware
      * constraint, instead of growing up and down at runtime. A better way to do
      * this is to allocate a fixed-number of channels when we initialize the DMA
@@ -194,7 +195,7 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
      * channels model, we can let users to pick which channel they want to use,
      * or automatically pick the empty channel. */
     unsigned channel_idx = transmitList.size() - 1;
-    for (ChunkGenerator gen(addr, size, ChunkSize);
+    for (ChunkGenerator gen(base_addr + offset, size, ChunkSize);
          !gen.done(); gen.next()) {
         req = new Request(gen.addr(), gen.size(), flag, masterId);
         req->taskId(ContextSwitchTaskId::DMA);
@@ -217,6 +218,13 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     sendDma();
 
     return req;
+}
+
+RequestPtr
+DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+                   uint8_t *data, Tick delay, Request::Flags flag)
+{
+    return dmaAction(cmd, addr, 0, size, event, data, delay, flag);
 }
 
 void

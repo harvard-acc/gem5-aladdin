@@ -56,7 +56,7 @@
 #define MAX_DMA_REQUEST 64
 
 /* Maximum of DMA channels*/
-#define MAX_CHANNELS 8
+#define MAX_CHANNELS 20
 class DmaPort : public MasterPort
 {
   private:
@@ -111,10 +111,15 @@ class DmaPort : public MasterPort
         /** Amount to delay completion of dma by */
         const Tick delay;
 
-        DmaReqState(Event *ce, Addr tb, Addr base, Tick _delay)
+        DmaReqState(Event *ce, Addr tb, Addr base, size_t _offset, Tick _delay)
             : completionEvent(ce), totBytes(tb),
-              numBytes(0), baseAddr(base), delay(_delay)
+              numBytes(0), baseAddr(base), offset(_offset), delay(_delay)
         {}
+
+        DmaReqState(Event *ce, Addr tb, Addr base, Tick _delay)
+            : DmaReqState(ce, tb, base, 0, _delay)
+        {}
+
     };
 
     /** The device that owns this port. */
@@ -180,6 +185,9 @@ class DmaPort : public MasterPort
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                          uint8_t *data, Tick delay, Request::Flags flag = 0);
 
+    RequestPtr dmaAction(Packet::Command cmd, Addr base_addr, int offset, int size,
+                         Event *event, uint8_t *data, Tick delay, Request::Flags flag = 0);
+
     bool dmaPending() const { return pendingCount > 0; }
 
     unsigned int drain(DrainManager *drainManger);
@@ -198,13 +206,13 @@ class DmaDevice : public PioDevice
     void dmaWrite(Addr addr, int size, Event *event, uint8_t *data,
                   Tick delay = 0)
     {
-        dmaPort.dmaAction(MemCmd::WriteReq, addr, size, event, data, delay);
+        dmaPort.dmaAction(MemCmd::WriteReq, addr, 0, size, event, data, delay);
     }
 
     void dmaRead(Addr addr, int size, Event *event, uint8_t *data,
                  Tick delay = 0)
     {
-        dmaPort.dmaAction(MemCmd::ReadReq, addr, size, event, data, delay);
+        dmaPort.dmaAction(MemCmd::ReadReq, addr, 0, size, event, data, delay);
     }
 
     bool dmaPending() const { return dmaPort.dmaPending(); }
