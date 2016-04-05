@@ -664,7 +664,6 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
     num_cpus = 1
   if simulator.startswith("gem5"):
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
-               "--debug-flags=HybridDatapath,DMA "
                #"--stats-db-file=stats.db "
                "--outdir=%(output_path)s/%(outdir)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
