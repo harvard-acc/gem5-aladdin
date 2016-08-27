@@ -314,7 +314,7 @@ def template BasicDeclare {{
 
 // Basic instruction class constructor template.
 def template BasicConstructor {{
-    inline %(class_name)s::%(class_name)s(ExtMachInst machInst)
+    %(class_name)s::%(class_name)s(ExtMachInst machInst)
          : %(base_class)s("%(mnemonic)s", machInst, %(op_class)s)
     {
         %(constructor)s;
@@ -323,7 +323,7 @@ def template BasicConstructor {{
 
 // Basic instruction class execute method template.
 def template BasicExecute {{
-    Fault %(class_name)s::execute(%(CPU_exec_context)s *xc,
+    Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
                                   Trace::InstRecord *traceData) const
     {
         Fault fault = NoFault;
@@ -419,7 +419,7 @@ output decoder {{
 
 output exec {{
     Fault
-    Nop::execute(%(CPU_exec_context)s *, Trace::InstRecord *) const
+    Nop::execute(CPU_EXEC_CONTEXT *, Trace::InstRecord *) const
     {
         return NoFault;
     }

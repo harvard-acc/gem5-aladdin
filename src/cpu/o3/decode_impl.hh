@@ -1,5 +1,5 @@
 /* 
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012, 2014 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -68,6 +68,11 @@ DefaultDecode<Impl>::DefaultDecode(O3CPU *_cpu, DerivO3CPUParams *params)
       decodeWidth(params->decodeWidth),
       numThreads(params->numThreads)
 {
+    if (decodeWidth > Impl::MaxWidth)
+        fatal("decodeWidth (%d) is larger than compiled limit (%d),\n"
+             "\tincrease MaxWidth in src/cpu/o3/impl.hh\n",
+             decodeWidth, static_cast<int>(Impl::MaxWidth));
+
     // @todo: Make into a parameter
     skidBufferMax = (fetchToDecodeDelay + 1) *  params->fetchWidth;
 }
@@ -90,8 +95,6 @@ DefaultDecode<Impl>::resetStage()
         decodeStatus[tid] = Idle;
 
         stalls[tid].rename = false;
-        stalls[tid].iew = false;
-        stalls[tid].commit = false;
     }
 }
 
@@ -201,6 +204,17 @@ DefaultDecode<Impl>::drainSanityCheck() const
     }
 }
 
+template <class Impl>
+bool
+DefaultDecode<Impl>::isDrained() const
+{
+    for (ThreadID tid = 0; tid < numThreads; ++tid) {
+        if (!insts[tid].empty() || !skidBuffer[tid].empty())
+            return false;
+    }
+    return true;
+}
+
 template<class Impl>
 bool
 DefaultDecode<Impl>::checkStall(ThreadID tid) const
@@ -209,12 +223,6 @@ DefaultDecode<Impl>::checkStall(ThreadID tid) const
 
     if (stalls[tid].rename) {
         DPRINTF(Decode,"[tid:%i]: Stall fom Rename stage detected.\n", tid);
-        ret_val = true;
-    } else if (stalls[tid].iew) {
-        DPRINTF(Decode,"[tid:%i]: Stall fom IEW stage detected.\n", tid);
-        ret_val = true;
-    } else if (stalls[tid].commit) {
-        DPRINTF(Decode,"[tid:%i]: Stall fom Commit stage detected.\n", tid);
         ret_val = true;
     }
 
@@ -390,10 +398,10 @@ DefaultDecode<Impl>::skidInsert(ThreadID tid)
 
         assert(tid == inst->threadNumber);
 
-        DPRINTF(Decode,"Inserting [sn:%lli] PC: %s into decode skidBuffer %i\n",
-                inst->seqNum, inst->pcState(), inst->threadNumber);
-
         skidBuffer[tid].push(inst);
+
+        DPRINTF(Decode,"Inserting [tid:%d][sn:%lli] PC: %s into decode skidBuffer %i\n",
+                inst->threadNumber, inst->seqNum, inst->pcState(), skidBuffer[tid].size());
     }
 
     // @todo: Eventually need to enforce this by not letting a thread
@@ -478,24 +486,6 @@ DefaultDecode<Impl>::readStallSignals(ThreadID tid)
         assert(stalls[tid].rename);
         stalls[tid].rename = false;
     }
-
-    if (fromIEW->iewBlock[tid]) {
-        stalls[tid].iew = true;
-    }
-
-    if (fromIEW->iewUnblock[tid]) {
-        assert(stalls[tid].iew);
-        stalls[tid].iew = false;
-    }
-
-    if (fromCommit->commitBlock[tid]) {
-        stalls[tid].commit = true;
-    }
-
-    if (fromCommit->commitUnblock[tid]) {
-        assert(stalls[tid].commit);
-        stalls[tid].commit = false;
-    }
 }
 
 template <class Impl>
@@ -520,16 +510,6 @@ DefaultDecode<Impl>::checkSignalsAndUpdate(ThreadID tid)
                 "from commit.\n", tid);
 
         squash(tid);
-
-        return true;
-    }
-
-    // Check ROB squash signals from commit.
-    if (fromCommit->commitInfo[tid].robSquashing) {
-        DPRINTF(Decode, "[tid:%u]: ROB is still squashing.\n", tid);
-
-        // Continue to squash.
-        decodeStatus[tid] = Squashing;
 
         return true;
     }

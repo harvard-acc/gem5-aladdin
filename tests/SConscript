@@ -104,6 +104,10 @@ def run_test(target, source, env):
     timeout = 15 * 60 # used to be a param, probably should be again
     if env['BATCH']:
         cmd = '%s -t %d %s' % (env['BATCH_CMD'], timeout, cmd)
+    # The slowest regression (bzip2) requires ~4 hours;
+    # 5 hours was chosen to be conservative.
+    elif env['TIMEOUT']:
+        cmd = 'timeout --foreground 5h %s' % cmd
 
     # Create a default value for the status string, changed as needed
     # based on the status.
@@ -152,7 +156,9 @@ def run_test(target, source, env):
         # Consider it a failed test unless the exit status is 2
         status_str = "FAILED!"
         # gem5 did not terminate properly, so no need to check the output
-        if signaled(status):
+        if env['TIMEOUT'] and status == 124:
+            status_str = "TIMED-OUT!"
+        elif signaled(status):
             print 'gem5 terminated with signal', signum(status)
             if signum(status) in retry_signals:
                 # Consider the test incomplete; don't create a 'status' output.
@@ -192,7 +198,7 @@ def print_test(target, source, env):
 
     # if the test failed make it red, if it passed make it green, and
     # skip the punctuation
-    if status == "FAILED!":
+    if status == "FAILED!" or status == "TIMED-OUT!":
         status = termcap.Red + status[:-1] + termcap.Normal + status[-1]
     elif status == "CHANGED!":
         status = termcap.Yellow + status[:-1] + termcap.Normal + status[-1]
@@ -267,14 +273,14 @@ updateAction = env.Action(update_test, update_test_string)
 def test_builder(env, ref_dir):
     """Define a test."""
 
-    (category, mode, name, _ref, isa, opsys, config) = ref_dir.split('/')
-    assert(_ref == 'ref')
+    path = list(ref_dir.split('/'))
 
-    # target path (where test output goes) is the same except without
-    # the 'ref' component
-    tgt_dir = os.path.join(category, mode, name, isa, opsys, config)
+    # target path (where test output goes) consists of category, mode,
+    # name, isa, opsys, and config (skips the 'ref' component)
+    assert(path.pop(-4) == 'ref')
+    tgt_dir = os.path.join(*path[-6:])
 
-    # prepend file name with tgt_dir
+    # local closure for prepending target path to filename
     def tgt(f):
         return os.path.join(tgt_dir, f)
 
@@ -306,7 +312,7 @@ if env['TARGET_ISA'] == 'alpha':
                 'tsunami-simple-timing-dual',
                 'twosys-tsunami-simple-atomic',
                 'tsunami-o3', 'tsunami-o3-dual',
-                'tsunami-inorder',
+                'tsunami-minor', 'tsunami-minor-dual',
                 'tsunami-switcheroo-full']
 if env['TARGET_ISA'] == 'sparc':
     configs += ['t1000-simple-atomic',
@@ -316,25 +322,44 @@ if env['TARGET_ISA'] == 'arm':
                 'o3-timing-checker',
                 'realview-simple-atomic',
                 'realview-simple-atomic-dual',
+                'realview-simple-atomic-checkpoint',
                 'realview-simple-timing',
                 'realview-simple-timing-dual',
                 'realview-o3',
                 'realview-o3-checker',
                 'realview-o3-dual',
+                'realview-minor',
+                'realview-minor-dual',
                 'realview-switcheroo-atomic',
                 'realview-switcheroo-timing',
                 'realview-switcheroo-o3',
-                'realview-switcheroo-full']
+                'realview-switcheroo-full',
+                'realview64-simple-atomic',
+                'realview64-simple-atomic-checkpoint',
+                'realview64-simple-atomic-dual',
+                'realview64-simple-timing',
+                'realview64-simple-timing-dual',
+                'realview64-o3',
+                'realview64-o3-checker',
+                'realview64-o3-dual',
+                'realview64-minor',
+                'realview64-minor-dual',
+                'realview64-switcheroo-atomic',
+                'realview64-switcheroo-timing',
+                'realview64-switcheroo-o3',
+                'realview64-switcheroo-full']
 if env['TARGET_ISA'] == 'x86':
     configs += ['pc-simple-atomic',
                 'pc-simple-timing',
                 'pc-o3-timing',
                 'pc-switcheroo-full']
 
-configs += ['simple-atomic', 'simple-timing', 'o3-timing', 'memtest',
-            'simple-atomic-mp', 'simple-timing-mp', 'o3-timing-mp',
-            'inorder-timing', 'rubytest', 'tgen-simple-mem',
-            'tgen-simple-dram']
+configs += ['simple-atomic', 'simple-atomic-mp',
+            'simple-timing', 'simple-timing-mp',
+            'minor-timing', 'minor-timing-mp',
+            'o3-timing', 'o3-timing-mp',
+            'rubytest', 'memtest', 'memtest-filter',
+            'tgen-simple-mem', 'tgen-dram-ctrl']
 
 if env['PROTOCOL'] != 'None':
     if env['PROTOCOL'] == 'MI_example':
@@ -342,11 +367,10 @@ if env['PROTOCOL'] != 'None':
     else:
         configs = [c + "-ruby-" + env['PROTOCOL'] for c in configs]
 
-cwd = os.getcwd()
-os.chdir(str(Dir('.').srcdir))
+src = Dir('.').srcdir
 for config in configs:
-    dirs = glob.glob('*/*/*/ref/%s/*/%s' % (env['TARGET_ISA'], config))
+    dirs = src.glob('*/*/*/ref/%s/*/%s' % (env['TARGET_ISA'], config))
     for d in dirs:
+        d = str(d)
         if not os.path.exists(os.path.join(d, 'skip')):
             test_builder(env, d)
-os.chdir(cwd)

@@ -37,6 +37,7 @@
  * Authors: Thomas Grass
  *          Andreas Hansson
  *          Sascha Bischoff
+ *          Neha Agarwal
  */
 
 #include "base/random.hh"
@@ -56,12 +57,15 @@ BaseGen::getPacket(Addr addr, unsigned size, const MemCmd& cmd,
 {
     // Create new request
     Request *req = new Request(addr, size, flags, masterID);
+    // Dummy PC to have PC-based prefetchers latch on; get entropy into higher
+    // bits
+    req->setPC(((Addr)masterID) << 2);
 
     // Embed it in a packet
     PacketPtr pkt = new Packet(req, cmd);
 
     uint8_t* pkt_data = new uint8_t[req->getSize()];
-    pkt->dataDynamicArray(pkt_data);
+    pkt->dataDynamic(pkt_data);
 
     if (cmd.isWrite()) {
         memset(pkt_data, 0xA, req->getSize());
@@ -83,7 +87,7 @@ LinearGen::getNextPacket()
 {
     // choose if we generate a read or a write here
     bool isRead = readPercent != 0 &&
-        (readPercent == 100 || random_mt.random<uint8_t>(0, 100) < readPercent);
+        (readPercent == 100 || random_mt.random(0, 100) < readPercent);
 
     assert((readPercent == 0 && !isRead) || (readPercent == 100 && isRead) ||
            readPercent != 100);
@@ -123,7 +127,7 @@ LinearGen::nextPacketTick(bool elastic, Tick delay) const
         return MaxTick;
     } else {
         // return the time when the next request should take place
-        Tick wait = random_mt.random<Tick>(minPeriod, maxPeriod);
+        Tick wait = random_mt.random(minPeriod, maxPeriod);
 
         // compensate for the delay experienced to not be elastic, by
         // default the value we generate is from the time we are
@@ -151,13 +155,13 @@ RandomGen::getNextPacket()
 {
     // choose if we generate a read or a write here
     bool isRead = readPercent != 0 &&
-        (readPercent == 100 || random_mt.random<uint8_t>(0, 100) < readPercent);
+        (readPercent == 100 || random_mt.random(0, 100) < readPercent);
 
     assert((readPercent == 0 && !isRead) || (readPercent == 100 && isRead) ||
            readPercent != 100);
 
     // address of the request
-    Addr addr = random_mt.random<Addr>(startAddr, endAddr - 1);
+    Addr addr = random_mt.random(startAddr, endAddr - 1);
 
     // round down to start address of block
     addr -= addr % blocksize;
@@ -173,6 +177,207 @@ RandomGen::getNextPacket()
                      isRead ? MemCmd::ReadReq : MemCmd::WriteReq);
 }
 
+PacketPtr
+DramGen::getNextPacket()
+{
+    // if this is the first of the packets in series to be generated,
+    // start counting again
+    if (countNumSeqPkts == 0) {
+        countNumSeqPkts = numSeqPkts;
+
+        // choose if we generate a read or a write here
+        isRead = readPercent != 0 &&
+            (readPercent == 100 || random_mt.random(0, 100) < readPercent);
+
+        assert((readPercent == 0 && !isRead) ||
+               (readPercent == 100 && isRead) ||
+               readPercent != 100);
+
+        // pick a random bank
+        unsigned int new_bank =
+            random_mt.random<unsigned int>(0, nbrOfBanksUtil - 1);
+
+        // pick a random rank
+        unsigned int new_rank =
+            random_mt.random<unsigned int>(0, nbrOfRanks - 1);
+
+        // Generate the start address of the command series
+        // routine will update addr variable with bank, rank, and col
+        // bits updated for random traffic mode
+        genStartAddr(new_bank, new_rank);
+
+    } else {
+        // increment the column by one
+        if (addrMapping == 1)
+            // addrMapping=1: RoRaBaCoCh/RoRaBaChCo
+            // Simply increment addr by blocksize to increment the column by one
+            addr += blocksize;
+
+        else if (addrMapping == 0) {
+            // addrMapping=0: RoCoRaBaCh
+            // Explicity increment the column bits
+            unsigned int new_col = ((addr / blocksize / nbrOfBanksDRAM / nbrOfRanks) %
+                                    (pageSize / blocksize)) + 1;
+            replaceBits(addr, blockBits + bankBits + rankBits + pageBits - 1,
+                        blockBits + bankBits + rankBits, new_col);
+        }
+    }
+
+    DPRINTF(TrafficGen, "DramGen::getNextPacket: %c to addr %x, "
+            "size %d, countNumSeqPkts: %d, numSeqPkts: %d\n",
+            isRead ? 'r' : 'w', addr, blocksize, countNumSeqPkts, numSeqPkts);
+
+    // create a new request packet
+    PacketPtr pkt = getPacket(addr, blocksize,
+                              isRead ? MemCmd::ReadReq : MemCmd::WriteReq);
+
+    // add the amount of data manipulated to the total
+    dataManipulated += blocksize;
+
+    // subtract the number of packets remained to be generated
+    --countNumSeqPkts;
+
+    // return the generated packet
+    return pkt;
+}
+
+PacketPtr
+DramRotGen::getNextPacket()
+{
+    // if this is the first of the packets in series to be generated,
+    // start counting again
+    if (countNumSeqPkts == 0) {
+        countNumSeqPkts = numSeqPkts;
+
+        // choose if we generate a read or a write here
+        if (readPercent == 50) {
+           if ((nextSeqCount % nbrOfBanksUtil) == 0) {
+               // Change type after all banks have been rotated
+               // Otherwise, keep current value
+               isRead = !isRead;
+           }
+        } else {
+           // Set randomly based on percentage
+           isRead = readPercent != 0;
+        }
+
+        assert((readPercent == 0 && !isRead) ||
+               (readPercent == 100 && isRead) ||
+               readPercent != 100);
+
+         // Overwrite random bank value
+         // Rotate across banks
+         unsigned int new_bank = nextSeqCount % nbrOfBanksUtil;
+
+         // Overwrite random rank value
+         // Will rotate to the next rank after rotating through all banks,
+         // for each specified command type.
+
+         // Use modular function to ensure that calculated rank is within
+         // system limits after state transition
+         unsigned int new_rank = (nextSeqCount / maxSeqCountPerRank) %
+             nbrOfRanks;
+
+         // Increment nextSeqCount
+         // Roll back to 0 after completing a full rotation across
+         // banks, command type, and ranks
+         nextSeqCount = (nextSeqCount + 1) %
+             (nbrOfRanks * maxSeqCountPerRank);
+
+         DPRINTF(TrafficGen, "DramRotGen::getNextPacket nextSeqCount: %d "
+                 "new_rank: %d  new_bank: %d\n",
+                 nextSeqCount, new_rank, new_bank);
+
+        // Generate the start address of the command series
+        // routine will update addr variable with bank, rank, and col
+        // bits updated for rotation scheme
+        genStartAddr(new_bank, new_rank);
+
+    } else {
+        // increment the column by one
+        if (addrMapping == 1)
+            // addrMapping=1: RoRaBaCoCh/RoRaBaChCo
+            // Simply increment addr by blocksize to increment the column by one
+            addr += blocksize;
+
+        else if (addrMapping == 0) {
+            // addrMapping=0: RoCoRaBaCh
+            // Explicity increment the column bits
+            unsigned int new_col = ((addr / blocksize / nbrOfBanksDRAM / nbrOfRanks) %
+                                    (pageSize / blocksize)) + 1;
+            replaceBits(addr, blockBits + bankBits + rankBits + pageBits - 1,
+                        blockBits + bankBits + rankBits, new_col);
+        }
+    }
+
+    DPRINTF(TrafficGen, "DramRotGen::getNextPacket: %c to addr %x, "
+            "size %d, countNumSeqPkts: %d, numSeqPkts: %d\n",
+            isRead ? 'r' : 'w', addr, blocksize, countNumSeqPkts, numSeqPkts);
+
+    // create a new request packet
+    PacketPtr pkt = getPacket(addr, blocksize,
+                              isRead ? MemCmd::ReadReq : MemCmd::WriteReq);
+
+    // add the amount of data manipulated to the total
+    dataManipulated += blocksize;
+
+    // subtract the number of packets remained to be generated
+    --countNumSeqPkts;
+
+    // return the generated packet
+    return pkt;
+}
+
+void
+DramGen::genStartAddr(unsigned int new_bank, unsigned int new_rank)
+{
+    // start by picking a random address in the range
+    addr = random_mt.random<Addr>(startAddr, endAddr - 1);
+
+    // round down to start address of a block, i.e. a DRAM burst
+    addr -= addr % blocksize;
+
+    // insert the bank bits at the right spot, and align the
+    // address to achieve the required hit length, this involves
+    // finding the appropriate start address such that all
+    // sequential packets target successive columns in the same
+    // page
+
+    // for example, if we have a stride size of 192B, which means
+    // for LPDDR3 where burstsize = 32B we have numSeqPkts = 6,
+    // the address generated previously can be such that these
+    // 192B cross the page boundary, hence it needs to be aligned
+    // so that they all belong to the same page for page hit
+    unsigned int columns_per_page = pageSize / blocksize;
+
+    // pick a random column, but ensure that there is room for
+    // numSeqPkts sequential columns in the same page
+    unsigned int new_col =
+        random_mt.random<unsigned int>(0, columns_per_page - numSeqPkts);
+
+    if (addrMapping == 1) {
+        // addrMapping=1: RoRaBaCoCh/RoRaBaChCo
+        // Block bits, then page bits, then bank bits, then rank bits
+        replaceBits(addr, blockBits + pageBits + bankBits - 1,
+                    blockBits + pageBits, new_bank);
+        replaceBits(addr, blockBits + pageBits - 1, blockBits, new_col);
+        if (rankBits != 0) {
+            replaceBits(addr, blockBits + pageBits + bankBits +rankBits - 1,
+                        blockBits + pageBits + bankBits, new_rank);
+        }
+    } else if (addrMapping == 0) {
+        // addrMapping=0: RoCoRaBaCh
+        // Block bits, then bank bits, then rank bits, then page bits
+        replaceBits(addr, blockBits + bankBits - 1, blockBits, new_bank);
+        replaceBits(addr, blockBits + bankBits + rankBits + pageBits - 1,
+                    blockBits + bankBits + rankBits, new_col);
+        if (rankBits != 0) {
+            replaceBits(addr, blockBits + bankBits + rankBits - 1,
+                        blockBits + bankBits, new_rank);
+        }
+    }
+}
+
 Tick
 RandomGen::nextPacketTick(bool elastic, Tick delay) const
 {
@@ -186,7 +391,7 @@ RandomGen::nextPacketTick(bool elastic, Tick delay) const
         return MaxTick;
     } else {
         // return the time when the next request should take place
-        Tick wait = random_mt.random<Tick>(minPeriod, maxPeriod);
+        Tick wait = random_mt.random(minPeriod, maxPeriod);
 
         // compensate for the delay experienced to not be elastic, by
         // default the value we generate is from the time we are
@@ -212,7 +417,7 @@ void
 TraceGen::InputStream::init()
 {
     // Create a protobuf message for the header and read it from the stream
-    Message::PacketHeader header_msg;
+    ProtoMessage::PacketHeader header_msg;
     if (!trace.read(header_msg)) {
         panic("Failed to read packet header from trace\n");
 
@@ -233,7 +438,7 @@ TraceGen::InputStream::reset()
 bool
 TraceGen::InputStream::read(TraceElement& element)
 {
-    Message::Packet pkt_msg;
+    ProtoMessage::Packet pkt_msg;
     if (trace.read(pkt_msg)) {
         element.cmd = pkt_msg.cmd();
         element.addr = pkt_msg.addr();

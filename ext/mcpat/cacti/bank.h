@@ -2,6 +2,7 @@
  *                                McPAT/CACTI
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
+ *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,13 +37,11 @@
 
 #include "component.h"
 #include "decoder.h"
-#include "mat.h"
 #include "htree2.h"
+#include "mat.h"
 
-
-class Bank : public Component
-{
-  public:
+class Bank : public Component {
+public:
     Bank(const DynamicParameter & dyn_p);
     ~Bank();
     double compute_delays(double inrisetime);  // return outrisetime
@@ -63,10 +62,6 @@ class Bank : public Component
     int  num_addr_b_row_dec;
     int  num_addr_b_routed_to_mat_for_act;
     int  num_addr_b_routed_to_mat_for_rd_or_wr;
-
-    double  array_leakage;
-    double  wl_leakage;
-    double  cl_leakage;
 };
 
 

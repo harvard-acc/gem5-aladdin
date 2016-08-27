@@ -69,7 +69,7 @@ using namespace TheISA;
 
 template <class Impl>
 void
-Checker<Impl>::advancePC(Fault fault)
+Checker<Impl>::advancePC(const Fault &fault)
 {
     if (fault != NoFault) {
         curMacroStaticInst = StaticInst::nullStaticInstPtr;
@@ -230,11 +230,6 @@ Checker<Impl>::verify(DynInstPtr &completed_inst)
             }
             changedPC = false;
         }
-        if (changedNextPC) {
-            DPRINTF(Checker, "Changed NextPC recently to %#x\n",
-                    thread->nextInstAddr());
-            changedNextPC = false;
-        }
 
         // Try to fetch the instruction
         uint64_t fetchOffset = 0;
@@ -308,7 +303,7 @@ Checker<Impl>::verify(DynInstPtr &completed_inst)
                         microcodeRom.fetchMicroop(pcState.microPC(), NULL);
                 } else if (!curMacroStaticInst) {
                     //We're not in the middle of a macro instruction
-                    StaticInstPtr instPtr = NULL;
+                    StaticInstPtr instPtr = nullptr;
 
                     //Predecode, ie bundle up an ExtMachInst
                     //If more fetch data is needed, pass it in.
@@ -415,7 +410,7 @@ Checker<Impl>::verify(DynInstPtr &completed_inst)
         if (FullSystem) {
             // @todo: Determine if these should happen only if the
             // instruction hasn't faulted.  In the SimpleCPU case this may
-            // not be true, but in the O3 or Ozone case this may be true.
+            // not be true, but in the O3 case this may be true.
             Addr oldpc;
             int count = 0;
             do {

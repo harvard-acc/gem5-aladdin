@@ -30,7 +30,6 @@
 
 #include "base/trace.hh"
 #include "debug/RubyNetwork.hh"
-#include "mem/protocol/MachineType.hh"
 #include "mem/ruby/common/NetDest.hh"
 #include "mem/ruby/network/BasicLink.hh"
 #include "mem/ruby/network/Topology.hh"
@@ -89,8 +88,7 @@ Topology::Topology(uint32_t num_routers, vector<BasicExtLink *> ext_links,
         // Store the ExtLink pointers for later
         m_ext_link_vector.push_back(ext_link);
 
-        int machine_base_idx = MachineType_base_number(
-                string_to_MachineType(abs_cntrl->getName()));
+        int machine_base_idx = MachineType_base_number(abs_cntrl->getType());
         int ext_idx1 = machine_base_idx + abs_cntrl->getVersion();
         int ext_idx2 = ext_idx1 + m_nodes;
         int int_idx = router->params()->router_id + 2*m_nodes;
@@ -129,7 +127,7 @@ Topology::createLinks(Network *net)
     SwitchID max_switch_id = 0;
     for (LinkMap::const_iterator i = m_link_map.begin();
          i != m_link_map.end(); ++i) {
-        std::pair<int, int> src_dest = (*i).first;
+        std::pair<SwitchID, SwitchID> src_dest = (*i).first;
         max_switch_id = max(max_switch_id, src_dest.first);
         max_switch_id = max(max_switch_id, src_dest.second);        
     }
@@ -310,7 +308,7 @@ shortest_path_to_node(SwitchID src, SwitchID next, const Matrix& weights,
     max_machines = MachineType_base_number(MachineType_NUM);
 
     for (int m = 0; m < machines; m++) {
-        for (int i = 0; i < MachineType_base_count((MachineType)m); i++) {
+        for (NodeID i = 0; i < MachineType_base_count((MachineType)m); i++) {
             // we use "d+max_machines" below since the "destination"
             // switches for the machines are numbered
             // [MachineType_base_number(MachineType_NUM)...

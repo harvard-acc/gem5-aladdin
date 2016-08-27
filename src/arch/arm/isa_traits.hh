@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 ARM Limited
+ * Copyright (c) 2010, 2012 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,8 +51,6 @@
 
 namespace LittleEndianGuest {}
 
-#define TARGET_ARM
-
 namespace ArmISA
 {
     using namespace LittleEndianGuest;
@@ -95,19 +93,13 @@ namespace ArmISA
 
     const Addr PAddrImplMask = (ULL(1) << PABits) - 1;
 
+    // Max. physical address range in bits supported by the architecture
+    const unsigned MaxPhysAddrRange = 48;
+
     // return a no-op instruction... used for instruction fetch faults
     const ExtMachInst NoopMachInst = 0x01E320F000ULL;
 
-    const int LogVMPageSize = 12;       // 4K bytes
-    const int VMPageSize = (1 << LogVMPageSize);
-
-    // Shouldn't this be 1 because of Thumb?! Dynamic? --Ali
-    const int BranchPredAddrShiftAmt = 2; // instructions are 4-byte aligned
-
     const int MachineBytes = 4;
-    const int WordBytes = 4;
-    const int HalfwordBytes = 2;
-    const int ByteBytes = 1;
 
     const uint32_t HighVecs = 0xFFFF0000;
 
@@ -124,6 +116,8 @@ namespace ArmISA
         INT_IRQ,
         INT_FIQ,
         INT_SEV, // Special interrupt for recieving SEV's
+        INT_VIRT_IRQ,
+        INT_VIRT_FIQ,
         NumInterruptTypes
     };
 } // namespace ArmISA

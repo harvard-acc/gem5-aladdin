@@ -44,12 +44,12 @@ output decoder {{
 
 output exec {{
     Fault
-    Unknown::execute(%(CPU_exec_context)s *xc,
+    Unknown::execute(CPU_EXEC_CONTEXT *xc,
                      Trace::InstRecord *traceData) const
     {
         panic("attempt to execute unknown instruction "
               "(inst 0x%08x, opcode 0x%x)", machInst, OPCODE);
-        return new UnimplementedOpcodeFault;
+        return std::make_shared<UnimplementedOpcodeFault>();
     }
 }};
 

@@ -28,10 +28,8 @@
  * Authors: Niket Agarwal
  */
 
-#include "mem/ruby/buffers/MessageBuffer.hh"
-#include "mem/ruby/network/BasicLink.hh"
-#include "mem/ruby/network/Topology.hh"
 #include "mem/ruby/network/garnet/BaseGarnetNetwork.hh"
+#include "mem/ruby/network/MessageBuffer.hh"
 
 using namespace std;
 
@@ -60,34 +58,6 @@ BaseGarnetNetwork::BaseGarnetNetwork(const Params *p)
             fatal("Garnet only supports uniform bw across all links and NIs\n");
         }
     }
-
-    // Allocate to and from queues
-
-    // Queues that are getting messages from protocol
-    m_toNetQueues.resize(m_nodes);
-
-    // Queues that are feeding the protocol
-    m_fromNetQueues.resize(m_nodes);
-
-    m_in_use.resize(m_virtual_networks);
-    m_ordered.resize(m_virtual_networks);
-    for (int i = 0; i < m_virtual_networks; i++) {
-        m_in_use[i] = false;
-        m_ordered[i] = false;
-    }
-
-    for (int node = 0; node < m_nodes; node++) {
-        // Setting number of virtual message buffers per Network Queue
-        m_toNetQueues[node].resize(m_virtual_networks);
-        m_fromNetQueues[node].resize(m_virtual_networks);
-
-        // Instantiating the Message Buffers that
-        // interact with the coherence protocol
-        for (int j = 0; j < m_virtual_networks; j++) {
-            m_toNetQueues[node][j] = new MessageBuffer();
-            m_fromNetQueues[node][j] = new MessageBuffer();
-        }
-    }
 }
 
 void
@@ -96,20 +66,26 @@ BaseGarnetNetwork::init()
     Network::init();
 }
 
-MessageBuffer*
-BaseGarnetNetwork::getToNetQueue(NodeID id, bool ordered, int network_num,
-                                 string vnet_type)
+void
+BaseGarnetNetwork::setToNetQueue(NodeID id, bool ordered, int network_num,
+                                 string vnet_type, MessageBuffer *b)
 {
     checkNetworkAllocation(id, ordered, network_num, vnet_type);
-    return m_toNetQueues[id][network_num];
+    while (m_toNetQueues[id].size() <= network_num) {
+        m_toNetQueues[id].push_back(nullptr);
+    }
+    m_toNetQueues[id][network_num] = b;
 }
 
-MessageBuffer*
-BaseGarnetNetwork::getFromNetQueue(NodeID id, bool ordered, int network_num,  
-                                   string vnet_type)
+void
+BaseGarnetNetwork::setFromNetQueue(NodeID id, bool ordered, int network_num,
+                                   string vnet_type, MessageBuffer *b)
 {
     checkNetworkAllocation(id, ordered, network_num, vnet_type);
-    return m_fromNetQueues[id][network_num];
+    while (m_fromNetQueues[id].size() <= network_num) {
+        m_fromNetQueues[id].push_back(nullptr);
+    }
+    m_fromNetQueues[id][network_num] = b;
 }
 
 void

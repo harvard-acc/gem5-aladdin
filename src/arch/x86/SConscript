@@ -59,12 +59,12 @@ if env['TARGET_ISA'] == 'x86':
     Source('isa.cc')
     Source('linux/linux.cc')
     Source('linux/process.cc')
-    Source('linux/syscalls.cc')
     Source('linux/system.cc')
     Source('nativetrace.cc')
     Source('pagetable.cc')
     Source('pagetable_walker.cc')
     Source('process.cc')
+    Source('pseudo_inst.cc')
     Source('remote_gdb.cc')
     Source('stacktrace.cc')
     Source('system.cc')
@@ -312,6 +312,3 @@ if env['TARGET_ISA'] == 'x86':
         # Add in python file dependencies that won't be caught otherwise
         for pyfile in python_files:
             env.Depends(f, "isa/insts/%s" % pyfile)
-        # Only non-header files need to be compiled.
-        if not f.path.endswith('.hh'):
-            Source(f)

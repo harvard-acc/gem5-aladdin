@@ -38,11 +38,20 @@ class Process(SimObject):
     output = Param.String('cout', 'filename for stdout')
     errout = Param.String('cerr', 'filename for stderr')
     system = Param.System(Parent.any, "system process will run on")
+    useArchPT = Param.Bool('false', 'maintain an in-memory version of the page\
+                            table in an architecture-specific format')
+    kvmInSE = Param.Bool('false', 'initialize the process for KvmCPU in SE')
     max_stack_size = Param.MemorySize('64MB', 'maximum size of the stack')
 
     @classmethod
     def export_methods(cls, code):
-        code('bool map(Addr vaddr, Addr paddr, int size);')
+        code('bool map(Addr vaddr, Addr paddr, int size, bool cacheable=true);')
+
+class EmulatedDriver(SimObject):
+    type = 'EmulatedDriver'
+    cxx_header = "sim/emul_driver.hh"
+    abstract = True
+    filename = Param.String("device file name (under /dev)")
 
 class LiveProcess(Process):
     type = 'LiveProcess'
@@ -58,3 +67,5 @@ class LiveProcess(Process):
     pid = Param.Int(100, 'process id')
     ppid = Param.Int(99, 'parent process id')
     simpoint = Param.UInt64(0, 'simulation point at which to start simulation')
+    drivers = VectorParam.EmulatedDriver([], 'Available emulated drivers')
+

@@ -49,6 +49,7 @@ using std::ptrdiff_t;
 #include "base/statistics.hh"
 #include "sim/core.hh"
 #include "sim/stat_control.hh"
+#include "sim/stat_register.hh"
 
 
 namespace Stats {
@@ -69,20 +70,6 @@ inline void
 Stats_Info_flags_set(Info *info, FlagsType flags)
 {
     info->flags = flags;
-}
-
-inline void
-processResetQueue()
-{
-    extern CallbackQueue resetQueue;
-    resetQueue.process();
-}
-
-inline void
-processDumpQueue()
-{
-    extern CallbackQueue dumpQueue;
-    dumpQueue.process();
 }
 
 inline char *
@@ -109,13 +96,13 @@ call_module_function(const char *module_name, const char *func_name)
 }
 
 void
-dump()
+pythonDump()
 {
     call_module_function("m5.stats", "dump");
 }
 
 void
-reset()
+pythonReset()
 {
     call_module_function("m5.stats", "reset");
 }
@@ -156,6 +143,8 @@ template <class T> T cast_info(Info *info);
 
 void initSimStats();
 Output *initText(const std::string &filename, bool desc);
+
+void registerPythonStatsHandlers();
 
 void schedStatEvent(bool dump, bool reset,
                     Tick when = curTick(), Tick repeat = 0);

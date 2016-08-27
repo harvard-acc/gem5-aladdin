@@ -68,12 +68,11 @@ class BaseGarnetNetwork : public Network
         m_queueing_latency[vnet] += latency;
     }
 
-    // returns the queue requested for the given component
-    MessageBuffer* getToNetQueue(NodeID id, bool ordered, int network_num,
-                                 std::string vnet_type);
-    MessageBuffer* getFromNetQueue(NodeID id, bool ordered, int network_num,
-                                   std::string vnet_type);
-
+    // set the queue
+    void setToNetQueue(NodeID id, bool ordered, int network_num,
+                       std::string vnet_type, MessageBuffer *b);
+    void setFromNetQueue(NodeID id, bool ordered, int network_num,
+                         std::string vnet_type, MessageBuffer *b);
 
     bool isVNetOrdered(int vnet) { return m_ordered[vnet]; }
     bool validVirtualNetwork(int vnet) { return m_in_use[vnet]; }
@@ -87,12 +86,6 @@ class BaseGarnetNetwork : public Network
     int m_ni_flit_size;
     int m_vcs_per_vnet;
     bool m_enable_fault_model;
-
-    std::vector<bool> m_in_use;
-    std::vector<bool> m_ordered;
-
-    std::vector<std::vector<MessageBuffer*> > m_toNetQueues;
-    std::vector<std::vector<MessageBuffer*> > m_fromNetQueues;
 
     // Statistical variables
     Stats::Vector m_flits_received;

@@ -554,8 +554,6 @@ X86KvmCPU::startup()
 
     updateCPUID();
 
-    io_req.setThreadContext(tc->contextId(), 0);
-
     // TODO: Do we need to create an identity mapped TSS area? We
     // should call kvm.vm.setTSSAddress() here in that case. It should
     // only be needed for old versions of the virtualization
@@ -690,7 +688,7 @@ X86KvmCPU::updateKvmStateRegs()
     FOREACH_IREG();
 #undef APPLY_IREG
 
-    regs.rip = tc->instAddr();
+    regs.rip = tc->instAddr() - tc->readMiscReg(MISCREG_CS_BASE);
 
     /* You might think that setting regs.rflags to the contents
      * MISCREG_RFLAGS here would suffice. In that case you're
@@ -721,11 +719,11 @@ setKvmSegmentReg(ThreadContext *tc, struct kvm_segment &kvm_seg,
     kvm_seg.g = attr.granularity;
     kvm_seg.avl = attr.avl;
 
-    // A segment is unusable when the selector is zero. There is a
-    // attr.unusable flag in gem5, but it seems unused.
-    //
-    // TODO: Are there corner cases where this doesn't work?
-    kvm_seg.unusable = (kvm_seg.selector == 0);
+    // A segment is normally unusable when the selector is zero. There
+    // is a attr.unusable flag in gem5, but it seems unused. qemu
+    // seems to set this to 0 all the time, so we just do the same and
+    // hope for the best.
+    kvm_seg.unusable = 0;
 }
 
 static inline void
@@ -936,16 +934,29 @@ X86KvmCPU::updateKvmStateMSRs()
 void
 X86KvmCPU::updateThreadContext()
 {
+    struct kvm_regs regs;
+    struct kvm_sregs sregs;
+
+    getRegisters(regs);
+    getSpecialRegisters(sregs);
+
     DPRINTF(KvmContext, "X86KvmCPU::updateThreadContext():\n");
     if (DTRACE(KvmContext))
         dump();
 
-    updateThreadContextRegs();
-    updateThreadContextSRegs();
-    if (useXSave)
-        updateThreadContextXSave();
-    else
-        updateThreadContextFPU();
+    updateThreadContextRegs(regs, sregs);
+    updateThreadContextSRegs(sregs);
+    if (useXSave) {
+        struct kvm_xsave xsave;
+        getXSave(xsave);
+
+       updateThreadContextXSave(xsave);
+    } else {
+        struct kvm_fpu fpu;
+        getFPUState(fpu);
+
+        updateThreadContextFPU(fpu);
+    }
     updateThreadContextMSRs();
 
     // The M5 misc reg caches some values from other
@@ -955,18 +966,16 @@ X86KvmCPU::updateThreadContext()
 }
 
 void
-X86KvmCPU::updateThreadContextRegs()
+X86KvmCPU::updateThreadContextRegs(const struct kvm_regs &regs,
+                                   const struct kvm_sregs &sregs)
 {
-    struct kvm_regs regs;
-    getRegisters(regs);
-
 #define APPLY_IREG(kreg, mreg) tc->setIntReg(mreg, regs.kreg)
 
     FOREACH_IREG();
 
 #undef APPLY_IREG
 
-    tc->pcState(PCState(regs.rip));
+    tc->pcState(PCState(regs.rip + sregs.cs.base));
 
     // Flags are spread out across multiple semi-magic registers so we
     // need some special care when updating them.
@@ -1011,11 +1020,8 @@ setContextSegment(ThreadContext *tc, const struct kvm_dtable &kvm_dtable,
 }
 
 void
-X86KvmCPU::updateThreadContextSRegs()
+X86KvmCPU::updateThreadContextSRegs(const struct kvm_sregs &sregs)
 {
-    struct kvm_sregs sregs;
-    getSpecialRegisters(sregs);
-
     assert(getKvmRunState()->apic_base == sregs.apic_base);
     assert(getKvmRunState()->cr8 == sregs.cr8);
 
@@ -1070,11 +1076,8 @@ updateThreadContextFPUCommon(ThreadContext *tc, const T &fpu)
 }
 
 void
-X86KvmCPU::updateThreadContextFPU()
+X86KvmCPU::updateThreadContextFPU(const struct kvm_fpu &fpu)
 {
-    struct kvm_fpu fpu;
-    getFPUState(fpu);
-
     updateThreadContextFPUCommon(tc, fpu);
 
     tc->setMiscRegNoEffect(MISCREG_FISEG, 0);
@@ -1084,11 +1087,9 @@ X86KvmCPU::updateThreadContextFPU()
 }
 
 void
-X86KvmCPU::updateThreadContextXSave()
+X86KvmCPU::updateThreadContextXSave(const struct kvm_xsave &kxsave)
 {
-    struct kvm_xsave kxsave;
-    FXSave &xsave(*(FXSave *)kxsave.region);
-    getXSave(kxsave);
+    const FXSave &xsave(*(const FXSave *)kxsave.region);
 
     updateThreadContextFPUCommon(tc, xsave);
 
@@ -1131,13 +1132,43 @@ X86KvmCPU::updateThreadContextMSRs()
 void
 X86KvmCPU::deliverInterrupts()
 {
+    Fault fault;
+
     syncThreadContext();
 
-    Fault fault(interrupts->getInterrupt(tc));
-    interrupts->updateIntrInfo(tc);
+    {
+        // Migrate to the interrupt controller's thread to get the
+        // interrupt. Even though the individual methods are safe to
+        // call across threads, we might still lose interrupts unless
+        // they are getInterrupt() and updateIntrInfo() are called
+        // atomically.
+        EventQueue::ScopedMigration migrate(interrupts->eventQueue());
+        fault = interrupts->getInterrupt(tc);
+        interrupts->updateIntrInfo(tc);
+    }
 
     X86Interrupt *x86int(dynamic_cast<X86Interrupt *>(fault.get()));
-    if (x86int) {
+    if (dynamic_cast<NonMaskableInterrupt *>(fault.get())) {
+        DPRINTF(KvmInt, "Delivering NMI\n");
+        kvmNonMaskableInterrupt();
+    } else if (dynamic_cast<InitInterrupt *>(fault.get())) {
+        DPRINTF(KvmInt, "INIT interrupt\n");
+        fault.get()->invoke(tc);
+        // Delay the kvm state update since we won't enter KVM on this
+        // tick.
+        threadContextDirty = true;
+        // HACK: gem5 doesn't actually have any BIOS code, which means
+        // that we need to halt the thread and wait for a startup
+        // interrupt before restarting the thread. The simulated CPUs
+        // use the same kind of hack using a microcode routine.
+        thread->suspend();
+    } else if (dynamic_cast<StartupInterrupt *>(fault.get())) {
+        DPRINTF(KvmInt, "STARTUP interrupt\n");
+        fault.get()->invoke(tc);
+        // The kvm state is assumed to have been updated when entering
+        // kvmRun(), so we need to update manually it here.
+        updateKvmState();
+    } else if (x86int) {
         struct kvm_interrupt kvm_int;
         kvm_int.irq = x86int->getVector();
 
@@ -1145,9 +1176,6 @@ X86KvmCPU::deliverInterrupts()
                 fault->name(), kvm_int.irq);
 
         kvmInterrupt(kvm_int);
-    } else if (dynamic_cast<NonMaskableInterrupt *>(fault.get())) {
-        DPRINTF(KvmInt, "Delivering NMI\n");
-        kvmNonMaskableInterrupt();
     } else {
         panic("KVM: Unknown interrupt type\n");
     }
@@ -1160,7 +1188,12 @@ X86KvmCPU::kvmRun(Tick ticks)
     struct kvm_run &kvm_run(*getKvmRunState());
 
     if (interrupts->checkInterruptsRaw()) {
-        if (kvm_run.ready_for_interrupt_injection) {
+        if (interrupts->hasPendingUnmaskable()) {
+            DPRINTF(KvmInt,
+                    "Delivering unmaskable interrupt.\n");
+            syncThreadContext();
+            deliverInterrupts();
+        } else if (kvm_run.ready_for_interrupt_injection) {
             // KVM claims that it is ready for an interrupt. It might
             // be lying if we just updated rflags and disabled
             // interrupts (e.g., by doing a CPU handover). Let's sync
@@ -1187,7 +1220,12 @@ X86KvmCPU::kvmRun(Tick ticks)
         kvm_run.request_interrupt_window = 0;
     }
 
-    return kvmRunWrapper(ticks);
+    // The CPU might have been suspended as a result of the INIT
+    // interrupt delivery hack. In that case, don't enter into KVM.
+    if (_status == Idle)
+        return 0;
+    else
+        return kvmRunWrapper(ticks);
 }
 
 Tick
@@ -1306,10 +1344,15 @@ X86KvmCPU::handleKvmExitIO()
         pAddr = X86ISA::x86IOAddress(port);
     }
 
-    io_req.setPhys(pAddr, kvm_run.io.size, Request::UNCACHEABLE,
+    Request io_req(pAddr, kvm_run.io.size, Request::UNCACHEABLE,
                    dataMasterId());
+    io_req.setThreadContext(tc->contextId(), 0);
 
     const MemCmd cmd(isWrite ? MemCmd::WriteReq : MemCmd::ReadReq);
+    // Temporarily lock and migrate to the event queue of the
+    // VM. This queue is assumed to "own" all devices we need to
+    // access if running in multi-core mode.
+    EventQueue::ScopedMigration migrate(vm.eventQueue());
     for (int i = 0; i < count; ++i) {
         Packet pkt(&io_req, cmd);
 

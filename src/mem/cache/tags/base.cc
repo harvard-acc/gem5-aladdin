@@ -46,7 +46,6 @@
  * Definitions of BaseTags.
  */
 
-#include "config/the_isa.hh"
 #include "cpu/smt.hh" //maxThreadsPerCPU
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/base.hh"
@@ -56,14 +55,15 @@ using namespace std;
 
 BaseTags::BaseTags(const Params *p)
     : ClockedObject(p), blkSize(p->block_size), size(p->size),
-      hitLatency(p->hit_latency), 
-      isPerfectCache(p->is_perfect_cache)
+      accessLatency(p->hit_latency), cache(nullptr), warmupBound(0),
+      warmedUp(false), numBlocks(0)
 {
 }
 
 void
 BaseTags::setCache(BaseCache *_cache)
 {
+    assert(!cache);
     cache = _cache;
 }
 

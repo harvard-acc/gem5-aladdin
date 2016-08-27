@@ -36,9 +36,9 @@ class O3_ARM_v7a_Simple_Int(FUDesc):
 
 # Complex ALU instructions have a variable latencies
 class O3_ARM_v7a_Complex_Int(FUDesc):
-    opList = [ OpDesc(opClass='IntMult', opLat=3, issueLat=1),
-               OpDesc(opClass='IntDiv', opLat=12, issueLat=12),
-               OpDesc(opClass='IprAccess', opLat=3, issueLat=1) ]
+    opList = [ OpDesc(opClass='IntMult', opLat=3, pipelined=True),
+               OpDesc(opClass='IntDiv', opLat=12, pipelined=False),
+               OpDesc(opClass='IprAccess', opLat=3, pipelined=True) ]
     count = 1
 
 
@@ -67,8 +67,8 @@ class O3_ARM_v7a_FP(FUDesc):
                OpDesc(opClass='FloatAdd', opLat=5),
                OpDesc(opClass='FloatCmp', opLat=5),
                OpDesc(opClass='FloatCvt', opLat=5),
-               OpDesc(opClass='FloatDiv', opLat=9, issueLat=9),
-               OpDesc(opClass='FloatSqrt', opLat=33, issueLat=33),
+               OpDesc(opClass='FloatDiv', opLat=9, pipelined=False),
+               OpDesc(opClass='FloatSqrt', opLat=33, pipelined=False),
                OpDesc(opClass='FloatMult', opLat=4) ]
     count = 2
 
@@ -88,8 +88,7 @@ class O3_ARM_v7a_FUP(FUPool):
               O3_ARM_v7a_Load(), O3_ARM_v7a_Store(), O3_ARM_v7a_FP()]
 
 # Bi-Mode Branch Predictor
-class O3_ARM_v7a_BP(BranchPredictor):
-    predType = "bi-mode"
+class O3_ARM_v7a_BP(BiModeBP):
     globalPredictorSize = 8192
     globalCtrBits = 2
     choicePredictorSize = 8192
@@ -126,7 +125,6 @@ class O3_ARM_v7a_3(DerivO3CPU):
     dispatchWidth = 6
     issueWidth = 8
     wbWidth = 8
-    wbDepth = 1
     fuPool = O3_ARM_v7a_FUP()
     iewToCommitDelay = 1
     renameToROBDelay = 1
@@ -153,7 +151,8 @@ class O3_ARM_v7a_ICache(BaseCache):
     tgts_per_mshr = 8
     size = '32kB'
     assoc = 2
-    is_top_level = 'true'
+    is_top_level = True
+    forward_snoops = False
 
 # Data Cache
 class O3_ARM_v7a_DCache(BaseCache):
@@ -164,7 +163,7 @@ class O3_ARM_v7a_DCache(BaseCache):
     size = '32kB'
     assoc = 2
     write_buffers = 16
-    is_top_level = 'true'
+    is_top_level = True
 
 # TLB Cache
 # Use a cache as a L2 TLB
@@ -176,8 +175,8 @@ class O3_ARM_v7aWalkCache(BaseCache):
     size = '1kB'
     assoc = 8
     write_buffers = 16
-    is_top_level = 'true'
-
+    is_top_level = True
+    forward_snoops = False
 
 # L2 Cache
 class O3_ARM_v7aL2(BaseCache):
@@ -188,7 +187,7 @@ class O3_ARM_v7aL2(BaseCache):
     size = '1MB'
     assoc = 16
     write_buffers = 8
-    prefetch_on_access = 'true'
+    prefetch_on_access = True
     # Simple stride prefetcher
     prefetcher = StridePrefetcher(degree=8, latency = 1)
     tags = RandomRepl()

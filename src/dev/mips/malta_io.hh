@@ -51,9 +51,6 @@
  */
 class MaltaIO : public BasicPioDevice
 {
-  private:
-    struct tm tm;
-
   protected:
 
     class RTC : public MC146818
@@ -145,6 +142,11 @@ class MaltaIO : public BasicPioDevice
      * @param section The section name of this object
      */
     virtual void unserialize(Checkpoint *cp, const std::string &section);
+
+    /**
+     * Start running.
+     */
+    virtual void startup();
 
 };
 

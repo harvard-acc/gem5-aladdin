@@ -1,6 +1,7 @@
 
 /*
- * Copyright (c) 2010-2012 ARM Limited
+ * Copyright (c) 2010-2014 ARM Limited
+ * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -98,19 +99,22 @@ LSQUnit<Impl>::completeDataAccess(PacketPtr pkt)
     DPRINTF(IEW, "Writeback event [sn:%lli].\n", inst->seqNum);
     DPRINTF(Activity, "Activity: Writeback event [sn:%lli].\n", inst->seqNum);
 
-    //iewStage->ldstQueue.removeMSHR(inst->threadNumber,inst->seqNum);
+    if (state->cacheBlocked) {
+        // This is the first half of a previous split load,
+        // where the 2nd half blocked, ignore this response
+        DPRINTF(IEW, "[sn:%lli]: Response from first half of earlier "
+                "blocked split load recieved. Ignoring.\n", inst->seqNum);
+        delete state;
+        return;
+    }
 
     // If this is a split access, wait until all packets are received.
     if (TheISA::HasUnalignedMemAcc && !state->complete()) {
-        delete pkt->req;
-        delete pkt;
         return;
     }
 
     assert(!cpu->switchedOut());
-    if (inst->isSquashed()) {
-        iewStage->decrWb(inst->seqNum);
-    } else {
+    if (!inst->isSquashed()) {
         if (!state->noWB) {
             if (!TheISA::HasUnalignedMemAcc || !state->isSplit ||
                 !state->isLoad) {
@@ -131,16 +135,15 @@ LSQUnit<Impl>::completeDataAccess(PacketPtr pkt)
     }
 
     pkt->req->setAccessLatency();
+    cpu->ppDataAccessComplete->notify(std::make_pair(inst, pkt));
+
     delete state;
-    delete pkt->req;
-    delete pkt;
 }
 
 template <class Impl>
 LSQUnit<Impl>::LSQUnit()
     : loads(0), stores(0), storesToWB(0), cacheBlockMask(0), stalled(false),
-      isStoreBlocked(false), isLoadBlocked(false),
-      loadBlockedHandled(false), storeInFlight(false), hasPendingPkt(false)
+      isStoreBlocked(false), storeInFlight(false), hasPendingPkt(false)
 {
 }
 
@@ -153,11 +156,11 @@ LSQUnit<Impl>::init(O3CPU *cpu_ptr, IEW *iew_ptr, DerivO3CPUParams *params,
     cpu = cpu_ptr;
     iewStage = iew_ptr;
 
-    DPRINTF(LSQUnit, "Creating LSQUnit%i object.\n",id);
-
     lsq = lsq_ptr;
 
     lsqID = id;
+
+    DPRINTF(LSQUnit, "Creating LSQUnit%i object.\n",id);
 
     // Add 1 for the sentinel entry (they are circular queues).
     LQEntries = maxLQEntries + 1;
@@ -194,11 +197,7 @@ LSQUnit<Impl>::resetState()
     retryPkt = NULL;
     memDepViolator = NULL;
 
-    blockedLoadSeqNum = 0;
-
     stalled = false;
-    isLoadBlocked = false;
-    loadBlockedHandled = false;
 
     cacheBlockMask = ~(cpu->cacheLineSize() - 1);
 }
@@ -210,7 +209,7 @@ LSQUnit<Impl>::name() const
     if (Impl::MaxThreads == 1) {
         return iewStage->name() + ".lsq";
     } else {
-        return iewStage->name() + ".lsq.thread" + to_string(lsqID);
+        return iewStage->name() + ".lsq.thread" + std::to_string(lsqID);
     }
 }
 
@@ -412,31 +411,37 @@ LSQUnit<Impl>::getMemDepViolator()
 
 template <class Impl>
 unsigned
-LSQUnit<Impl>::numFreeEntries()
+LSQUnit<Impl>::numFreeLoadEntries()
 {
-    unsigned free_lq_entries = LQEntries - loads;
-    unsigned free_sq_entries = SQEntries - stores;
-
-    // Both the LQ and SQ entries have an extra dummy entry to differentiate
-    // empty/full conditions.  Subtract 1 from the free entries.
-    if (free_lq_entries < free_sq_entries) {
-        return free_lq_entries - 1;
-    } else {
-        return free_sq_entries - 1;
-    }
+        //LQ has an extra dummy entry to differentiate
+        //empty/full conditions. Subtract 1 from the free entries.
+        DPRINTF(LSQUnit, "LQ size: %d, #loads occupied: %d\n", LQEntries, loads);
+        return LQEntries - loads - 1;
 }
+
+template <class Impl>
+unsigned
+LSQUnit<Impl>::numFreeStoreEntries()
+{
+        //SQ has an extra dummy entry to differentiate
+        //empty/full conditions. Subtract 1 from the free entries.
+        DPRINTF(LSQUnit, "SQ size: %d, #stores occupied: %d\n", SQEntries, stores);
+        return SQEntries - stores - 1;
+
+ }
 
 template <class Impl>
 void
 LSQUnit<Impl>::checkSnoop(PacketPtr pkt)
 {
     int load_idx = loadHead;
+    DPRINTF(LSQUnit, "Got snoop for address %#x\n", pkt->getAddr());
 
     // Unlock the cpu-local monitor when the CPU sees a snoop to a locked
     // address. The CPU can speculatively execute a LL operation after a pending
     // SC operation in the pipeline and that can make the cache monitor the CPU
     // is connected to valid while it really shouldn't be.
-    for (int x = 0; x < cpu->numActiveThreads(); x++) {
+    for (int x = 0; x < cpu->numContexts(); x++) {
         ThreadContext *tc = cpu->getContext(x);
         bool no_squash = cpu->thread[x]->noSquashFromTC;
         cpu->thread[x]->noSquashFromTC = true;
@@ -444,17 +449,29 @@ LSQUnit<Impl>::checkSnoop(PacketPtr pkt)
         cpu->thread[x]->noSquashFromTC = no_squash;
     }
 
+    Addr invalidate_addr = pkt->getAddr() & cacheBlockMask;
+
+    DynInstPtr ld_inst = loadQueue[load_idx];
+    if (ld_inst) {
+        Addr load_addr = ld_inst->physEffAddr & cacheBlockMask;
+        // Check that this snoop didn't just invalidate our lock flag
+        if (ld_inst->effAddrValid() && load_addr == invalidate_addr &&
+            ld_inst->memReqFlags & Request::LLSC)
+            TheISA::handleLockedSnoopHit(ld_inst.get());
+    }
+
     // If this is the only load in the LSQ we don't care
     if (load_idx == loadTail)
         return;
+
     incrLdIdx(load_idx);
 
-    DPRINTF(LSQUnit, "Got snoop for address %#x\n", pkt->getAddr());
-    Addr invalidate_addr = pkt->getAddr() & cacheBlockMask;
+    bool force_squash = false;
+
     while (load_idx != loadTail) {
         DynInstPtr ld_inst = loadQueue[load_idx];
 
-        if (!ld_inst->effAddrValid() || ld_inst->uncacheable()) {
+        if (!ld_inst->effAddrValid() || ld_inst->strictlyOrdered()) {
             incrLdIdx(load_idx);
             continue;
         }
@@ -463,14 +480,29 @@ LSQUnit<Impl>::checkSnoop(PacketPtr pkt)
         DPRINTF(LSQUnit, "-- inst [sn:%lli] load_addr: %#x to pktAddr:%#x\n",
                     ld_inst->seqNum, load_addr, invalidate_addr);
 
-        if (load_addr == invalidate_addr) {
-            if (ld_inst->possibleLoadViolation()) {
+        if (load_addr == invalidate_addr || force_squash) {
+            if (needsTSO) {
+                // If we have a TSO system, as all loads must be ordered with
+                // all other loads, this load as well as *all* subsequent loads
+                // need to be squashed to prevent possible load reordering.
+                force_squash = true;
+            }
+            if (ld_inst->possibleLoadViolation() || force_squash) {
                 DPRINTF(LSQUnit, "Conflicting load at addr %#x [sn:%lli]\n",
-                        ld_inst->physEffAddr, pkt->getAddr(), ld_inst->seqNum);
+                        pkt->getAddr(), ld_inst->seqNum);
 
                 // Mark the load for re-execution
-                ld_inst->fault = new ReExec;
+                ld_inst->fault = std::make_shared<ReExec>();
             } else {
+                DPRINTF(LSQUnit, "HitExternal Snoop for addr %#x [sn:%lli]\n",
+                        pkt->getAddr(), ld_inst->seqNum);
+
+                // Make sure that we don't lose a snoop hitting a LOCKED
+                // address since the LOCK* flags don't get updated until
+                // commit.
+                if (ld_inst->memReqFlags & Request::LLSC)
+                    TheISA::handleLockedSnoopHit(ld_inst.get());
+
                 // If a older load checks this and it's true
                 // then we might have missed the snoop
                 // in which case we need to invalidate to be sure
@@ -496,7 +528,7 @@ LSQUnit<Impl>::checkViolations(int load_idx, DynInstPtr &inst)
      */
     while (load_idx != loadTail) {
         DynInstPtr ld_inst = loadQueue[load_idx];
-        if (!ld_inst->effAddrValid() || ld_inst->uncacheable()) {
+        if (!ld_inst->effAddrValid() || ld_inst->strictlyOrdered()) {
             incrLdIdx(load_idx);
             continue;
         }
@@ -520,17 +552,17 @@ LSQUnit<Impl>::checkViolations(int load_idx, DynInstPtr &inst)
 
                         ++lsqMemOrderViolation;
 
-                        return new GenericISA::M5PanicFault(
-                                "Detected fault with inst [sn:%lli] and "
-                                "[sn:%lli] at address %#x\n",
-                                inst->seqNum, ld_inst->seqNum, ld_eff_addr1);
+                        return std::make_shared<GenericISA::M5PanicFault>(
+                            "Detected fault with inst [sn:%lli] and "
+                            "[sn:%lli] at address %#x\n",
+                            inst->seqNum, ld_inst->seqNum, ld_eff_addr1);
                     }
                 }
 
                 // Otherwise, mark the load has a possible load violation
                 // and if we see a snoop before it's commited, we need to squash
                 ld_inst->possibleLoadViolation(true);
-                DPRINTF(LSQUnit, "Found possible load violaiton at addr: %#x"
+                DPRINTF(LSQUnit, "Found possible load violation at addr: %#x"
                         " between instructions [sn:%lli] and [sn:%lli]\n",
                         inst_eff_addr1, inst->seqNum, ld_inst->seqNum);
             } else {
@@ -547,9 +579,10 @@ LSQUnit<Impl>::checkViolations(int load_idx, DynInstPtr &inst)
 
                 ++lsqMemOrderViolation;
 
-                return new GenericISA::M5PanicFault("Detected fault with "
-                        "inst [sn:%lli] and [sn:%lli] at address %#x\n",
-                        inst->seqNum, ld_inst->seqNum, ld_eff_addr1);
+                return std::make_shared<GenericISA::M5PanicFault>(
+                    "Detected fault with "
+                    "inst [sn:%lli] and [sn:%lli] at address %#x\n",
+                    inst->seqNum, ld_inst->seqNum, ld_eff_addr1);
             }
         }
 
@@ -582,23 +615,23 @@ LSQUnit<Impl>::executeLoad(DynInstPtr &inst)
 
     // If the instruction faulted or predicated false, then we need to send it
     // along to commit without the instruction completing.
-    if (load_fault != NoFault || inst->readPredicate() == false) {
+    if (load_fault != NoFault || !inst->readPredicate()) {
         // Send this instruction to commit, also make sure iew stage
-        // realizes there is activity.
-        // Mark it as executed unless it is an uncached load that
-        // needs to hit the head of commit.
-        if (inst->readPredicate() == false)
+        // realizes there is activity.  Mark it as executed unless it
+        // is a strictly ordered load that needs to hit the head of
+        // commit.
+        if (!inst->readPredicate())
             inst->forwardOldRegs();
         DPRINTF(LSQUnit, "Load [sn:%lli] not executed from %s\n",
                 inst->seqNum,
                 (load_fault != NoFault ? "fault" : "predication"));
-        if (!(inst->hasRequest() && inst->uncacheable()) ||
+        if (!(inst->hasRequest() && inst->strictlyOrdered()) ||
             inst->isAtCommit()) {
             inst->setExecuted();
         }
         iewStage->instToCommit(inst);
         iewStage->activityThisCycle();
-    } else if (!loadBlocked()) {
+    } else {
         assert(inst->effAddrValid());
         int load_idx = inst->lqIdx;
         incrLdIdx(load_idx);
@@ -635,7 +668,7 @@ LSQUnit<Impl>::executeStore(DynInstPtr &store_inst)
         store_fault == NoFault)
         return store_fault;
 
-    if (store_inst->readPredicate() == false)
+    if (!store_inst->readPredicate())
         store_inst->forwardOldRegs();
 
     if (storeQueue[store_idx].size == 0) {
@@ -643,7 +676,7 @@ LSQUnit<Impl>::executeStore(DynInstPtr &store_inst)
                 store_inst->pcState(), store_inst->seqNum);
 
         return store_fault;
-    } else if (store_inst->readPredicate() == false) {
+    } else if (!store_inst->readPredicate()) {
         DPRINTF(LSQUnit, "Store [sn:%lli] not executed from predication\n",
                 store_inst->seqNum);
         return store_fault;
@@ -753,7 +786,7 @@ LSQUnit<Impl>::writebackStores()
            ((!needsTSO) || (!storeInFlight)) &&
            usedPorts < cachePorts) {
 
-        if (isStoreBlocked || lsq->cacheBlocked()) {
+        if (isStoreBlocked) {
             DPRINTF(LSQUnit, "Unable to write back any more stores, cache"
                     " is blocked!\n");
             break;
@@ -794,13 +827,13 @@ LSQUnit<Impl>::writebackStores()
         storeQueue[storeWBIdx].committed = true;
 
         assert(!inst->memData);
-        inst->memData = new uint8_t[64];
+        inst->memData = new uint8_t[req->getSize()];
 
-        memcpy(inst->memData, storeQueue[storeWBIdx].data, req->getSize());
+        if (storeQueue[storeWBIdx].isAllZeros)
+            memset(inst->memData, 0, req->getSize());
+        else
+            memcpy(inst->memData, storeQueue[storeWBIdx].data, req->getSize());
 
-        MemCmd command =
-            req->isSwap() ? MemCmd::SwapReq :
-            (req->isLLSC() ? MemCmd::StoreCondReq : MemCmd::WriteReq);
         PacketPtr data_pkt;
         PacketPtr snd_data_pkt = NULL;
 
@@ -812,13 +845,13 @@ LSQUnit<Impl>::writebackStores()
         if (!TheISA::HasUnalignedMemAcc || !storeQueue[storeWBIdx].isSplit) {
 
             // Build a single data packet if the store isn't split.
-            data_pkt = new Packet(req, command);
+            data_pkt = Packet::createWrite(req);
             data_pkt->dataStatic(inst->memData);
             data_pkt->senderState = state;
         } else {
             // Create two packets if the store is split in two.
-            data_pkt = new Packet(sreqLow, command);
-            snd_data_pkt = new Packet(sreqHigh, command);
+            data_pkt = Packet::createWrite(sreqLow);
+            snd_data_pkt = Packet::createWrite(sreqHigh);
 
             data_pkt->dataStatic(inst->memData);
             snd_data_pkt->dataStatic(inst->memData + sreqLow->getSize());
@@ -847,7 +880,7 @@ LSQUnit<Impl>::writebackStores()
             // misc regs normally updates the result, but this is not
             // the desired behavior when handling store conditionals.
             inst->recordResult(false);
-            bool success = TheISA::handleLockedWrite(inst.get(), req);
+            bool success = TheISA::handleLockedWrite(inst.get(), req, cacheBlockMask);
             inst->recordResult(true);
 
             if (!success) {
@@ -987,14 +1020,6 @@ LSQUnit<Impl>::squash(const InstSeqNum &squashed_num)
         ++lsqSquashedLoads;
     }
 
-    if (isLoadBlocked) {
-        if (squashed_num < blockedLoadSeqNum) {
-            isLoadBlocked = false;
-            loadBlockedHandled = false;
-            blockedLoadSeqNum = 0;
-        }
-    }
-
     if (memDepViolator && squashed_num < memDepViolator->seqNum) {
         memDepViolator = NULL;
     }
@@ -1091,7 +1116,6 @@ LSQUnit<Impl>::writeback(DynInstPtr &inst, PacketPtr pkt)
 
     // Squashed instructions do not need to complete their access.
     if (inst->isSquashed()) {
-        iewStage->decrWb(inst->seqNum);
         assert(!inst->isStore());
         ++lsqIgnoredResponses;
         return;
@@ -1100,8 +1124,20 @@ LSQUnit<Impl>::writeback(DynInstPtr &inst, PacketPtr pkt)
     if (!inst->isExecuted()) {
         inst->setExecuted();
 
-        // Complete access to copy data to proper place.
-        inst->completeAcc(pkt);
+        if (inst->fault == NoFault) {
+            // Complete access to copy data to proper place.
+            inst->completeAcc(pkt);
+        } else {
+            // If the instruction has an outstanding fault, we cannot complete
+            // the access as this discards the current fault.
+
+            // If we have an outstanding fault, the fault should only be of
+            // type ReExec.
+            assert(dynamic_cast<ReExec*>(inst->fault.get()) != nullptr);
+
+            DPRINTF(LSQUnit, "Not completing instruction [sn:%lli] access "
+                    "due to pending fault.\n", inst->seqNum);
+        }
     }
 
     // Need to insert instruction into queue to commit
@@ -1182,7 +1218,6 @@ LSQUnit<Impl>::sendStore(PacketPtr data_pkt)
         ++lsqCacheBlocked;
         assert(retryPkt == NULL);
         retryPkt = data_pkt;
-        lsq->setRetryTid(lsqID);
         return false;
     }
     return true;
@@ -1208,7 +1243,6 @@ LSQUnit<Impl>::recvRetry()
             }
             retryPkt = NULL;
             isStoreBlocked = false;
-            lsq->setRetryTid(InvalidThreadID);
 
             // Send any outstanding packet.
             if (TheISA::HasUnalignedMemAcc && state->pktToSend) {
@@ -1220,13 +1254,7 @@ LSQUnit<Impl>::recvRetry()
         } else {
             // Still blocked!
             ++lsqCacheBlocked;
-            lsq->setRetryTid(lsqID);
         }
-    } else if (isLoadBlocked) {
-        DPRINTF(LSQUnit, "Loads squash themselves and all younger insts, "
-                "no need to resend packet.\n");
-    } else {
-        DPRINTF(LSQUnit, "Retry received but LSQ is no longer blocked.\n");
     }
 }
 

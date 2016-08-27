@@ -44,6 +44,8 @@
 #ifndef __CPU_O3_DYN_INST_HH__
 #define __CPU_O3_DYN_INST_HH__
 
+#include <array>
+
 #include "arch/isa_traits.hh"
 #include "config/the_isa.hh"
 #include "cpu/o3/cpu.hh"
@@ -54,13 +56,6 @@
 
 class Packet;
 
-/**
- * Mostly implementation & ISA specific AlphaDynInst. As with most
- * other classes in the new CPU model, it is templated on the Impl to
- * allow for passing in of all types, such as the CPU type and the ISA
- * type. The AlphaDynInst serves as the primary interface to the CPU
- * for instructions that are executing.
- */
 template <class Impl>
 class BaseO3DynInst : public BaseDynInst<Impl>
 {
@@ -78,9 +73,8 @@ class BaseO3DynInst : public BaseDynInst<Impl>
     typedef TheISA::IntReg   IntReg;
     typedef TheISA::FloatReg FloatReg;
     typedef TheISA::FloatRegBits FloatRegBits;
-#ifdef ISA_HAS_CC_REGS
     typedef TheISA::CCReg   CCReg;
-#endif
+
     /** Misc register index type. */
     typedef TheISA::MiscReg  MiscReg;
 
@@ -91,12 +85,13 @@ class BaseO3DynInst : public BaseDynInst<Impl>
 
   public:
     /** BaseDynInst constructor given a binary instruction. */
-    BaseO3DynInst(StaticInstPtr staticInst, StaticInstPtr macroop,
+    BaseO3DynInst(const StaticInstPtr &staticInst, const StaticInstPtr &macroop,
                   TheISA::PCState pc, TheISA::PCState predPC,
                   InstSeqNum seq_num, O3CPU *cpu);
 
     /** BaseDynInst constructor given a static inst pointer. */
-    BaseO3DynInst(StaticInstPtr _staticInst, StaticInstPtr _macroop);
+    BaseO3DynInst(const StaticInstPtr &_staticInst,
+                  const StaticInstPtr &_macroop);
 
     ~BaseO3DynInst();
 
@@ -115,13 +110,13 @@ class BaseO3DynInst : public BaseDynInst<Impl>
 
   protected:
     /** Values to be written to the destination misc. registers. */
-    MiscReg _destMiscRegVal[TheISA::MaxMiscDestRegs];
+    std::array<MiscReg, TheISA::MaxMiscDestRegs> _destMiscRegVal;
 
     /** Indexes of the destination misc. registers. They are needed to defer
      * the write accesses to the misc. registers until the commit stage, when
      * the instruction is out of its speculative state.
      */
-    short _destMiscRegIdx[TheISA::MaxMiscDestRegs];
+    std::array<short, TheISA::MaxMiscDestRegs> _destMiscRegIdx;
 
     /** Number of destination misc. registers. */
     uint8_t _numDestMiscRegs;
@@ -238,7 +233,7 @@ class BaseO3DynInst : public BaseDynInst<Impl>
     /** Calls hardware return from error interrupt. */
     Fault hwrei();
     /** Traps to handle specified fault. */
-    void trap(Fault fault);
+    void trap(const Fault &fault);
     bool simPalCheck(int palFunc);
 
     /** Emulates a syscall. */
@@ -257,7 +252,7 @@ class BaseO3DynInst : public BaseDynInst<Impl>
     // storage (which is pretty hard to imagine they would have reason
     // to do).
 
-    uint64_t readIntRegOperand(const StaticInst *si, int idx)
+    IntReg readIntRegOperand(const StaticInst *si, int idx)
     {
         return this->cpu->readIntReg(this->_srcRegIdx[idx]);
     }
@@ -272,7 +267,7 @@ class BaseO3DynInst : public BaseDynInst<Impl>
         return this->cpu->readFloatRegBits(this->_srcRegIdx[idx]);
     }
 
-    uint64_t readCCRegOperand(const StaticInst *si, int idx)
+    CCReg readCCRegOperand(const StaticInst *si, int idx)
     {
         return this->cpu->readCCReg(this->_srcRegIdx[idx]);
     }
@@ -280,7 +275,7 @@ class BaseO3DynInst : public BaseDynInst<Impl>
     /** @todo: Make results into arrays so they can handle multiple dest
      *  registers.
      */
-    void setIntRegOperand(const StaticInst *si, int idx, uint64_t val)
+    void setIntRegOperand(const StaticInst *si, int idx, IntReg val)
     {
         this->cpu->setIntReg(this->_destRegIdx[idx], val);
         BaseDynInst<Impl>::setIntRegOperand(si, idx, val);
@@ -299,20 +294,20 @@ class BaseO3DynInst : public BaseDynInst<Impl>
         BaseDynInst<Impl>::setFloatRegOperandBits(si, idx, val);
     }
 
-    void setCCRegOperand(const StaticInst *si, int idx, uint64_t val)
+    void setCCRegOperand(const StaticInst *si, int idx, CCReg val)
     {
         this->cpu->setCCReg(this->_destRegIdx[idx], val);
         BaseDynInst<Impl>::setCCRegOperand(si, idx, val);
     }
 
 #if THE_ISA == MIPS_ISA
-    uint64_t readRegOtherThread(int misc_reg)
+    MiscReg readRegOtherThread(int misc_reg, ThreadID tid)
     {
         panic("MIPS MT not defined for O3 CPU.\n");
         return 0;
     }
 
-    void setRegOtherThread(int misc_reg, const TheISA::MiscReg &val)
+    void setRegOtherThread(int misc_reg, MiscReg val, ThreadID tid)
     {
         panic("MIPS MT not defined for O3 CPU.\n");
     }

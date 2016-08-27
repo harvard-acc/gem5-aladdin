@@ -40,8 +40,10 @@
 #ifndef __CPU_KVM_BASE_HH__
 #define __CPU_KVM_BASE_HH__
 
-#include <memory>
+#include <pthread.h>
+
 #include <csignal>
+#include <memory>
 
 #include "base/statistics.hh"
 #include "cpu/kvm/perfevent.hh"
@@ -50,11 +52,8 @@
 #include "cpu/base.hh"
 #include "cpu/simple_thread.hh"
 
-/** Signal to use to trigger time-based exits from KVM */
-#define KVM_TIMER_SIGNAL SIGRTMIN
-
-/** Signal to use to trigger instruction-based exits from KVM */
-#define KVM_INST_SIGNAL (SIGRTMIN+1)
+/** Signal to use to trigger exits from KVM */
+#define KVM_KICK_SIGNAL SIGRTMIN
 
 // forward declarations
 class ThreadContext;
@@ -101,7 +100,7 @@ class BaseKvmCPU : public BaseCPU
     MasterPort &getInstPort() { return instPort; }
 
     void wakeup();
-    void activateContext(ThreadID thread_num, Cycles delay);
+    void activateContext(ThreadID thread_num);
     void suspendContext(ThreadID thread_num);
     void deallocateContext(ThreadID thread_num);
     void haltContext(ThreadID thread_num);
@@ -113,6 +112,14 @@ class BaseKvmCPU : public BaseCPU
 
     /** Dump the internal state to the terminal. */
     virtual void dump();
+
+    /**
+     * Force an exit from KVM.
+     *
+     * Send a signal to the thread owning this vCPU to get it to exit
+     * from KVM. Ignored if the vCPU is not executing.
+     */
+    void kick() const { pthread_kill(vcpuThread, KVM_KICK_SIGNAL); }
 
     /**
      * A cached copy of a thread's state in the form of a SimpleThread
@@ -240,6 +247,11 @@ class BaseKvmCPU : public BaseCPU
      * @note It is the response of the caller (normally tick()) to
      * make sure that the KVM state is synchronized and that the TC is
      * invalidated after entering KVM.
+     *
+     * @note This method does not normally cause any state
+     * transitions. However, if it may suspend the CPU by suspending
+     * the thread, which leads to a transition to the Idle state. In
+     * such a case, kvm <i>must not</i> be entered.
      *
      * @param ticks Number of ticks to execute, set to 0 to exit
      * immediately after finishing pending operations.
@@ -549,9 +561,9 @@ class BaseKvmCPU : public BaseCPU
             return true;
         }
 
-        void recvRetry()
+        void recvReqRetry()
         {
-            panic("The KVM CPU doesn't expect recvRetry!\n");
+            panic("The KVM CPU doesn't expect recvReqRetry!\n");
         }
 
     };
@@ -561,9 +573,6 @@ class BaseKvmCPU : public BaseCPU
 
     /** Unused dummy port for the instruction interface */
     KVMCpuPort instPort;
-
-    /** Pre-allocated MMIO memory request */
-    Request mmio_req;
 
     /**
      * Is the gem5 context dirty? Set to true to force an update of
@@ -579,6 +588,9 @@ class BaseKvmCPU : public BaseCPU
 
     /** KVM internal ID of the vCPU */
     const long vcpuID;
+
+    /** ID of the vCPU thread */
+    pthread_t vcpuThread;
 
   private:
     struct TickEvent : public Event
@@ -617,6 +629,20 @@ class BaseKvmCPU : public BaseCPU
      * @return true if the signal was pending, false otherwise.
      */
     bool discardPendingSignal(int signum) const;
+
+    /**
+     * Thread-specific initialization.
+     *
+     * Some KVM-related initialization requires us to know the TID of
+     * the thread that is going to execute our event queue. For
+     * example, when setting up timers, we need to know the TID of the
+     * thread executing in KVM in order to deliver the timer signal to
+     * that thread. This method is called as the first event in this
+     * SimObject's event queue.
+     *
+     * @see startup
+     */
+    void startupThread();
 
     /** Try to drain the CPU if a drain is pending */
     bool tryDrain();

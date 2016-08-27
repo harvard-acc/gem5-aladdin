@@ -34,8 +34,8 @@
 #ifndef __AREA_H__
 #define __AREA_H__
 
-#include "cacti_interface.h"
 #include "basic_circuit.h"
+#include "cacti_interface.h"
 
 using namespace std;
 

@@ -81,7 +81,7 @@ output decoder {{
 
 def template TrapExecute {{
         //Edit This Template When Traps Are Implemented
-        Fault %(class_name)s::execute(%(CPU_exec_context)s *xc, Trace::InstRecord *traceData) const
+        Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc, Trace::InstRecord *traceData) const
         {
                 //Write the resulting state to the execution context
                 %(op_wb)s;
@@ -94,7 +94,7 @@ def format Trap(code, *flags) {{
 
         code ='bool cond;\n' + code
         code += 'if (cond) {\n'
-        code += 'fault = new TrapFault();\n};'
+        code += 'fault = std::make_shared<TrapFault>();\n};'
 
         iop = InstObjParams(name, Name, 'MipsStaticInst', code, flags)
         header_output = BasicDeclare.subst(iop)
@@ -106,7 +106,7 @@ def format TrapImm(code, *flags) {{
 
         code ='bool cond;\n' + code
         code += 'if (cond) {\n'
-        code += 'fault = new TrapFault();\n};'
+        code += 'fault = std::make_shared<TrapFault>();\n};'
         iop = InstObjParams(name, Name, 'MipsStaticInst', code, flags)
         header_output = BasicDeclare.subst(iop)
         decoder_output = BasicConstructor.subst(iop)

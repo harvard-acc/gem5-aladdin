@@ -1,32 +1,48 @@
+warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (256 Mbytes)
 warn: Sockets disabled, not accepting vnc client connections
 warn: Sockets disabled, not accepting terminal connections
 warn: Sockets disabled, not accepting gdb connections
-warn: DTB file specified, but no device tree support in kernel
+warn: Existing EnergyCtrl, but no enabled DVFSHandler found.
+warn: Not doing anything for miscreg ACTLR
+warn: Not doing anything for miscreg ACTLR
+warn: Not doing anything for write of miscreg ACTLR
+warn: Not doing anything for write of miscreg ACTLR
 warn: The clidr register always reports 0 caches.
 warn: clidr LoUIS field of 0b001 to match current ARM implementations.
 warn: The csselr register isn't implemented.
-warn: The ccsidr register isn't implemented and always reads as 0.
+warn: 	instruction 'mcr dccmvau' unimplemented
+warn: 	instruction 'mcr icimvau' unimplemented
 warn: 	instruction 'mcr bpiallis' unimplemented
 warn: 	instruction 'mcr icialluis' unimplemented
 warn: 	instruction 'mcr dccimvac' unimplemented
-warn: 	instruction 'mcr dccmvau' unimplemented
-warn: 	instruction 'mcr icimvau' unimplemented
-warn: 6117297500: Instruction results do not match! (Values may not actually be integers) Inst: 0x3704, checker: 0x3708
-warn: 6125706500: Instruction results do not match! (Values may not actually be integers) Inst: 0x36c4, checker: 0x36c8
-warn: 6160975500: Instruction results do not match! (Values may not actually be integers) Inst: 0x3604, checker: 0x3608
-warn: 6176055500: Instruction results do not match! (Values may not actually be integers) Inst: 0x35c4, checker: 0x35c8
-warn: 6715294500: Instruction results do not match! (Values may not actually be integers) Inst: 0x34f0, checker: 0x34f8
-warn: LCD dual screen mode not supported
-warn: 51807478000: Instruction results do not match! (Values may not actually be integers) Inst: 0x19dc, checker: 0x1a04
-warn: 	instruction 'mcr icialluis' unimplemented
-warn: 	instruction 'mcr bpiallis' unimplemented
-warn: 2474714862500: Instruction results do not match! (Values may not actually be integers) Inst: 0x9debc, checker: 0
-warn: 2488540668500: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d2b4, checker: 0
-warn: 2489750451500: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d2a4, checker: 0
-warn: 2510845218000: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d2b4, checker: 0
-warn: 2511359133500: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d2b4, checker: 0
-warn: 2517064152000: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d974, checker: 0
-warn: 2517573704500: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d954, checker: 0
-warn: 2518135055000: Instruction results do not match! (Values may not actually be integers) Inst: 0x9d9fc, checker: 0
-warn: 2518136146000: Instruction results do not match! (Values may not actually be integers) Inst: 0x9da34, checker: 0
-hack: be nice to actually delete the event here
+warn: Tried to read RealView I/O at offset 0x60 that doesn't exist
+warn: 8779058000: Instruction results do not match! (Values may not actually be integers) Inst: 0xa, checker: 0
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: Tried to write RVIO at offset 0xa8 (data 0) that doesn't exist
+warn: CP14 unimplemented crn[1], opc1[0], crm[1], opc2[4]
+warn: CP14 unimplemented crn[1], opc1[0], crm[3], opc2[4]
+warn: CP14 unimplemented crn[1], opc1[0], crm[0], opc2[4]
+warn: CP14 unimplemented crn[0], opc1[0], crm[7], opc2[0]
+warn: CP14 unimplemented crn[1], opc1[0], crm[5], opc2[4]
+warn: CP14 unimplemented crn[5], opc1[4], crm[0], opc2[0]
+warn: 82000113500: Instruction results do not match! (Values may not actually be integers) Inst: 0x80000001, checker: 0x80000000
+warn: Returning zero for read from miscreg pmcr
+warn: Returning zero for read from miscreg pmcr
+warn: Ignoring write to miscreg pmcntenclr
+warn: Ignoring write to miscreg pmcntenclr
+warn: Ignoring write to miscreg pmintenclr
+warn: Ignoring write to miscreg pmintenclr
+warn: Ignoring write to miscreg pmovsr
+warn: Ignoring write to miscreg pmovsr
+warn: Ignoring write to miscreg pmcr
+warn: Ignoring write to miscreg pmcr
+warn: 405408467500: Instruction results do not match! (Values may not actually be integers) Inst: 0x80000001, checker: 0x80000000
+warn: 	instruction 'mcr dcisw' unimplemented
+warn: 	instruction 'mcr bpiall' unimplemented

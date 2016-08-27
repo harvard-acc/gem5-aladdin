@@ -63,6 +63,8 @@ from m5.util import code_formatter, compareVersions
 # false).  Current filters are:
 #     main -- specifies the gem5 main() function
 #     skip_lib -- do not put this file into the gem5 library
+#     skip_no_python -- do not put this file into a no_python library
+#       as it embeds compiled Python
 #     <unittest> -- unit tests use filters based on the unit test name
 #
 # A parent can now be specified for a source file and default filter
@@ -149,6 +151,14 @@ class SourceFile(object):
     def __eq__(self, other): return self.filename == other.filename
     def __ne__(self, other): return self.filename != other.filename
 
+    @staticmethod
+    def done():
+        def disabled(cls, name, *ignored):
+            raise RuntimeError("Additional SourceFile '%s'" % name,\
+                  "declared, but targets deps are already fixed.")
+        SourceFile.__init__ = disabled
+
+
 class Source(SourceFile):
     '''Add a c/c++ source file to the build'''
     def __init__(self, source, Werror=False, swig=False, **guards):
@@ -222,7 +232,7 @@ class SwigSource(SourceFile):
 
     def __init__(self, package, source, **guards):
         '''Specify the python package, the source file, and any guards'''
-        super(SwigSource, self).__init__(source, **guards)
+        super(SwigSource, self).__init__(source, skip_no_python=True, **guards)
 
         modname,ext = self.extname
         assert ext == 'i'
@@ -231,8 +241,8 @@ class SwigSource(SourceFile):
         cc_file = joinpath(self.dirname, modname + '_wrap.cc')
         py_file = joinpath(self.dirname, modname + '.py')
 
-        self.cc_source = Source(cc_file, swig=True, parent=self)
-        self.py_source = PySource(package, py_file, parent=self)
+        self.cc_source = Source(cc_file, swig=True, parent=self, **guards)
+        self.py_source = PySource(package, py_file, parent=self, **guards)
 
 class ProtoBuf(SourceFile):
     '''Add a Protocol Buffer to build'''
@@ -370,8 +380,20 @@ def makeTheISA(source, target, env):
 
 ''')
 
+    # create defines for the preprocessing and compile-time determination
     for i,isa in enumerate(isas):
         code('#define $0 $1', define(isa), i + 1)
+    code()
+
+    # create an enum for any run-time determination of the ISA, we
+    # reuse the same name as the namespaces
+    code('enum class Arch {')
+    for i,isa in enumerate(isas):
+        if i + 1 == len(isas):
+            code('  $0 = $1', namespace(isa), define(isa))
+        else:
+            code('  $0 = $1,', namespace(isa), define(isa))
+    code('};')
 
     code('''
 
@@ -507,6 +529,7 @@ for name,obj in sorted(sim_objects.iteritems()):
 #
 module_depends = ["m5", "m5.SimObject", "m5.params"]
 depends = [ PySource.modules[dep].snode for dep in module_depends ]
+depends.sort(key = lambda x: x.name)
 
 ########################################################################
 #
@@ -570,6 +593,18 @@ def createSimObjectParamStruct(target, source, env):
     obj.cxx_param_decl(code)
     code.write(target[0].abspath)
 
+def createSimObjectCxxConfig(is_header):
+    def body(target, source, env):
+        assert len(target) == 1 and len(source) == 1
+
+        name = str(source[0].get_contents())
+        obj = sim_objects[name]
+
+        code = code_formatter()
+        obj.cxx_config_param_file(code, is_header)
+        code.write(target[0].abspath)
+    return body
+
 def createParamSwigWrapper(target, source, env):
     assert len(target) == 1 and len(source) == 1
 
@@ -618,6 +653,10 @@ def createSimObjectSwigWrapper(target, source, env):
     obj.swig_decl(code)
     code.write(target[0].abspath)
 
+# dummy target for generated code
+# we start out with all the Source files so they get copied to build/*/ also.
+SWIG = env.Dummy('swig', [s.tnode for s in Source.get()])
+
 # Generate all of the SimObject param C++ struct header files
 params_hh_files = []
 for name,simobj in sorted(sim_objects.iteritems()):
@@ -629,15 +668,72 @@ for name,simobj in sorted(sim_objects.iteritems()):
     env.Command(hh_file, Value(name),
                 MakeAction(createSimObjectParamStruct, Transform("SO PARAM")))
     env.Depends(hh_file, depends + extra_deps)
+    env.Depends(SWIG, hh_file)
+
+# C++ parameter description files
+if GetOption('with_cxx_config'):
+    for name,simobj in sorted(sim_objects.iteritems()):
+        py_source = PySource.modules[simobj.__module__]
+        extra_deps = [ py_source.tnode ]
+
+        cxx_config_hh_file = File('cxx_config/%s.hh' % name)
+        cxx_config_cc_file = File('cxx_config/%s.cc' % name)
+        env.Command(cxx_config_hh_file, Value(name),
+                    MakeAction(createSimObjectCxxConfig(True),
+                    Transform("CXXCPRHH")))
+        env.Command(cxx_config_cc_file, Value(name),
+                    MakeAction(createSimObjectCxxConfig(False),
+                    Transform("CXXCPRCC")))
+        env.Depends(cxx_config_hh_file, depends + extra_deps +
+                    [File('params/%s.hh' % name), File('sim/cxx_config.hh')])
+        env.Depends(cxx_config_cc_file, depends + extra_deps +
+                    [cxx_config_hh_file])
+        Source(cxx_config_cc_file)
+
+    cxx_config_init_cc_file = File('cxx_config/init.cc')
+
+    def createCxxConfigInitCC(target, source, env):
+        assert len(target) == 1 and len(source) == 1
+
+        code = code_formatter()
+
+        for name,simobj in sorted(sim_objects.iteritems()):
+            if not hasattr(simobj, 'abstract') or not simobj.abstract:
+                code('#include "cxx_config/${name}.hh"')
+        code()
+        code('void cxxConfigInit()')
+        code('{')
+        code.indent()
+        for name,simobj in sorted(sim_objects.iteritems()):
+            not_abstract = not hasattr(simobj, 'abstract') or \
+                not simobj.abstract
+            if not_abstract and 'type' in simobj.__dict__:
+                code('cxx_config_directory["${name}"] = '
+                     '${name}CxxConfigParams::makeDirectoryEntry();')
+        code.dedent()
+        code('}')
+        code.write(target[0].abspath)
+
+    py_source = PySource.modules[simobj.__module__]
+    extra_deps = [ py_source.tnode ]
+    env.Command(cxx_config_init_cc_file, Value(name),
+        MakeAction(createCxxConfigInitCC, Transform("CXXCINIT")))
+    cxx_param_hh_files = ["cxx_config/%s.hh" % simobj
+        for name,simobj in sorted(sim_objects.iteritems())
+        if not hasattr(simobj, 'abstract') or not simobj.abstract]
+    Depends(cxx_config_init_cc_file, cxx_param_hh_files +
+            [File('sim/cxx_config.hh')])
+    Source(cxx_config_init_cc_file)
 
 # Generate any needed param SWIG wrapper files
 params_i_files = []
-for name,param in params_to_swig.iteritems():
+for name,param in sorted(params_to_swig.iteritems()):
     i_file = File('python/m5/internal/%s.i' % (param.swig_module_name()))
     params_i_files.append(i_file)
     env.Command(i_file, Value(name),
                 MakeAction(createParamSwigWrapper, Transform("SW PARAM")))
     env.Depends(i_file, depends)
+    env.Depends(SWIG, i_file)
     SwigSource('m5.internal', i_file)
 
 # Generate all enum header files
@@ -649,24 +745,26 @@ for name,enum in sorted(all_enums.iteritems()):
     env.Command(cc_file, Value(name),
                 MakeAction(createEnumStrings, Transform("ENUM STR")))
     env.Depends(cc_file, depends + extra_deps)
+    env.Depends(SWIG, cc_file)
     Source(cc_file)
 
     hh_file = File('enums/%s.hh' % name)
     env.Command(hh_file, Value(name),
                 MakeAction(createEnumDecls, Transform("ENUMDECL")))
     env.Depends(hh_file, depends + extra_deps)
+    env.Depends(SWIG, hh_file)
 
     i_file = File('python/m5/internal/enum_%s.i' % name)
     env.Command(i_file, Value(name),
                 MakeAction(createEnumSwigWrapper, Transform("ENUMSWIG")))
     env.Depends(i_file, depends + extra_deps)
+    env.Depends(SWIG, i_file)
     SwigSource('m5.internal', i_file)
 
 # Generate SimObject SWIG wrapper files
-for name,simobj in sim_objects.iteritems():
+for name,simobj in sorted(sim_objects.iteritems()):
     py_source = PySource.modules[simobj.__module__]
     extra_deps = [ py_source.tnode ]
-
     i_file = File('python/m5/internal/param_%s.i' % name)
     env.Command(i_file, Value(name),
                 MakeAction(createSimObjectSwigWrapper, Transform("SO SWIG")))
@@ -697,6 +795,7 @@ for swig in SwigSource.all:
     init_file = '%s/%s_init.cc' % (dirname(cc_file), basename(cc_file))
     env.Command(init_file, Value(swig.module),
                 MakeAction(makeEmbeddedSwigInit, Transform("EMBED SW")))
+    env.Depends(SWIG, init_file)
     Source(init_file, **swig.guards)
 
 # Build all protocol buffers if we have got protoc and protobuf available
@@ -711,6 +810,7 @@ if env['HAVE_PROTOBUF']:
                                '--proto_path ${SOURCE.dir} $SOURCE',
                                Transform("PROTOC")))
 
+        env.Depends(SWIG, [proto.cc_file, proto.hh_file])
         # Add the C++ source file
         Source(proto.cc_file, **proto.guards)
 elif ProtoBuf.all:
@@ -723,40 +823,42 @@ elif ProtoBuf.all:
 def makeDebugFlagCC(target, source, env):
     assert(len(target) == 1 and len(source) == 1)
 
-    val = eval(source[0].get_contents())
-    name, compound, desc = val
-    compound = list(sorted(compound))
-
     code = code_formatter()
+
+    # delay definition of CompoundFlags until after all the definition
+    # of all constituent SimpleFlags
+    comp_code = code_formatter()
 
     # file header
     code('''
 /*
- * DO NOT EDIT THIS FILE! Automatically generated
+ * DO NOT EDIT THIS FILE! Automatically generated by SCons.
  */
 
 #include "base/debug.hh"
+
+namespace Debug {
+
 ''')
 
-    for flag in compound:
-        code('#include "debug/$flag.hh"')
-    code()
-    code('namespace Debug {')
-    code()
+    for name, flag in sorted(source[0].read().iteritems()):
+        n, compound, desc = flag
+        assert n == name
 
-    if not compound:
-        code('SimpleFlag $name("$name", "$desc");')
-    else:
-        code('CompoundFlag $name("$name", "$desc",')
-        code.indent()
-        last = len(compound) - 1
-        for i,flag in enumerate(compound):
-            if i != last:
-                code('$flag,')
-            else:
-                code('$flag);')
-        code.dedent()
+        if not compound:
+            code('SimpleFlag $name("$name", "$desc");')
+        else:
+            comp_code('CompoundFlag $name("$name", "$desc",')
+            comp_code.indent()
+            last = len(compound) - 1
+            for i,flag in enumerate(compound):
+                if i != last:
+                    comp_code('&$flag,')
+                else:
+                    comp_code('&$flag);')
+            comp_code.dedent()
 
+    code.append(comp_code)
     code()
     code('} // namespace Debug')
 
@@ -773,9 +875,7 @@ def makeDebugFlagHH(target, source, env):
     # file header boilerplate
     code('''\
 /*
- * DO NOT EDIT THIS FILE!
- *
- * Automatically generated by SCons
+ * DO NOT EDIT THIS FILE! Automatically generated by SCons.
  */
 
 #ifndef __DEBUG_${name}_HH__
@@ -807,11 +907,15 @@ for name,flag in sorted(debug_flags.iteritems()):
     n, compound, desc = flag
     assert n == name
 
-    env.Command('debug/%s.hh' % name, Value(flag),
+    hh_file = 'debug/%s.hh' % name
+    env.Command(hh_file, Value(flag),
                 MakeAction(makeDebugFlagHH, Transform("TRACING", 0)))
-    env.Command('debug/%s.cc' % name, Value(flag),
-                MakeAction(makeDebugFlagCC, Transform("TRACING", 0)))
-    Source('debug/%s.cc' % name)
+    env.Depends(SWIG, hh_file)
+
+env.Command('debug/flags.cc', Value(debug_flags),
+            MakeAction(makeDebugFlagCC, Transform("TRACING", 0)))
+env.Depends(SWIG, 'debug/flags.cc')
+Source('debug/flags.cc')
 
 # Embed python files.  All .py files that have been indicated by a
 # PySource() call in a SConscript need to be embedded into the M5
@@ -867,9 +971,10 @@ EmbeddedPython embedded_${sym}(
     code.write(str(target[0]))
 
 for source in PySource.all:
-    env.Command(source.cpp, source.tnode, 
+    env.Command(source.cpp, source.tnode,
                 MakeAction(embedPyFile, Transform("EMBED PY")))
-    Source(source.cpp)
+    env.Depends(SWIG, source.cpp)
+    Source(source.cpp, skip_no_python=True)
 
 ########################################################################
 #
@@ -878,20 +983,26 @@ for source in PySource.all:
 #
 
 # List of constructed environments to pass back to SConstruct
-envList = []
-
 date_source = Source('base/date.cc', skip_lib=True)
+
+# Capture this directory for the closure makeEnv, otherwise when it is
+# called, it won't know what directory it should use.
+variant_dir = Dir('.').path
+def variant(*path):
+    return os.path.join(variant_dir, *path)
+def variantd(*path):
+    return variant(*path)+'/'
 
 # Function to create a new build environment as clone of current
 # environment 'env' with modified object suffix and optional stripped
 # binary.  Additional keyword arguments are appended to corresponding
 # build environment vars.
-def makeEnv(label, objsfx, strip = False, **kwargs):
+def makeEnv(env, label, objsfx, strip = False, **kwargs):
     # SCons doesn't know to append a library suffix when there is a '.' in the
     # name.  Use '_' instead.
-    libname = 'gem5_' + label
-    exename = 'gem5.' + label
-    secondary_exename = 'm5.' + label
+    libname = variant('gem5_' + label)
+    exename = variant('gem5.' + label)
+    secondary_exename = variant('m5.' + label)
 
     new_env = env.Clone(OBJSUFFIX=objsfx, SHOBJSUFFIX=objsfx + 's')
     new_env.Label = label
@@ -912,10 +1023,8 @@ def makeEnv(label, objsfx, strip = False, **kwargs):
         # warnings about uninitialized variables and missing field
         # initializers.
         swig_env.Append(CCFLAGS=['-Wno-uninitialized',
-                                 '-Wno-missing-field-initializers'])
-
-        if compareVersions(env['GCC_VERSION'], '4.6') >= 0:
-            swig_env.Append(CCFLAGS='-Wno-unused-but-set-variable')
+                                 '-Wno-missing-field-initializers',
+                                 '-Wno-unused-but-set-variable'])
 
         # If gcc supports it, also warn for deletion of derived
         # classes with non-virtual desctructors. For gcc >= 4.7 we
@@ -924,14 +1033,41 @@ def makeEnv(label, objsfx, strip = False, **kwargs):
         if compareVersions(env['GCC_VERSION'], '4.7') >= 0:
             new_env.Append(CXXFLAGS='-Wdelete-non-virtual-dtor')
             swig_env.Append(CCFLAGS='-Wno-maybe-uninitialized')
+
+        # Only gcc >= 4.9 supports UBSan, so check both the version
+        # and the command-line option before adding the compiler and
+        # linker flags.
+        if GetOption('with_ubsan') and \
+                compareVersions(env['GCC_VERSION'], '4.9') >= 0:
+            new_env.Append(CCFLAGS='-fsanitize=undefined')
+            new_env.Append(LINKFLAGS='-fsanitize=undefined')
+
     if env['CLANG']:
         # Always enable the warning for deletion of derived classes
         # with non-virtual destructors
         new_env.Append(CXXFLAGS=['-Wdelete-non-virtual-dtor'])
 
+        swig_env.Append(CCFLAGS=[
+                # Some versions of SWIG can return uninitialized values
+                '-Wno-sometimes-uninitialized',
+                # Register storage is requested in a lot of places in
+                # SWIG-generated code.
+                '-Wno-deprecated-register',
+                ])
+
+        # All supported clang versions have support for UBSan, so if
+        # asked to use it, append the compiler and linker flags.
+        if GetOption('with_ubsan'):
+            new_env.Append(CCFLAGS='-fsanitize=undefined')
+            new_env.Append(LINKFLAGS='-fsanitize=undefined')
+
     werror_env = new_env.Clone()
-    werror_env.Append(CCFLAGS='-Wno-unused-local-typedefs')
-    #werror_env.Append(CCFLAGS='-Werror')
+    # Treat warnings as errors but white list some warnings that we
+    # want to allow (e.g., deprecation warnings).
+    werror_env.Append(CCFLAGS=['-Werror',
+                               '-Wno-error=deprecated-declarations',
+                               '-Wno-error=deprecated',
+                               ])
 
     def make_obj(source, static, extra_deps = None):
         '''This function adds the specified source to the correct
@@ -955,14 +1091,19 @@ def makeEnv(label, objsfx, strip = False, **kwargs):
 
         return obj
 
-    static_objs = \
-        [ make_obj(s, True) for s in Source.get(main=False, skip_lib=False) ]
-    shared_objs = \
-        [ make_obj(s, False) for s in Source.get(main=False, skip_lib=False) ]
+    lib_guards = {'main': False, 'skip_lib': False}
+
+    # Without Python, leave out all SWIG and Python content from the
+    # library builds.  The option doesn't affect gem5 built as a program
+    if GetOption('without_python'):
+        lib_guards['skip_no_python'] = False
+
+    static_objs = [ make_obj(s, True) for s in Source.get(**lib_guards) ]
+    shared_objs = [ make_obj(s, False) for s in Source.get(**lib_guards) ]
 
     static_date = make_obj(date_source, static=True, extra_deps=static_objs)
     static_objs.append(static_date)
-    
+
     shared_date = make_obj(date_source, static=False, extra_deps=shared_objs)
     shared_objs.append(shared_date)
 
@@ -980,8 +1121,8 @@ def makeEnv(label, objsfx, strip = False, **kwargs):
         test_objs = [ make_obj(s, static=True) for s in test_sources ]
         if test.main:
             test_objs += main_objs
-        testname = "unittest/%s.%s" % (test.target, label)
-        new_env.Program(testname, test_objs + static_objs)
+        path = variant('unittest/%s.%s' % (test.target, label))
+        new_env.Program(path, test_objs + static_objs)
 
     progname = exename
     if strip:
@@ -1001,7 +1142,7 @@ def makeEnv(label, objsfx, strip = False, **kwargs):
             MakeAction('ln $SOURCE $TARGET', Transform("HARDLINK")))
 
     new_env.M5Binary = targets[0]
-    envList.append(new_env)
+    return new_env
 
 # Start out with the compiler flags common to all compilers,
 # i.e. they all use -g for opt and -g -pg for prof
@@ -1067,39 +1208,77 @@ needed_envs = [identifyTarget(target) for target in BUILD_TARGETS]
 if 'all' in needed_envs:
     needed_envs += target_types
 
-# Debug binary
-if 'debug' in needed_envs:
-    makeEnv('debug', '.do',
-            CCFLAGS = Split(ccflags['debug']),
-            CPPDEFINES = ['DEBUG', 'TRACING_ON=1'],
-            LINKFLAGS = Split(ldflags['debug']))
+gem5_root = Dir('.').up().up().abspath
+def makeEnvirons(target, source, env):
+    # cause any later Source() calls to be fatal, as a diagnostic.
+    Source.done()
 
-# Optimized binary
-if 'opt' in needed_envs:
-    makeEnv('opt', '.o',
-            CCFLAGS = Split(ccflags['opt']),
-            CPPDEFINES = ['TRACING_ON=1'],
-            LINKFLAGS = Split(ldflags['opt']))
+    envList = []
 
-# "Fast" binary
-if 'fast' in needed_envs:
-    makeEnv('fast', '.fo', strip = True,
-            CCFLAGS = Split(ccflags['fast']),
-            CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-            LINKFLAGS = Split(ldflags['fast']))
+    # Debug binary
+    if 'debug' in needed_envs:
+        envList.append(
+            makeEnv(env, 'debug', '.do',
+                    CCFLAGS = Split(ccflags['debug']),
+                    CPPDEFINES = ['DEBUG', 'TRACING_ON=1'],
+                    LINKFLAGS = Split(ldflags['debug'])))
 
-# Profiled binary using gprof
-if 'prof' in needed_envs:
-    makeEnv('prof', '.po',
-            CCFLAGS = Split(ccflags['prof']),
-            CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-            LINKFLAGS = Split(ldflags['prof']))
+    # Optimized binary
+    if 'opt' in needed_envs:
+        envList.append(
+            makeEnv(env, 'opt', '.o',
+                    CCFLAGS = Split(ccflags['opt']),
+                    CPPDEFINES = ['TRACING_ON=1'],
+                    LINKFLAGS = Split(ldflags['opt'])))
 
-# Profiled binary using google-pprof
-if 'perf' in needed_envs:
-    makeEnv('perf', '.gpo',
-            CCFLAGS = Split(ccflags['perf']),
-            CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-            LINKFLAGS = Split(ldflags['perf']))
+    # "Fast" binary
+    if 'fast' in needed_envs:
+        envList.append(
+            makeEnv(env, 'fast', '.fo', strip = True,
+                    CCFLAGS = Split(ccflags['fast']),
+                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                    LINKFLAGS = Split(ldflags['fast'])))
 
-Return('envList')
+    # Profiled binary using gprof
+    if 'prof' in needed_envs:
+        envList.append(
+            makeEnv(env, 'prof', '.po',
+                    CCFLAGS = Split(ccflags['prof']),
+                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                    LINKFLAGS = Split(ldflags['prof'])))
+
+    # Profiled binary using google-pprof
+    if 'perf' in needed_envs:
+        envList.append(
+            makeEnv(env, 'perf', '.gpo',
+                    CCFLAGS = Split(ccflags['perf']),
+                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                    LINKFLAGS = Split(ldflags['perf'])))
+
+    # Set up the regression tests for each build.
+    for e in envList:
+        SConscript(os.path.join(gem5_root, 'tests', 'SConscript'),
+                   variant_dir = variantd('tests', e.Label),
+                   exports = { 'env' : e }, duplicate = False)
+
+# The MakeEnvirons Builder defers the full dependency collection until
+# after processing the ISA definition (due to dynamically generated
+# source files).  Add this dependency to all targets so they will wait
+# until the environments are completely set up.  Otherwise, a second
+# process (e.g. -j2 or higher) will try to compile the requested target,
+# not know how, and fail.
+env.Append(BUILDERS = {'MakeEnvirons' :
+                        Builder(action=MakeAction(makeEnvirons,
+                                                  Transform("ENVIRONS", 1)))})
+
+isa_target = env['PHONY_BASE'] + '-deps'
+environs   = env['PHONY_BASE'] + '-environs'
+env.Depends('#all-deps',     isa_target)
+env.Depends('#all-environs', environs)
+env.ScanISA(isa_target, File('arch/%s/generated/inc.d' % env['TARGET_ISA']))
+envSetup = env.MakeEnvirons(environs, isa_target)
+
+# make sure no -deps targets occur before all ISAs are complete
+env.Depends(isa_target, '#all-isas')
+# likewise for -environs targets and all the -deps targets
+env.Depends(environs, '#all-deps')

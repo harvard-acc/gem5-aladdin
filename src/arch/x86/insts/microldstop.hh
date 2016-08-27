@@ -41,20 +41,13 @@
 #define __ARCH_X86_INSTS_MICROLDSTOP_HH__
 
 #include "arch/x86/insts/microop.hh"
+#include "arch/x86/ldstflags.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 #include "sim/faults.hh"
 
 namespace X86ISA
 {
-    const Request::FlagsType SegmentFlagMask = mask(4);
-    const int FlagShift = 4;
-    enum FlagBit {
-        CPL0FlagBit = 1,
-        AddrSizeFlagBit = 2,
-        StoreCheck = 4
-    };
-
     /**
      * Base class for load and store ops
      */

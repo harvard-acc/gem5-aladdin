@@ -93,9 +93,18 @@ struct EthAddr : protected eth_addr
     uint8_t *bytes() { return &data[0]; }
 
     const uint8_t *addr() const { return &data[0]; }
-    bool unicast() const { return data[0] == 0x00; }
-    bool multicast() const { return data[0] == 0x01; }
-    bool broadcast() const { return data[0] == 0xff; }
+    bool unicast() const { return !(data[0] & 0x01); }
+    bool multicast() const { return !unicast() && !broadcast(); }
+    bool broadcast() const
+    {
+        bool isBroadcast = true;
+        for (int i = 0; i < ETH_ADDR_LEN; ++i) {
+            isBroadcast = isBroadcast && data[i] == 0xff;
+        }
+
+        return isBroadcast;
+    }
+
     std::string string() const;
 
     operator uint64_t() const
@@ -173,7 +182,7 @@ class EthPtr
     const EthPacketPtr packet() const { return p; }
     EthPacketPtr packet() { return p; }
     bool operator!() const { return !p; }
-    operator bool() const { return p; }
+    operator bool() const { return (p != nullptr); }
     int off() const { return 0; }
     int pstart() const { return off() + ((const EthHdr*)p->data)->size(); }
 };
@@ -315,7 +324,7 @@ class IpPtr
     const EthPacketPtr packet() const { return p; }
     EthPacketPtr packet() { return p; }
     bool operator!() const { return !p; }
-    operator bool() const { return p; }
+    operator bool() const { return (p != nullptr); }
     int off() const { return (sizeof(eth_hdr) + ((eth_hdr_vlan) ? 4 : 0)); }
     int pstart() const { return (off() + get()->size()); }
 };
@@ -431,7 +440,7 @@ class Ip6Ptr
     const EthPacketPtr packet() const { return p; }
     EthPacketPtr packet() { return p; }
     bool operator!() const { return !p; }
-    operator bool() const { return p; }
+    operator bool() const { return (p != nullptr); }
     int off() const { return sizeof(eth_hdr) + ((eth_hdr_vlan) ? 4 : 0); }
     int pstart() const { return off() + get()->size(); }
 };
@@ -567,7 +576,7 @@ class TcpPtr
     const EthPacketPtr packet() const { return p; }
     EthPacketPtr packet() { return p; }
     bool operator!() const { return !p; }
-    operator bool() const { return p; }
+    operator bool() const { return (p != nullptr); }
     int off() const { return _off; }
     int pstart() const { return off() + get()->size(); }
 };
@@ -662,7 +671,7 @@ class UdpPtr
     const EthPacketPtr packet() const { return p; }
     EthPacketPtr packet() { return p; }
     bool operator!() const { return !p; }
-    operator bool() const { return p; }
+    operator bool() const { return (p != nullptr); }
     int off() const { return _off; }
     int pstart() const { return off() + get()->size(); }
 };

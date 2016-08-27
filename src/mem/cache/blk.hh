@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013 ARM Limited
+ * Copyright (c) 2012-2014 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -72,7 +72,7 @@ enum CacheBlkStatusBits {
     /** block was a hardware prefetch yet unaccessed*/
     BlkHWPrefetched =   0x20,
     /** block holds data from the secure memory space */
-    BlkSecure =         0x40
+    BlkSecure =         0x40,
 };
 
 /**
@@ -344,8 +344,8 @@ class CacheBlk
           default:    s = 'T'; break; // @TODO add other types
         }
         return csprintf("state: %x (%c) valid: %d writable: %d readable: %d "
-                        "dirty: %d tag: %x data: %x", status, s, isValid(),
-                        isWritable(), isReadable(), isDirty(), tag, *data);
+                        "dirty: %d tag: %x", status, s, isValid(),
+                        isWritable(), isReadable(), isDirty(), tag);
     }
 
     /**
@@ -402,63 +402,19 @@ class CacheBlkPrintWrapper : public Printable
 };
 
 /**
- * Wrap a method and present it as a cache block visitor.
- *
- * For example the forEachBlk method in the tag arrays expects a
- * callable object/function as their parameter. This class wraps a
- * method in an object and presents  callable object that adheres to
- * the cache block visitor protocol.
+ * Base class for cache block visitor, operating on the cache block
+ * base class (later subclassed for the various tag classes). This
+ * visitor class is used as part of the forEachBlk interface in the
+ * tag classes.
  */
-template <typename T, typename BlkType>
-class CacheBlkVisitorWrapper
+class CacheBlkVisitor
 {
   public:
-    typedef bool (T::*visitorPtr)(BlkType &blk);
 
-    CacheBlkVisitorWrapper(T &_obj, visitorPtr _visitor)
-        : obj(_obj), visitor(_visitor) {}
+    CacheBlkVisitor() {}
+    virtual ~CacheBlkVisitor() {}
 
-    bool operator()(BlkType &blk) {
-        return (obj.*visitor)(blk);
-    }
-
-  private:
-    T &obj;
-    visitorPtr visitor;
-};
-
-/**
- * Cache block visitor that determines if there are dirty blocks in a
- * cache.
- *
- * Use with the forEachBlk method in the tag array to determine if the
- * array contains dirty blocks.
- */
-template <typename BlkType>
-class CacheBlkIsDirtyVisitor
-{
-  public:
-    CacheBlkIsDirtyVisitor()
-        : _isDirty(false) {}
-
-    bool operator()(BlkType &blk) {
-        if (blk.isDirty()) {
-            _isDirty = true;
-            return false;
-        } else {
-            return true;
-        }
-    }
-
-    /**
-     * Does the array contain a dirty line?
-     *
-     * \return true if yes, false otherwise.
-     */
-    bool isDirty() const { return _isDirty; };
-
-  private:
-    bool _isDirty;
+    virtual bool operator()(CacheBlk &blk) = 0;
 };
 
 #endif //__CACHE_BLK_HH__

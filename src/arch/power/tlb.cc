@@ -150,7 +150,7 @@ TLB::checkCacheability(RequestPtr &req)
     if ((req->getVaddr() & VAddrUncacheable) == VAddrUncacheable) {
 
         // mark request as uncacheable
-        req->setFlags(Request::UNCACHEABLE);
+        req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
     }
     return NoFault;
 }
@@ -165,7 +165,7 @@ TLB::insertAt(PowerISA::PTE &pte, unsigned Index, int _smallPages)
     } else {
 
         // Update TLB
-        if (table[Index].V0 == true || table[Index].V1 == true) {
+        if (table[Index].V0 || table[Index].V1) {
 
             // Previous entry is valid
             PageTable::iterator i = lookupTable.find(table[Index].VPN);
@@ -282,7 +282,7 @@ TLB::translateInst(RequestPtr req, ThreadContext *tc)
     if (req->getVaddr() & 0x3) {
         DPRINTF(TLB, "Alignment Fault on %#x, size = %d\n", req->getVaddr(),
                 req->getSize());
-        return new AlignmentFault();
+        return std::make_shared<AlignmentFault>();
     }
 
      Process * p = tc->getProcessPtr();

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2014 Advanced Micro Devices, Inc.
  * Copyright (c) 2001-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -50,6 +51,7 @@ struct LiveProcessParams;
 class SyscallDesc;
 class System;
 class ThreadContext;
+class EmulatedDriver;
 
 template<class IntType>
 struct AuxVector
@@ -125,7 +127,12 @@ class Process : public SimObject
     //separated.
     uint64_t M5_pid;
 
-    PageTable* pTable;
+    // flag for using architecture specific page table
+    bool useArchPT;
+    // running KvmCPU in SE mode requires special initialization
+    bool kvmInSE;
+
+    PageTableBase* pTable;
 
     class FdMap
     {
@@ -137,10 +144,11 @@ class Process : public SimObject
         bool isPipe;
         int readPipeSource;
         uint64_t fileOffset;
+        EmulatedDriver *driver;
 
         FdMap()
             : fd(-1), filename("NULL"), mode(0), flags(0),
-              isPipe(false), readPipeSource(0), fileOffset(0)
+              isPipe(false), readPipeSource(0), fileOffset(0), driver(NULL)
         { }
 
         void serialize(std::ostream &os);
@@ -182,7 +190,7 @@ class Process : public SimObject
     void dup_fd(int sim_fd, int tgt_fd);
 
     // generate new target fd for sim_fd
-    int alloc_fd(int sim_fd, std::string filename, int flags, int mode,
+    int alloc_fd(int sim_fd, const std::string& filename, int flags, int mode,
                  bool pipe);
 
     // free target fd (e.g., after close)
@@ -212,19 +220,19 @@ class Process : public SimObject
     bool fixupStackFault(Addr vaddr);
 
     /**
-     * Map a contiguous range of virtual addresses in this process's
+     * Maps a contiguous range of virtual addresses in this process's
      * address space to a contiguous range of physical addresses.
-     * This function exists primarily to enable exposing the map
-     * operation to python, so that configuration scripts can set up
-     * mappings in SE mode.
+     * This function exists primarily to expose the map operation to
+     * python, so that configuration scripts can set up mappings in SE mode.
      *
      * @param vaddr The starting virtual address of the range.
      * @param paddr The starting physical address of the range.
      * @param size The length of the range in bytes.
+     * @param cacheable Specifies whether accesses are cacheable.
      * @return True if the map operation was successful.  (At this
      *           point in time, the map operation always succeeds.)
      */
-    bool map(Addr vaddr, Addr paddr, int size);
+    bool map(Addr vaddr, Addr paddr, int size, bool cacheable = true);
 
     void serialize(std::ostream &os);
     void unserialize(Checkpoint *cp, const std::string &section);
@@ -253,6 +261,9 @@ class LiveProcess : public Process
     // pid of the process and it's parent
     uint64_t __pid;
     uint64_t __ppid;
+
+    // Emulated drivers available to this process
+    std::vector<EmulatedDriver *> drivers;
 
   public:
 
@@ -324,6 +335,14 @@ class LiveProcess : public Process
             SyscallReturn return_value) = 0;
 
     virtual SyscallDesc *getDesc(int callnum) = 0;
+
+    /**
+     * Find an emulated device driver.
+     *
+     * @param filename Name of the device (under /dev)
+     * @return Pointer to driver object if found, else NULL
+     */
+    EmulatedDriver *findDriver(std::string filename);
 
     // this function is used to create the LiveProcess object, since
     // we can't tell which subclass of LiveProcess to use until we

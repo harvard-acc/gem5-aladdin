@@ -82,6 +82,7 @@ class PageTableWalkerCache(BaseCache):
     mshrs = 10
     size = '1kB'
     tgts_per_mshr = 12
+    forward_snoops = False
     is_top_level = True
     is_perfect_cache = False
 

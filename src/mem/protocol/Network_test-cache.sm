@@ -32,15 +32,17 @@
 
 
 machine(L1Cache, "Network_test L1 Cache")
-: Sequencer * sequencer,
-  Cycles issue_latency = 2
+    : Sequencer * sequencer;
+      Cycles issue_latency := 2;
+
+      // NETWORK BUFFERS
+      MessageBuffer * requestFromCache, network="To", virtual_network="0",
+            ordered="false", vnet_type = "request";
+      MessageBuffer * forwardFromCache, network="To", virtual_network="1",
+            ordered="false", vnet_type = "forward";
+      MessageBuffer * responseFromCache, network="To", virtual_network="2",
+            ordered="false", vnet_type = "response";
 {
-
-  // NETWORK BUFFERS
-  MessageBuffer requestFromCache, network="To", virtual_network="0", ordered="false", vnet_type = "request";
-  MessageBuffer forwardFromCache, network="To", virtual_network="1", ordered="false", vnet_type = "forward";
-  MessageBuffer responseFromCache, network="To", virtual_network="2", ordered="false", vnet_type = "response";
-
   // STATES
   state_declaration(State, desc="Cache states", default="L1Cache_State_I") {
     I,  AccessPermission:Invalid, desc="Not Present/Invalid";
@@ -112,8 +114,12 @@ machine(L1Cache, "Network_test L1 Cache")
     return OOD;
   }
 
-  DataBlock getDataBlock(Address addr), return_by_ref="yes" {
-    error("Network Test does not support get data block.");
+  void functionalRead(Address addr, Packet *pkt) {
+    error("Network test does not support functional read.");
+  }
+
+  int functionalWrite(Address addr, Packet *pkt) {
+    error("Network test does not support functional write.");
   }
 
   // NETWORK PORTS
@@ -138,7 +144,7 @@ machine(L1Cache, "Network_test L1 Cache")
   // map_Address_to_Directory is used to retrieve it.
 
   action(a_issueRequest, "a", desc="Issue a request") {
-    enqueue(requestNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
       out_msg.Addr := address;
       out_msg.Type := CoherenceRequestType:MSG;
       out_msg.Requestor := machineID;
@@ -149,7 +155,7 @@ machine(L1Cache, "Network_test L1 Cache")
   }
 
   action(b_issueForward, "b", desc="Issue a forward") {
-    enqueue(forwardNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(forwardNetwork_out, RequestMsg, issue_latency) {
       out_msg.Addr := address;
       out_msg.Type := CoherenceRequestType:MSG;
       out_msg.Requestor := machineID;
@@ -159,7 +165,7 @@ machine(L1Cache, "Network_test L1 Cache")
   }
 
   action(c_issueResponse, "c", desc="Issue a response") {
-    enqueue(responseNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(responseNetwork_out, RequestMsg, issue_latency) {
       out_msg.Addr := address;
       out_msg.Type := CoherenceRequestType:MSG;
       out_msg.Requestor := machineID;

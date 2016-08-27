@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright 2014 Google, Inc.
+ * Copyright (c) 2012, 2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -74,9 +75,6 @@ class Kvm
     friend class KvmVM;
 
   public:
-    typedef std::vector<struct kvm_cpuid_entry2> CPUIDVector;
-    typedef std::vector<uint32_t> MSRIndexVector;
-
     virtual ~Kvm();
 
     Kvm *create();
@@ -110,6 +108,12 @@ class Kvm
     int capCoalescedMMIO() const;
 
     /**
+     * Attempt to determine how many memory slots are available. If it can't
+     * be determined, this function returns 0.
+     */
+    int capNumMemSlots() const;
+
+    /**
      * Support for reading and writing single registers.
      *
      * @see BaseKvmCPU::getOneReg(), and BaseKvmCPU::setOneReg()
@@ -135,6 +139,16 @@ class Kvm
     /** Support for getting and setting the kvm_xsave structure. */
     bool capXSave() const;
     /** @} */
+
+#if defined(__i386__) || defined(__x86_64__)
+  public: // x86-specific
+    /**
+     * @{
+     * @name X86-specific APIs
+     */
+
+    typedef std::vector<struct kvm_cpuid_entry2> CPUIDVector;
+    typedef std::vector<uint32_t> MSRIndexVector;
 
     /**
      * Get the CPUID features supported by the hardware and Kvm.
@@ -173,6 +187,17 @@ class Kvm
      * @return Reference to cached MSR index list.
      */
     const MSRIndexVector &getSupportedMSRs() const;
+
+  private: // x86-specific
+    /** Cached vector of supported CPUID entries. */
+    mutable CPUIDVector supportedCPUIDCache;
+
+    /** Cached vector of supported MSRs. */
+    mutable MSRIndexVector supportedMSRCache;
+
+
+    /** @} */
+#endif
 
   protected:
     /**
@@ -231,12 +256,6 @@ class Kvm
     int apiVersion;
     /** Size of the MMAPed vCPU parameter area. */
     int vcpuMMapSize;
-
-    /** Cached vector of supported CPUID entries. */
-    mutable CPUIDVector supportedCPUIDCache;
-
-    /** Cached vector of supported MSRs. */
-    mutable MSRIndexVector supportedMSRCache;
 
     /** Singleton instance */
     static Kvm *instance;
@@ -331,8 +350,70 @@ class KvmVM : public SimObject
     bool hasKernelIRQChip() const { return _hasKernelIRQChip; }
     /** @} */
 
+    struct MemSlot
+    {
+        MemSlot(uint32_t _num) : num(_num)
+        {}
+        MemSlot() : num(-1)
+        {}
+
+        int32_t num;
+    };
+
+    /**
+     *  Allocate a memory slot within the VM.
+     */
+    const MemSlot allocMemSlot(uint64_t size);
+
+    /**
+     * Setup a region of physical memory in the guest
+     *
+     * @param slot KVM memory slot ID returned by allocMemSlot
+     * @param host_addr Memory allocation backing the memory
+     * @param guest_addr Address in the guest
+     * @param flags Flags (see the KVM API documentation)
+     */
+    void setupMemSlot(const MemSlot slot, void *host_addr, Addr guest_addr,
+                      uint32_t flags);
+
+    /**
+     * Disable a memory slot.
+     */
+    void disableMemSlot(const MemSlot slot);
+
+    /**
+     *  Free a previously allocated memory slot.
+     */
+    void freeMemSlot(const MemSlot slot);
+
+    /**
+     * Create an in-kernel device model.
+     *
+     * @param type Device type (KVM_DEV_TYPE_xxx)
+     * @param flags Creation flags (KVM_CREATE_DEVICE_xxx)
+     * @return Device file descriptor
+     */
+    int createDevice(uint32_t type, uint32_t flags = 0);
+
     /** Global KVM interface */
     Kvm kvm;
+
+#if defined(__aarch64__)
+  public: // ARM-specific
+    /**
+     * Ask the kernel for the preferred CPU target to simulate.
+     *
+     * When creating an ARM vCPU in Kvm, we need to initialize it with
+     * a call to BaseArmKvmCPU::kvmArmVCpuInit(). When calling this
+     * function, we need to know what type of CPU the host has. This
+     * call sets up the kvm_vcpu_init structure with the values the
+     * kernel wants.
+     *
+     * @param[out] target Target structure to initialize.
+     */
+    void kvmArmPreferredTarget(struct kvm_vcpu_init &target) const;
+
+#endif
 
   protected:
     /**
@@ -366,16 +447,12 @@ class KvmVM : public SimObject
      * @param slot KVM memory slot ID (must be unique)
      * @param host_addr Memory allocation backing the memory
      * @param guest_addr Address in the guest
-     * @param guest_range Address range used by guest.
      * @param len Size of the allocation in bytes
      * @param flags Flags (see the KVM API documentation)
      */
     void setUserMemoryRegion(uint32_t slot,
                              void *host_addr, Addr guest_addr,
                              uint64_t len, uint32_t flags);
-    void setUserMemoryRegion(uint32_t slot,
-                             void *host_addr, AddrRange guest_range,
-                             uint32_t flags);
     /** @} */
 
     /**
@@ -437,6 +514,19 @@ class KvmVM : public SimObject
 
     /** Next unallocated vCPU ID */
     long nextVCPUID;
+
+    /**
+     *  Structures tracking memory slots.
+     */
+    class MemorySlot
+    {
+      public:
+        uint64_t size;
+        uint32_t slot;
+        bool active;
+    };
+    std::vector<MemorySlot> memorySlots;
+    uint32_t maxMemorySlot;
 };
 
 #endif

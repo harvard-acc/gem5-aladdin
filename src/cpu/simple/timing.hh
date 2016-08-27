@@ -123,7 +123,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
         }
 
         void
-        finish(Fault fault, RequestPtr req, ThreadContext *tc,
+        finish(const Fault &fault, RequestPtr req, ThreadContext *tc,
                BaseTLB::Mode mode)
         {
             cpu->sendFetch(fault, req, tc);
@@ -135,9 +135,9 @@ class TimingSimpleCPU : public BaseSimpleCPU
     void sendSplitData(RequestPtr req1, RequestPtr req2, RequestPtr req,
                        uint8_t *data, bool read);
 
-    void translationFault(Fault fault);
+    void translationFault(const Fault &fault);
 
-    void buildPacket(PacketPtr &pkt, RequestPtr req, bool read);
+    PacketPtr buildPacket(RequestPtr req, bool read);
     void buildSplitPacket(PacketPtr &pkt1, PacketPtr &pkt2,
             RequestPtr req1, RequestPtr req2, RequestPtr req,
             uint8_t *data, bool read);
@@ -157,7 +157,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
       public:
 
         TimingCPUPort(const std::string& _name, TimingSimpleCPU* _cpu)
-            : MasterPort(_name, _cpu), cpu(_cpu), retryEvent(this)
+            : MasterPort(_name, _cpu), cpu(_cpu), retryRespEvent(this)
         { }
 
       protected:
@@ -165,7 +165,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
         /**
          * Snooping a coherence request, do nothing.
          */
-        virtual void recvTimingSnoopReq(PacketPtr pkt) { }
+        virtual void recvTimingSnoopReq(PacketPtr pkt) {}
 
         TimingSimpleCPU* cpu;
 
@@ -179,7 +179,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
             void schedule(PacketPtr _pkt, Tick t);
         };
 
-        EventWrapper<MasterPort, &MasterPort::sendRetry> retryEvent;
+        EventWrapper<MasterPort, &MasterPort::sendRetryResp> retryRespEvent;
     };
 
     class IcachePort : public TimingCPUPort
@@ -195,7 +195,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
 
         virtual bool recvTimingResp(PacketPtr pkt);
 
-        virtual void recvRetry();
+        virtual void recvReqRetry();
 
         struct ITickEvent : public TickEvent
         {
@@ -217,13 +217,26 @@ class TimingSimpleCPU : public BaseSimpleCPU
         DcachePort(TimingSimpleCPU *_cpu)
             : TimingCPUPort(_cpu->name() + ".dcache_port", _cpu),
               tickEvent(_cpu)
-        { }
+        {
+           cacheBlockMask = ~(cpu->cacheLineSize() - 1);
+        }
 
+        Addr cacheBlockMask;
       protected:
+
+        /** Snoop a coherence request, we need to check if this causes
+         * a wakeup event on a cpu that is monitoring an address
+         */
+        virtual void recvTimingSnoopReq(PacketPtr pkt);
+        virtual void recvFunctionalSnoop(PacketPtr pkt);
 
         virtual bool recvTimingResp(PacketPtr pkt);
 
-        virtual void recvRetry();
+        virtual void recvReqRetry();
+
+        virtual bool isSnooping() const {
+            return true;
+        }
 
         struct DTickEvent : public TickEvent
         {
@@ -237,13 +250,15 @@ class TimingSimpleCPU : public BaseSimpleCPU
 
     };
 
+    void updateCycleCounts();
+
     IcachePort icachePort;
     DcachePort dcachePort;
 
     PacketPtr ifetch_pkt;
     PacketPtr dcache_pkt;
 
-    Tick previousCycle;
+    Cycles previousCycle;
 
   protected:
 
@@ -263,7 +278,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
 
     void verifyMemoryMode() const;
 
-    virtual void activateContext(ThreadID thread_num, Cycles delay);
+    virtual void activateContext(ThreadID thread_num);
     virtual void suspendContext(ThreadID thread_num);
 
     Fault readMem(Addr addr, uint8_t *data, unsigned size, unsigned flags);
@@ -272,10 +287,10 @@ class TimingSimpleCPU : public BaseSimpleCPU
                    Addr addr, unsigned flags, uint64_t *res);
 
     void fetch();
-    void sendFetch(Fault fault, RequestPtr req, ThreadContext *tc);
+    void sendFetch(const Fault &fault, RequestPtr req, ThreadContext *tc);
     void completeIfetch(PacketPtr );
     void completeDataAccess(PacketPtr pkt);
-    void advanceInst(Fault fault);
+    void advanceInst(const Fault &fault);
 
     /** This function is used by the page table walker to determine if it could
      * translate the a pending request or if the underlying request has been

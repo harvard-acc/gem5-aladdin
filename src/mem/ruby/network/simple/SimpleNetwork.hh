@@ -32,16 +32,13 @@
 #include <iostream>
 #include <vector>
 
-#include "mem/ruby/common/Global.hh"
 #include "mem/ruby/network/Network.hh"
 #include "params/SimpleNetwork.hh"
-#include "sim/sim_object.hh"
 
 class NetDest;
 class MessageBuffer;
 class Throttle;
 class Switch;
-class Topology;
 
 class SimpleNetwork : public Network
 {
@@ -59,15 +56,14 @@ class SimpleNetwork : public Network
     void collateStats();
     void regStats();
 
-    // returns the queue requested for the given component
-    MessageBuffer* getToNetQueue(NodeID id, bool ordered, int network_num, std::string vnet_type);
-    MessageBuffer* getFromNetQueue(NodeID id, bool ordered, int network_num, std::string vnet_type);
-    virtual const std::vector<Throttle*>* getThrottles(NodeID id) const;
+    // sets the queue requested
+    void setToNetQueue(NodeID id, bool ordered, int network_num,
+                       std::string vnet_type, MessageBuffer *b);
+    void setFromNetQueue(NodeID id, bool ordered, int network_num,
+                         std::string vnet_type, MessageBuffer *b);
 
     bool isVNetOrdered(int vnet) { return m_ordered[vnet]; }
     bool validVirtualNetwork(int vnet) { return m_in_use[vnet]; }
-
-    int getNumNodes() {return m_nodes; }
 
     // Methods used by Topology to setup the network
     void makeOutLink(SwitchID src, NodeID dest, BasicLink* link, 
@@ -96,12 +92,6 @@ class SimpleNetwork : public Network
     SimpleNetwork(const SimpleNetwork& obj);
     SimpleNetwork& operator=(const SimpleNetwork& obj);
 
-    // vector of queues from the components
-    std::vector<std::vector<MessageBuffer*> > m_toNetQueues;
-    std::vector<std::vector<MessageBuffer*> > m_fromNetQueues;
-
-    std::vector<bool> m_in_use;
-    std::vector<bool> m_ordered;
     std::vector<Switch*> m_switches;
     std::vector<MessageBuffer*> m_buffers_to_free;
     std::vector<Switch*> m_endpoint_switches;

@@ -85,7 +85,8 @@ class Throttle : public Consumer
   private:
     void init(NodeID node, Cycles link_latency, int link_bandwidth_multiplier,
               int endpoint_bandwidth);
-    void addVirtualNetwork(MessageBuffer* in_ptr, MessageBuffer* out_ptr);
+    void operateVnet(int vnet, int &bw_remainin, bool &schedule_wakeup,
+                     MessageBuffer *in, MessageBuffer *out);
 
     // Private copy constructor and assignment operator
     Throttle(const Throttle& obj);
@@ -95,6 +96,7 @@ class Throttle : public Consumer
     std::vector<MessageBuffer*> m_out;
     unsigned int m_vnets;
     std::vector<int> m_units_remaining;
+
     int m_sID;
     NodeID m_node;
     int m_link_bandwidth_multiplier;

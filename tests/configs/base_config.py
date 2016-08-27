@@ -58,7 +58,8 @@ class BaseSystem(object):
     __metaclass__ = ABCMeta
 
     def __init__(self, mem_mode='timing', mem_class=SimpleMemory,
-                 cpu_class=TimingSimpleCPU, num_cpus=1, checker=False):
+                 cpu_class=TimingSimpleCPU, num_cpus=1, checker=False,
+                 mem_size=None):
         """Initialize a simple base system.
 
         Keyword Arguments:
@@ -67,6 +68,7 @@ class BaseSystem(object):
           cpu_class -- CPU class to use
           num_cpus -- Number of CPUs to instantiate
           checker -- Set to True to add checker CPUs
+          mem_size -- Override the default memory size
         """
         self.mem_mode = mem_mode
         self.mem_class = mem_class
@@ -102,7 +104,7 @@ class BaseSystem(object):
         Returns:
           A bus that CPUs should use to connect to the shared cache.
         """
-        system.toL2Bus = CoherentBus(clk_domain=system.cpu_clk_domain)
+        system.toL2Bus = L2XBar(clk_domain=system.cpu_clk_domain)
         system.l2c = L2Cache(clk_domain=system.cpu_clk_domain,
                              size='4MB', assoc=8)
         system.l2c.cpu_side = system.toL2Bus.master
@@ -184,7 +186,7 @@ class BaseSESystem(BaseSystem):
 
     def create_system(self):
         system = System(physmem = self.mem_class(),
-                        membus = CoherentBus(),
+                        membus = SystemXBar(),
                         mem_mode = self.mem_mode)
         system.system_port = system.membus.slave
         system.physmem.port = system.membus.master

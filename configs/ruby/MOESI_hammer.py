@@ -32,6 +32,7 @@ import m5
 from m5.objects import *
 from m5.defines import buildEnv
 from Ruby import create_topology
+from Ruby import send_evicts
 
 #
 # Note: the L1 Cache latency is only used by the sequencer on fast path hits
@@ -59,7 +60,7 @@ def define_options(parser):
     parser.add_option("--dir-on", action="store_true",
           help="Hammer: enable Full-bit Directory")
 
-def create_system(options, system, piobus, dma_ports, ruby_system):
+def create_system(options, full_system, system, dma_ports, ruby_system):
 
     if buildEnv['PROTOCOL'] != 'MOESI_hammer':
         panic("This script requires the MOESI_hammer protocol to be built.")
@@ -81,8 +82,6 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
     #
     block_size_bits = int(math.log(options.cacheline_size, 2))
 
-    cntrl_count = 0
-    
     for i in xrange(options.num_cpus):
         #
         # First create the Ruby objects associated with this cpu
@@ -99,38 +98,42 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
                            start_index_bit = block_size_bits)
 
         l1_cntrl = L1Cache_Controller(version = i,
-                                      cntrl_id = cntrl_count,
                                       L1Icache = l1i_cache,
                                       L1Dcache = l1d_cache,
                                       L2cache = l2_cache,
                                       no_mig_atomic = not \
                                         options.allow_atomic_migration,
-                                      send_evictions = (
-                                          options.cpu_type == "detailed"),
+                                      send_evictions = send_evicts(options),
                                       transitions_per_cycle = options.ports,
+                                      clk_domain=system.cpu[i].clk_domain,
                                       ruby_system = ruby_system)
 
         cpu_seq = RubySequencer(version = i,
                                 icache = l1i_cache,
                                 dcache = l1d_cache,
+                                clk_domain=system.cpu[i].clk_domain,
                                 ruby_system = ruby_system)
 
         l1_cntrl.sequencer = cpu_seq
-
-        if piobus != None:
-            cpu_seq.pio_port = piobus.slave
-
         if options.recycle_latency:
             l1_cntrl.recycle_latency = options.recycle_latency
 
         exec("ruby_system.l1_cntrl%d = l1_cntrl" % i)
-        #
+
         # Add controllers and sequencers to the appropriate lists
-        #
         cpu_sequencers.append(cpu_seq)
         l1_cntrl_nodes.append(l1_cntrl)
 
-        cntrl_count += 1
+        # Connect the L1 controller and the network
+        # Connect the buffers from the controller to network
+        l1_cntrl.requestFromCache = ruby_system.network.slave
+        l1_cntrl.responseFromCache = ruby_system.network.slave
+        l1_cntrl.unblockFromCache = ruby_system.network.slave
+
+        # Connect the buffers from the network to the controller
+        l1_cntrl.forwardToCache = ruby_system.network.master
+        l1_cntrl.responseToCache = ruby_system.network.master
+
 
     phys_mem_size = sum(map(lambda r: r.size(), system.mem_ranges))
     assert(phys_mem_size % options.num_dirs == 0)
@@ -167,15 +170,6 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
                                           clk_divider=3)
 
     for i in xrange(options.num_dirs):
-        #
-        # Create the Ruby objects associated with the directory controller
-        #
-
-        mem_cntrl = RubyMemoryControl(
-                              clk_domain = ruby_system.memctrl_clk_domain,
-                              version = i,
-                              ruby_system = ruby_system)
-
         dir_size = MemorySize('0B')
         dir_size.value = mem_module_size
 
@@ -183,18 +177,9 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
                          start_index_bit = pf_start_bit)
 
         dir_cntrl = Directory_Controller(version = i,
-                                         cntrl_id = cntrl_count,
-                                         directory = \
-                                         RubyDirectoryMemory( \
-                                                    version = i,
-                                                    size = dir_size,
-                                                    use_map = options.use_map,
-                                                    map_levels = \
-                                                    options.map_levels,
-                                                    numa_high_bit = \
-                                                      options.numa_high_bit),
+                                         directory = RubyDirectoryMemory(
+                                            version = i, size = dir_size),
                                          probeFilter = pf,
-                                         memBuffer = mem_cntrl,
                                          probe_filter_enabled = options.pf_on,
                                          full_bit_dir_enabled = options.dir_on,
                                          transitions_per_cycle = options.ports,
@@ -206,32 +191,56 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
         exec("ruby_system.dir_cntrl%d = dir_cntrl" % i)
         dir_cntrl_nodes.append(dir_cntrl)
 
-        cntrl_count += 1
+        # Connect the directory controller to the network
+        dir_cntrl.forwardFromDir = ruby_system.network.slave
+        dir_cntrl.responseFromDir = ruby_system.network.slave
+        dir_cntrl.dmaResponseFromDir = ruby_system.network.slave
+
+        dir_cntrl.unblockToDir = ruby_system.network.master
+        dir_cntrl.responseToDir = ruby_system.network.master
+        dir_cntrl.requestToDir = ruby_system.network.master
+        dir_cntrl.dmaRequestToDir = ruby_system.network.master
+
 
     for i, dma_port in enumerate(dma_ports):
         #
         # Create the Ruby objects associated with the dma controller
         #
         dma_seq = DMASequencer(version = i,
-                               ruby_system = ruby_system)
+                               ruby_system = ruby_system,
+                               slave = dma_port)
         
         dma_cntrl = DMA_Controller(version = i,
-                                   cntrl_id = cntrl_count,
                                    dma_sequencer = dma_seq,
                                    transitions_per_cycle = options.ports,
                                    ruby_system = ruby_system)
 
         exec("ruby_system.dma_cntrl%d = dma_cntrl" % i)
-        exec("ruby_system.dma_cntrl%d.dma_sequencer.slave = dma_port" % i)
         dma_cntrl_nodes.append(dma_cntrl)
 
         if options.recycle_latency:
             dma_cntrl.recycle_latency = options.recycle_latency
 
-        cntrl_count += 1
+        # Connect the dma controller to the network
+        dma_cntrl.responseFromDir = ruby_system.network.master
+        dma_cntrl.requestToDir = ruby_system.network.slave
 
     all_cntrls = l1_cntrl_nodes + dir_cntrl_nodes + dma_cntrl_nodes
 
-    topology = create_topology(all_cntrls, options)
+    # Create the io controller and the sequencer
+    if full_system:
+        io_seq = DMASequencer(version=len(dma_ports), ruby_system=ruby_system)
+        ruby_system._io_port = io_seq
+        io_controller = DMA_Controller(version = len(dma_ports),
+                                       dma_sequencer = io_seq,
+                                       ruby_system = ruby_system)
+        ruby_system.io_controller = io_controller
 
+        # Connect the dma controller to the network
+        io_controller.responseFromDir = ruby_system.network.master
+        io_controller.requestToDir = ruby_system.network.slave
+
+        all_cntrls = all_cntrls + [io_controller]
+
+    topology = create_topology(all_cntrls, options)
     return (cpu_sequencers, dir_cntrl_nodes, topology)

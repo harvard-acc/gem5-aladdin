@@ -32,7 +32,7 @@ from m5.proxy import *
 from BaseCPU import BaseCPU
 from FUPool import *
 from O3Checker import O3Checker
-from BranchPredictor import BranchPredictor
+from BranchPredictor import *
 
 class DerivO3CPU(BaseCPU):
     type = 'DerivO3CPU'
@@ -61,6 +61,8 @@ class DerivO3CPU(BaseCPU):
     commitToFetchDelay = Param.Cycles(1, "Commit to fetch delay")
     fetchWidth = Param.Unsigned(8, "Fetch width")
     fetchBufferSize = Param.Unsigned(64, "Fetch buffer size in bytes")
+    fetchQueueSize = Param.Unsigned(32, "Fetch queue size in micro-ops "
+                                    "per-thread")
 
     renameToDecodeDelay = Param.Cycles(1, "Rename to decode delay")
     iewToDecodeDelay = Param.Cycles(1, "Issue/Execute/Writeback to decode "
@@ -84,7 +86,6 @@ class DerivO3CPU(BaseCPU):
     dispatchWidth = Param.Unsigned(8, "Dispatch width")
     issueWidth = Param.Unsigned(8, "Issue width")
     wbWidth = Param.Unsigned(8, "Writeback width")
-    wbDepth = Param.Unsigned(1, "Writeback depth")
     fuPool = Param.FUPool(DefaultFUPool(), "Functional Unit pool")
 
     iewToCommitDelay = Param.Cycles(1, "Issue/Execute/Writeback to commit "
@@ -115,7 +116,7 @@ class DerivO3CPU(BaseCPU):
                                       "registers")
     # most ISAs don't use condition-code regs, so default is 0
     _defaultNumPhysCCRegs = 0
-    if buildEnv['TARGET_ISA'] == 'x86':
+    if buildEnv['TARGET_ISA'] in ('arm','x86'):
         # For x86, each CC reg is used to hold only a subset of the
         # flags, so we need 4-5 times the number of CC regs as
         # physical integer regs to be sure we don't run out.  In
@@ -138,7 +139,7 @@ class DerivO3CPU(BaseCPU):
     smtROBThreshold = Param.Int(100, "SMT ROB Threshold Sharing Parameter")
     smtCommitPolicy = Param.String('RoundRobin', "SMT Commit Policy")
 
-    branchPred = Param.BranchPredictor(BranchPredictor(numThreads =
+    branchPred = Param.BranchPredictor(TournamentBP(numThreads =
                                                        Parent.numThreads),
                                        "Branch Predictor")
     needsTSO = Param.Bool(buildEnv['TARGET_ISA'] == 'x86',

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 ARM Limited
+ * Copyright (c) 2010, 2012-2013 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -48,10 +48,11 @@
 namespace ArmISA
 {
 static inline uint32_t
-rotate_imm(uint32_t immValue, int rotateValue)
+rotate_imm(uint32_t immValue, uint32_t rotateValue)
 {
-    return ((immValue >> (rotateValue & 31)) |
-            (immValue << (32 - (rotateValue & 31))));
+    rotateValue &= 31;
+    return rotateValue == 0 ? immValue :
+        (immValue >> rotateValue) | (immValue << (32 - rotateValue));
 }
 
 static inline uint32_t
@@ -78,7 +79,8 @@ modified_imm(uint8_t ctrlImm, uint8_t dataImm)
 }
 
 static inline uint64_t
-simd_modified_imm(bool op, uint8_t cmode, uint8_t data, bool &immValid)
+simd_modified_imm(bool op, uint8_t cmode, uint8_t data, bool &immValid,
+                  bool isAarch64 = false)
 {
     uint64_t bigData = data;
     immValid = true;
@@ -133,12 +135,20 @@ simd_modified_imm(bool op, uint8_t cmode, uint8_t data, bool &immValid)
         }
         break;
       case 0xf:
-        if (!op) {
-            uint64_t bVal = bits(bigData, 6) ? (0x1F) : (0x20);
-            bigData = (bits(bigData, 5, 0) << 19) |
-                      (bVal << 25) | (bits(bigData, 7) << 31);
-            bigData |= (bigData << 32);
-            break;
+        {
+            uint64_t bVal = 0;
+            if (!op) {
+                bVal = bits(bigData, 6) ? (0x1F) : (0x20);
+                bigData = (bits(bigData, 5, 0) << 19) |
+                          (bVal << 25) | (bits(bigData, 7) << 31);
+                bigData |= (bigData << 32);
+                break;
+            } else if (isAarch64) {
+                bVal = bits(bigData, 6) ? (0x0FF) : (0x100);
+                bigData = (bits(bigData, 5, 0) << 48) |
+                          (bVal << 54) | (bits(bigData, 7) << 63);
+                break;
+            }
         }
         // Fall through, immediate encoding is invalid.
       default:
@@ -179,11 +189,14 @@ class PredOp : public ArmStaticInst
 
     /// Constructor
     PredOp(const char *mnem, ExtMachInst _machInst, OpClass __opClass) :
-           ArmStaticInst(mnem, _machInst, __opClass),
-           condCode(machInst.itstateMask ?
-                   (ConditionCode)(uint8_t)machInst.itstateCond :
-                   (ConditionCode)(unsigned)machInst.condCode)
+           ArmStaticInst(mnem, _machInst, __opClass)
     {
+        if (machInst.aarch64)
+            condCode = COND_UC;
+        else if (machInst.itstateMask)
+            condCode = (ConditionCode)(uint8_t)machInst.itstateCond;
+        else
+            condCode = (ConditionCode)(unsigned)machInst.condCode;
     }
 };
 
@@ -299,7 +312,7 @@ class PredMacroOp : public PredOp
     /// Constructor
     PredMacroOp(const char *mnem, ExtMachInst _machInst, OpClass __opClass) :
                 PredOp(mnem, _machInst, __opClass),
-                numMicroops(0)
+                numMicroops(0), microOps(nullptr)
     {
         // We rely on the subclasses of this object to handle the
         // initialization of the micro-operations, since they are

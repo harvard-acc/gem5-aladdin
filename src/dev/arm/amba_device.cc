@@ -62,9 +62,9 @@ AmbaIntDevice::AmbaIntDevice(const Params *p, Addr pio_size)
 
 
 
-AmbaDmaDevice::AmbaDmaDevice(const Params *p)
+AmbaDmaDevice::AmbaDmaDevice(const Params *p, Addr pio_size)
     : DmaDevice(p), ambaId(AmbaVendor | p->amba_id),
-      pioAddr(p->pio_addr), pioSize(0),
+      pioAddr(p->pio_addr), pioSize(pio_size),
       pioDelay(p->pio_latency),intNum(p->int_num), gic(p->gic)
 {
 }
@@ -75,8 +75,6 @@ AmbaDevice::readId(PacketPtr pkt, uint64_t amba_id, Addr pio_addr)
     Addr daddr = pkt->getAddr() - pio_addr;
     if (daddr < AMBA_PER_ID0 || daddr > AMBA_CEL_ID3)
         return false;
-
-    pkt->allocate();
 
     int byte = (daddr - AMBA_PER_ID0) << 1;
     // Too noisy right now

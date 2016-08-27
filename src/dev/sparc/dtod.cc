@@ -53,17 +53,7 @@ DumbTOD::DumbTOD(const Params *p)
     : BasicPioDevice(p, 0x08)
 {
     struct tm tm = p->time;
-    char *tz;
-
-    tz = getenv("TZ");
-    setenv("TZ", "", 1);
-    tzset();
-    todTime = mktime(&tm);
-    if (tz)
-        setenv("TZ", tz, 1);
-    else
-        unsetenv("TZ");
-    tzset();
+    todTime = mkutctime(&tm);
 
     DPRINTFN("Real-time clock set to %s\n", asctime(&tm));
     DPRINTFN("Real-time clock set to %d\n", todTime);
@@ -75,7 +65,6 @@ DumbTOD::read(PacketPtr pkt)
     assert(pkt->getAddr() >= pioAddr && pkt->getAddr() < pioAddr + pioSize);
     assert(pkt->getSize() == 8);
 
-    pkt->allocate();
     pkt->set(todTime);
     todTime += 1000;
 

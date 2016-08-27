@@ -130,6 +130,12 @@ class Linux : public OperatingSystem
         int64_t tv_usec;        //!< microseconds
     };
 
+    /// For clock_gettime().
+    struct timespec {
+        time_t tv_sec;         //!< seconds
+        int64_t tv_nsec;        //!< nanoseconds
+    };
+
     /// Clock ticks per second, for times().
     static const int M5_SC_CLK_TCK = 100;
 
@@ -227,6 +233,12 @@ class Linux : public OperatingSystem
     static const unsigned TGT_EWOULDBLOCK = TGT_EAGAIN;
     static const unsigned TGT_FUTEX_PRIVATE_FLAG = 128;
 
+    // for *at syscalls
+    static const int TGT_AT_FDCWD   = -100;
+
+    // for MREMAP
+    static const unsigned TGT_MREMAP_MAYMOVE    = 0x1;
+    static const unsigned TGT_MREMAP_FIXED      = 0x2;
 };  // class Linux
 
 #endif // __LINUX_HH__

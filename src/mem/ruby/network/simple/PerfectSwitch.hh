@@ -68,6 +68,7 @@ class PerfectSwitch : public Consumer
     void addInPort(const std::vector<MessageBuffer*>& in);
     void addOutPort(const std::vector<MessageBuffer*>& out,
                     const NetDest& routing_table_entry);
+
     int getInLinks() const { return m_in.size(); }
     int getOutLinks() const { return m_out.size(); }
 
@@ -83,11 +84,14 @@ class PerfectSwitch : public Consumer
     PerfectSwitch(const PerfectSwitch& obj);
     PerfectSwitch& operator=(const PerfectSwitch& obj);
 
+    void operateVnet(int vnet);
+
     SwitchID m_switch_id;
 
     // vector of queues from the components
     std::vector<std::vector<MessageBuffer*> > m_in;
     std::vector<std::vector<MessageBuffer*> > m_out;
+
     std::vector<NetDest> m_routing_table;
     std::vector<LinkOrder> m_link_order;
 

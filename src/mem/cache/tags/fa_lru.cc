@@ -55,13 +55,11 @@
 using namespace std;
 
 FALRU::FALRU(const Params *p)
-    : BaseTags(p)
+    : BaseTags(p), cacheBoundaries(nullptr)
 {
     if (!isPowerOf2(blkSize))
         fatal("cache block size (in bytes) `%d' must be a power of two",
               blkSize);
-    if (!(hitLatency > 0))
-        fatal("Access latency in cycles must be at least one cycle");
     if (!isPowerOf2(size))
         fatal("Cache Size must be power of 2 for now");
 
@@ -74,7 +72,6 @@ FALRU::FALRU(const Params *p)
         cacheMask = 0;
     }
 
-    warmedUp = false;
     warmupBound = size/blkSize;
     numBlocks = size/blkSize;
 
@@ -164,13 +161,19 @@ FALRU::hashLookup(Addr addr) const
 }
 
 void
-FALRU::invalidate(FALRU::BlkType *blk)
+FALRU::invalidate(CacheBlk *blk)
 {
     assert(blk);
     tagsInUse--;
 }
 
-FALRUBlk*
+CacheBlk*
+FALRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int context_src)
+{
+    return accessBlock(addr, is_secure, lat, context_src, 0);
+}
+
+CacheBlk*
 FALRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int context_src,
                    int *inCache)
 {
@@ -203,13 +206,13 @@ FALRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int context_src,
         *inCache = tmp_in_cache;
     }
 
-    lat = hitLatency;
+    lat = accessLatency;
     //assert(check());
     return blk;
 }
 
 
-FALRUBlk*
+CacheBlk*
 FALRU::findBlock(Addr addr, bool is_secure) const
 {
     Addr blkAddr = blkAlign(addr);
@@ -223,7 +226,7 @@ FALRU::findBlock(Addr addr, bool is_secure) const
     return blk;
 }
 
-FALRUBlk*
+CacheBlk*
 FALRU::findVictim(Addr addr)
 {
     FALRUBlk * blk = tail;
@@ -246,7 +249,7 @@ FALRU::findVictim(Addr addr)
 }
 
 void
-FALRU::insertBlock(PacketPtr pkt, FALRU::BlkType *blk)
+FALRU::insertBlock(PacketPtr pkt, CacheBlk *blk)
 {
 }
 

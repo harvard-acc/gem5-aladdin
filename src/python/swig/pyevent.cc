@@ -32,11 +32,12 @@
 
 #include "python/swig/pyevent.hh"
 #include "sim/async.hh"
+#include "sim/eventq.hh"
 
-PythonEvent::PythonEvent(PyObject *obj, Priority priority)
-    : Event(priority), object(obj)
+PythonEvent::PythonEvent(PyObject *code, Priority priority)
+    : Event(priority), eventCode(code)
 {
-    if (object == NULL)
+    if (code == NULL)
         panic("Passed in invalid object");
 }
 
@@ -48,7 +49,7 @@ void
 PythonEvent::process()
 {
     PyObject *args = PyTuple_New(0);
-    PyObject *result = PyObject_Call(object, args, NULL);
+    PyObject *result = PyObject_Call(eventCode, args, NULL);
     Py_DECREF(args);
 
     if (result) {
@@ -59,6 +60,8 @@ PythonEvent::process()
         // that there's been an exception.
         async_event = true;
         async_exception = true;
+        /* Wake up some event queue to handle event */
+        getEventQueue(0)->wakeup();
     }
 
     // Since the object has been removed from the event queue, its

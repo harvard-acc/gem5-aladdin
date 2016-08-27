@@ -40,7 +40,10 @@
 #include <inttypes.h>
 
 #include <cassert>
+#include <memory>
 #include <ostream>
+
+#include "base/refcnt.hh"
 
 /** uint64_t constant */
 #define ULL(N)          ((uint64_t)N##ULL)
@@ -177,7 +180,17 @@ typedef int16_t PortID;
 const PortID InvalidPortID = (PortID)-1;
 
 class FaultBase;
-template <class T> class RefCountingPtr;
-typedef RefCountingPtr<FaultBase> Fault;
+typedef std::shared_ptr<FaultBase> Fault;
+
+#ifndef SWIG // Swig gets really confused by decltype
+// Rather than creating a shared_ptr instance and assigning it nullptr,
+// we just create an alias.
+constexpr decltype(nullptr) NoFault = nullptr;
+#endif
+
+enum ByteOrder {
+    BigEndianByteOrder,
+    LittleEndianByteOrder
+};
 
 #endif // __BASE_TYPES_HH__

@@ -128,9 +128,13 @@ AddrMapper::recvTimingReq(PacketPtr pkt)
     // packets)
     bool successful = masterPort.sendTimingReq(pkt);
 
-    // If not successful, restore the sender state
-    if (!successful && needsResponse) {
-        delete pkt->popSenderState();
+    // If not successful, restore the address and sender state
+    if (!successful) {
+        pkt->setAddr(orig_addr);
+
+        if (needsResponse) {
+            delete pkt->popSenderState();
+        }
     }
 
     return successful;
@@ -190,15 +194,15 @@ AddrMapper::isSnooping() const
 }
 
 void
-AddrMapper::recvRetryMaster()
+AddrMapper::recvReqRetry()
 {
-    slavePort.sendRetry();
+    slavePort.sendRetryReq();
 }
 
 void
-AddrMapper::recvRetrySlave()
+AddrMapper::recvRespRetry()
 {
-    masterPort.sendRetry();
+    masterPort.sendRetryResp();
 }
 
 void

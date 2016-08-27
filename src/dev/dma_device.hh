@@ -105,6 +105,9 @@ class DmaPort : public MasterPort
         /** Base DMA request address for this transaction. */
         Addr baseAddr;
 
+        /** DMA request address offset. */
+        size_t offset;
+
         /** Amount to delay completion of dma by */
         const Tick delay;
 
@@ -158,12 +161,14 @@ class DmaPort : public MasterPort
     bool multi_channel;
   protected:
 
-    virtual bool recvTimingResp(PacketPtr pkt);
-    void recvRetry() ;
+    bool recvTimingResp(PacketPtr pkt);
+    void recvReqRetry() ;
 
     void queueDma(unsigned channel_index, PacketPtr pkt);
 
     Addr getPacketBaseAddr(PacketPtr pkt);
+
+    size_t getPacketOffset(PacketPtr pkt);
 
   public:
 
@@ -172,8 +177,8 @@ class DmaPort : public MasterPort
     DmaPort(MemObject *dev, System *s, unsigned max_req, unsigned chunk_size,
             bool interleave=false);
 
-    void dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
-                   uint8_t *data, Tick delay, Request::Flags flag = 0);
+    RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+                         uint8_t *data, Tick delay, Request::Flags flag = 0);
 
     bool dmaPending() const { return pendingCount > 0; }
 

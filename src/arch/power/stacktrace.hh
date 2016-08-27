@@ -47,15 +47,6 @@ namespace PowerISA
 
 class ProcessInfo
 {
-  private:
-    ThreadContext *tc;
-
-    int thread_info_size;
-    int task_struct_size;
-    int task_off;
-    int pid_off;
-    int name_off;
-
   public:
     ProcessInfo(ThreadContext *_tc);
 
@@ -82,7 +73,7 @@ class StackTrace
 
   public:
     StackTrace();
-    StackTrace(ThreadContext *tc, StaticInstPtr inst);
+    StackTrace(ThreadContext *tc, const StaticInstPtr &inst);
     ~StackTrace();
 
     void
@@ -98,7 +89,7 @@ class StackTrace
         return tc != NULL;
     }
 
-    bool trace(ThreadContext *tc, StaticInstPtr inst);
+    bool trace(ThreadContext *tc, const StaticInstPtr &inst);
 
   public:
     const std::vector<Addr> &
@@ -132,7 +123,7 @@ class StackTrace
 };
 
 inline bool
-StackTrace::trace(ThreadContext *tc, StaticInstPtr inst)
+StackTrace::trace(ThreadContext *tc, const StaticInstPtr &inst)
 {
     if (!inst->isCall() && !inst->isReturn())
         return false;

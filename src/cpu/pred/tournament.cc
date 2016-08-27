@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 ARM Limited
+ * Copyright (c) 2011, 2014 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -44,7 +44,7 @@
 #include "base/intmath.hh"
 #include "cpu/pred/tournament.hh"
 
-TournamentBP::TournamentBP(const Params *params)
+TournamentBP::TournamentBP(const TournamentBPParams *params)
     : BPredUnit(params),
       localPredictorSize(params->localPredictorSize),
       localCtrBits(params->localCtrBits),
@@ -58,8 +58,7 @@ TournamentBP::TournamentBP(const Params *params)
           ceilLog2(params->globalPredictorSize) :
           ceilLog2(params->choicePredictorSize)),
       choicePredictorSize(params->choicePredictorSize),
-      choiceCtrBits(params->choiceCtrBits),
-      instShiftAmt(params->instShiftAmt)
+      choiceCtrBits(params->choiceCtrBits)
 {
     if (!isPowerOf2(localPredictorSize)) {
         fatal("Invalid local predictor size!\n");
@@ -249,7 +248,7 @@ TournamentBP::lookup(Addr branch_addr, void * &bp_history)
 }
 
 void
-TournamentBP::uncondBranch(void * &bp_history)
+TournamentBP::uncondBranch(Addr pc, void * &bp_history)
 {
     // Create BPHistory and pass it back to be recorded.
     BPHistory *history = new BPHistory;
@@ -346,15 +345,22 @@ TournamentBP::update(Addr branch_addr, bool taken, void *bp_history,
                 }
              }
 
+        } else {
+            // We're done with this history, now delete it.
+            delete history;
         }
-        // We're done with this history, now delete it.
-        delete history;
-
     }
 
     assert(local_history_idx < localHistoryTableSize);
 
 
+}
+
+void
+TournamentBP::retireSquashed(void *bp_history)
+{
+    BPHistory *history = static_cast<BPHistory *>(bp_history);
+    delete history;
 }
 
 void
@@ -367,6 +373,12 @@ TournamentBP::squash(void *bp_history)
 
     // Delete this BPHistory now that we're done with it.
     delete history;
+}
+
+TournamentBP*
+TournamentBPParams::create()
+{
+    return new TournamentBP(this);
 }
 
 #ifdef DEBUG

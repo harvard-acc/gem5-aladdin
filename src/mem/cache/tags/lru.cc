@@ -54,11 +54,11 @@ LRU::LRU(const Params *p)
 {
 }
 
-BaseSetAssoc::BlkType*
+CacheBlk*
 LRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int master_id)
 {
+    CacheBlk *blk = BaseSetAssoc::accessBlock(addr, is_secure, lat, master_id);
 
-    BlkType *blk = BaseSetAssoc::accessBlock(addr, is_secure, lat, master_id);
     if (blk != NULL) {
         // move this block to head of the MRU list
         sets[blk->set].moveToHead(blk);
@@ -70,13 +70,12 @@ LRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int master_id)
     return blk;
 }
 
-BaseSetAssoc::BlkType*
-LRU::findVictim(Addr addr) const
+CacheBlk*
+LRU::findVictim(Addr addr)
 {
     int set = extractSet(addr);
     // grab a replacement candidate
     BlkType *blk = sets[set].blks[assoc - 1];
-    DPRINTF(CacheRepl, "findVictim: addr: %x set: %x, assoc: %d\n", addr, set, assoc);
 
     if (blk->isValid()) {
         DPRINTF(CacheRepl, "set %x: selecting blk %x for replacement\n",
@@ -89,15 +88,16 @@ LRU::findVictim(Addr addr) const
 void
 LRU::insertBlock(PacketPtr pkt, BlkType *blk)
 {
-
     BaseSetAssoc::insertBlock(pkt, blk);
+
     int set = extractSet(pkt->getAddr());
     sets[set].moveToHead(blk);
 }
 
 void
-LRU::invalidate(BlkType *blk)
+LRU::invalidate(CacheBlk *blk)
 {
+    BaseSetAssoc::invalidate(blk);
 
     BaseSetAssoc::invalidate(blk);
     // should be evicted before valid blocks
@@ -105,7 +105,7 @@ LRU::invalidate(BlkType *blk)
     sets[set].moveToTail(blk);
 }
 
-LRU *
+LRU*
 LRUParams::create()
 {
     return new LRU(this);

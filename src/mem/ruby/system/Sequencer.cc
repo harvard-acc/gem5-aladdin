@@ -26,12 +26,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "arch/x86/ldstflags.hh"
 #include "base/misc.hh"
 #include "base/str.hh"
-#include "config/the_isa.hh"
-#if THE_ISA == X86_ISA
-#include "arch/x86/insts/microldstop.hh"
-#endif // X86_ISA
 #include "cpu/testers/rubytest/RubyTester.hh"
 #include "debug/MemoryAccess.hh"
 #include "debug/ProtocolTrace.hh"
@@ -45,6 +42,7 @@
 #include "mem/ruby/system/Sequencer.hh"
 #include "mem/ruby/system/System.hh"
 #include "mem/packet.hh"
+#include "sim/system.hh"
 
 using namespace std;
 
@@ -55,13 +53,8 @@ RubySequencerParams::create()
 }
 
 Sequencer::Sequencer(const Params *p)
-    : RubyPort(p), deadlockCheckEvent(this)
+    : RubyPort(p), m_IncompleteTimes(MachineType_NUM), deadlockCheckEvent(this)
 {
-    m_store_waiting_on_load_cycles = 0;
-    m_store_waiting_on_store_cycles = 0;
-    m_load_waiting_on_store_cycles = 0;
-    m_load_waiting_on_load_cycles = 0;
-
     m_outstanding_count = 0;
 
     m_instCache_ptr = p->icache;
@@ -133,78 +126,32 @@ Sequencer::wakeup()
     }
 }
 
-void Sequencer::clearStats()
+void Sequencer::resetStats()
 {
-    m_outstandReqHist.clear();
-
-    // Initialize the histograms that track latency of all requests
-    m_latencyHist.clear(20);
-    m_typeLatencyHist.resize(RubyRequestType_NUM);
+    m_latencyHist.reset();
+    m_hitLatencyHist.reset();
+    m_missLatencyHist.reset();
     for (int i = 0; i < RubyRequestType_NUM; i++) {
-        m_typeLatencyHist[i].clear(20);
-    }
-
-    // Initialize the histograms that track latency of requests that
-    // hit in the cache attached to the sequencer.
-    m_hitLatencyHist.clear(20);
-    m_hitTypeLatencyHist.resize(RubyRequestType_NUM);
-    m_hitTypeMachLatencyHist.resize(RubyRequestType_NUM);
-
-    for (int i = 0; i < RubyRequestType_NUM; i++) {
-        m_hitTypeLatencyHist[i].clear(20);
-        m_hitTypeMachLatencyHist[i].resize(MachineType_NUM);
+        m_typeLatencyHist[i]->reset();
+        m_hitTypeLatencyHist[i]->reset();
+        m_missTypeLatencyHist[i]->reset();
         for (int j = 0; j < MachineType_NUM; j++) {
-            m_hitTypeMachLatencyHist[i][j].clear(20);
+            m_hitTypeMachLatencyHist[i][j]->reset();
+            m_missTypeMachLatencyHist[i][j]->reset();
         }
     }
-
-    // Initialize the histograms that track the latency of requests that
-    // missed in the cache attached to the sequencer.
-    m_missLatencyHist.clear(20);
-    m_missTypeLatencyHist.resize(RubyRequestType_NUM);
-    m_missTypeMachLatencyHist.resize(RubyRequestType_NUM);
-
-    for (int i = 0; i < RubyRequestType_NUM; i++) {
-        m_missTypeLatencyHist[i].clear(20);
-        m_missTypeMachLatencyHist[i].resize(MachineType_NUM);
-        for (int j = 0; j < MachineType_NUM; j++) {
-            m_missTypeMachLatencyHist[i][j].clear(20);
-        }
-    }
-
-    m_hitMachLatencyHist.resize(MachineType_NUM);
-    m_missMachLatencyHist.resize(MachineType_NUM);
-    m_IssueToInitialDelayHist.resize(MachineType_NUM);
-    m_InitialToForwardDelayHist.resize(MachineType_NUM);
-    m_ForwardToFirstResponseDelayHist.resize(MachineType_NUM);
-    m_FirstResponseToCompletionDelayHist.resize(MachineType_NUM);
-    m_IncompleteTimes.resize(MachineType_NUM);
 
     for (int i = 0; i < MachineType_NUM; i++) {
-        m_missMachLatencyHist[i].clear(20);
-        m_hitMachLatencyHist[i].clear(20);
+        m_missMachLatencyHist[i]->reset();
+        m_hitMachLatencyHist[i]->reset();
 
-        m_IssueToInitialDelayHist[i].clear(20);
-        m_InitialToForwardDelayHist[i].clear(20);
-        m_ForwardToFirstResponseDelayHist[i].clear(20);
-        m_FirstResponseToCompletionDelayHist[i].clear(20);
+        m_IssueToInitialDelayHist[i]->reset();
+        m_InitialToForwardDelayHist[i]->reset();
+        m_ForwardToFirstResponseDelayHist[i]->reset();
+        m_FirstResponseToCompletionDelayHist[i]->reset();
 
         m_IncompleteTimes[i] = 0;
     }
-}
-
-void
-Sequencer::printStats(ostream & out) const
-{
-    out << "Sequencer: " << m_name << endl
-        << "  store_waiting_on_load_cycles: "
-        << m_store_waiting_on_load_cycles << endl
-        << "  store_waiting_on_store_cycles: "
-        << m_store_waiting_on_store_cycles << endl
-        << "  load_waiting_on_load_cycles: "
-        << m_load_waiting_on_load_cycles << endl
-        << "  load_waiting_on_store_cycles: "
-        << m_load_waiting_on_store_cycles << endl;
 }
 
 void
@@ -291,7 +238,7 @@ Sequencer::insertRequest(PacketPtr pkt, RubyRequestType request_type)
         // Check if there is any outstanding read request for the same
         // cache line.
         if (m_readRequestTable.count(line_addr) > 0) {
-            m_store_waiting_on_load_cycles++;
+            m_store_waiting_on_load++;
             return RequestStatus_Aliased;
         }
 
@@ -303,14 +250,14 @@ Sequencer::insertRequest(PacketPtr pkt, RubyRequestType request_type)
             m_outstanding_count++;
         } else {
           // There is an outstanding write request for the cache line
-          m_store_waiting_on_store_cycles++;
+          m_store_waiting_on_store++;
           return RequestStatus_Aliased;
         }
     } else {
         // Check if there is any outstanding write request for the same
         // cache line.
         if (m_writeRequestTable.count(line_addr) > 0) {
-            m_load_waiting_on_store_cycles++;
+            m_load_waiting_on_store++;
             return RequestStatus_Aliased;
         }
 
@@ -323,12 +270,12 @@ Sequencer::insertRequest(PacketPtr pkt, RubyRequestType request_type)
             m_outstanding_count++;
         } else {
             // There is an outstanding read request for the cache line
-            m_load_waiting_on_load_cycles++;
+            m_load_waiting_on_load++;
             return RequestStatus_Aliased;
         }
     }
 
-    m_outstandReqHist.add(m_outstanding_count);
+    m_outstandReqHist.sample(m_outstanding_count);
     assert(m_outstanding_count ==
         (m_writeRequestTable.size() + m_readRequestTable.size()));
 
@@ -432,41 +379,41 @@ Sequencer::recordMissLatency(const Cycles cycles, const RubyRequestType type,
                              Cycles forwardRequestTime,
                              Cycles firstResponseTime, Cycles completionTime)
 {
-    m_latencyHist.add(cycles);
-    m_typeLatencyHist[type].add(cycles);
+    m_latencyHist.sample(cycles);
+    m_typeLatencyHist[type]->sample(cycles);
 
     if (isExternalHit) {
-        m_missLatencyHist.add(cycles);
-        m_missTypeLatencyHist[type].add(cycles);
+        m_missLatencyHist.sample(cycles);
+        m_missTypeLatencyHist[type]->sample(cycles);
 
         if (respondingMach != MachineType_NUM) {
-            m_missMachLatencyHist[respondingMach].add(cycles);
-            m_missTypeMachLatencyHist[type][respondingMach].add(cycles);
+            m_missMachLatencyHist[respondingMach]->sample(cycles);
+            m_missTypeMachLatencyHist[type][respondingMach]->sample(cycles);
 
             if ((issuedTime <= initialRequestTime) &&
                 (initialRequestTime <= forwardRequestTime) &&
                 (forwardRequestTime <= firstResponseTime) &&
                 (firstResponseTime <= completionTime)) {
 
-                m_IssueToInitialDelayHist[respondingMach].add(
+                m_IssueToInitialDelayHist[respondingMach]->sample(
                     initialRequestTime - issuedTime);
-                m_InitialToForwardDelayHist[respondingMach].add(
+                m_InitialToForwardDelayHist[respondingMach]->sample(
                     forwardRequestTime - initialRequestTime);
-                m_ForwardToFirstResponseDelayHist[respondingMach].add(
+                m_ForwardToFirstResponseDelayHist[respondingMach]->sample(
                     firstResponseTime - forwardRequestTime);
-                m_FirstResponseToCompletionDelayHist[respondingMach].add(
+                m_FirstResponseToCompletionDelayHist[respondingMach]->sample(
                     completionTime - firstResponseTime);
             } else {
                 m_IncompleteTimes[respondingMach]++;
             }
         }
     } else {
-        m_hitLatencyHist.add(cycles);
-        m_hitTypeLatencyHist[type].add(cycles);
+        m_hitLatencyHist.sample(cycles);
+        m_hitTypeLatencyHist[type]->sample(cycles);
 
         if (respondingMach != MachineType_NUM) {
-            m_hitMachLatencyHist[respondingMach].add(cycles);
-            m_hitTypeMachLatencyHist[type][respondingMach].add(cycles);
+            m_hitMachLatencyHist[respondingMach]->sample(cycles);
+            m_hitTypeMachLatencyHist[type][respondingMach]->sample(cycles);
         }
     }
 }
@@ -577,53 +524,45 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
              llscSuccess ? "Done" : "SC_Failed", "", "",
              request_address, total_latency);
 
-    // update the data
-    if (g_system_ptr->m_warmup_enabled) {
-        assert(pkt->getPtr<uint8_t>(false) != NULL);
-        data.setData(pkt->getPtr<uint8_t>(false),
+    // update the data unless it is a non-data-carrying flush
+    if (RubySystem::getWarmupEnabled()) {
+        data.setData(pkt->getConstPtr<uint8_t>(),
                      request_address.getOffset(), pkt->getSize());
-    } else if (pkt->getPtr<uint8_t>(true) != NULL) {
+    } else if (!pkt->isFlush()) {
         if ((type == RubyRequestType_LD) ||
             (type == RubyRequestType_IFETCH) ||
             (type == RubyRequestType_RMW_Read) ||
             (type == RubyRequestType_Locked_RMW_Read) ||
             (type == RubyRequestType_Load_Linked)) {
-            memcpy(pkt->getPtr<uint8_t>(true),
+            memcpy(pkt->getPtr<uint8_t>(),
                    data.getData(request_address.getOffset(), pkt->getSize()),
                    pkt->getSize());
         } else {
-            data.setData(pkt->getPtr<uint8_t>(true),
+            data.setData(pkt->getConstPtr<uint8_t>(),
                          request_address.getOffset(), pkt->getSize());
         }
-    } else {
-        DPRINTF(MemoryAccess,
-                "WARNING.  Data not transfered from Ruby to M5 for type %s\n",
-                RubyRequestType_to_string(type));
     }
 
     // If using the RubyTester, update the RubyTester sender state's
     // subBlock with the recieved data.  The tester will later access
     // this state.
-    // Note: RubyPort will access it's sender state before the
-    // RubyTester.
     if (m_usingRubyTester) {
-        RubyPort::SenderState *reqSenderState =
-            safe_cast<RubyPort::SenderState*>(pkt->senderState);
-        // @todo This is a dangerous assumption on nothing else
-        // modifying the senderState
+        DPRINTF(RubySequencer, "hitCallback %s 0x%x using RubyTester\n",
+                pkt->cmdString(), pkt->getAddr());
         RubyTester::SenderState* testerSenderState =
-            safe_cast<RubyTester::SenderState*>(reqSenderState->predecessor);
+            pkt->findNextSenderState<RubyTester::SenderState>();
+        assert(testerSenderState);
         testerSenderState->subBlock.mergeFrom(data);
     }
 
     delete srequest;
 
-    if (g_system_ptr->m_warmup_enabled) {
+    if (RubySystem::getWarmupEnabled()) {
         assert(pkt->req);
         delete pkt->req;
         delete pkt;
         g_system_ptr->m_cache_recorder->enqueueNextFetchRequest();
-    } else if (g_system_ptr->m_cooldown_enabled) {
+    } else if (RubySystem::getCooldownEnabled()) {
         delete pkt;
         g_system_ptr->m_cache_recorder->enqueueNextFlushRequest();
     } else {
@@ -665,7 +604,7 @@ Sequencer::makeRequest(PacketPtr pkt)
             primary_type = RubyRequestType_Load_Linked;
         }
         secondary_type = RubyRequestType_ATOMIC;
-    } else if (pkt->req->isLocked()) {
+    } else if (pkt->req->isLockedRMW()) {
         //
         // x86 locked instructions are translated to store cache coherence
         // requests because these requests should always be treated as read
@@ -686,13 +625,13 @@ Sequencer::makeRequest(PacketPtr pkt)
             if (pkt->req->isInstFetch()) {
                 primary_type = secondary_type = RubyRequestType_IFETCH;
             } else {
-#if THE_ISA == X86_ISA
-                uint32_t flags = pkt->req->getFlags();
-                bool storeCheck = flags &
-                        (TheISA::StoreCheck << TheISA::FlagShift);
-#else
                 bool storeCheck = false;
-#endif // X86_ISA
+                // only X86 need the store check
+                if (system->getArch() == Arch::X86ISA) {
+                    uint32_t flags = pkt->req->getFlags();
+                    storeCheck = flags &
+                        (X86ISA::StoreCheck << X86ISA::FlagShift);
+                }
                 if (storeCheck) {
                     primary_type = RubyRequestType_RMW_Read;
                     secondary_type = RubyRequestType_ST;
@@ -737,11 +676,15 @@ Sequencer::issueRequest(PacketPtr pkt, RubyRequestType secondary_type)
         pc = pkt->req->getPC();
     }
 
-    RubyRequest *msg = new RubyRequest(clockEdge(), pkt->getAddr(),
-                                       pkt->getPtr<uint8_t>(true),
-                                       pkt->getSize(), pc, secondary_type,
-                                       RubyAccessMode_Supervisor, pkt,
-                                       PrefetchBit_No, proc_id);
+    // check if the packet has data as for example prefetch and flush
+    // requests do not
+    std::shared_ptr<RubyRequest> msg =
+        std::make_shared<RubyRequest>(clockEdge(), pkt->getAddr(),
+                                      pkt->isFlush() ?
+                                      nullptr : pkt->getPtr<uint8_t>(),
+                                      pkt->getSize(), pc, secondary_type,
+                                      RubyAccessMode_Supervisor, pkt,
+                                      PrefetchBit_No, proc_id);
 
     DPRINTFR(ProtocolTrace, "%15s %3s %10s%20s %6s>%-6s %s %s\n",
             curTick(), m_version, "Seq", "Begin", "", "",
@@ -809,4 +752,77 @@ void
 Sequencer::evictionCallback(const Address& address)
 {
     ruby_eviction_callback(address);
+}
+
+void
+Sequencer::regStats()
+{
+    m_store_waiting_on_load
+        .name(name() + ".store_waiting_on_load")
+        .desc("Number of times a store aliased with a pending load")
+        .flags(Stats::nozero);
+    m_store_waiting_on_store
+        .name(name() + ".store_waiting_on_store")
+        .desc("Number of times a store aliased with a pending store")
+        .flags(Stats::nozero);
+    m_load_waiting_on_load
+        .name(name() + ".load_waiting_on_load")
+        .desc("Number of times a load aliased with a pending load")
+        .flags(Stats::nozero);
+    m_load_waiting_on_store
+        .name(name() + ".load_waiting_on_store")
+        .desc("Number of times a load aliased with a pending store")
+        .flags(Stats::nozero);
+
+    // These statistical variables are not for display.
+    // The profiler will collate these across different
+    // sequencers and display those collated statistics.
+    m_outstandReqHist.init(10);
+    m_latencyHist.init(10);
+    m_hitLatencyHist.init(10);
+    m_missLatencyHist.init(10);
+
+    for (int i = 0; i < RubyRequestType_NUM; i++) {
+        m_typeLatencyHist.push_back(new Stats::Histogram());
+        m_typeLatencyHist[i]->init(10);
+
+        m_hitTypeLatencyHist.push_back(new Stats::Histogram());
+        m_hitTypeLatencyHist[i]->init(10);
+
+        m_missTypeLatencyHist.push_back(new Stats::Histogram());
+        m_missTypeLatencyHist[i]->init(10);
+    }
+
+    for (int i = 0; i < MachineType_NUM; i++) {
+        m_hitMachLatencyHist.push_back(new Stats::Histogram());
+        m_hitMachLatencyHist[i]->init(10);
+
+        m_missMachLatencyHist.push_back(new Stats::Histogram());
+        m_missMachLatencyHist[i]->init(10);
+
+        m_IssueToInitialDelayHist.push_back(new Stats::Histogram());
+        m_IssueToInitialDelayHist[i]->init(10);
+
+        m_InitialToForwardDelayHist.push_back(new Stats::Histogram());
+        m_InitialToForwardDelayHist[i]->init(10);
+
+        m_ForwardToFirstResponseDelayHist.push_back(new Stats::Histogram());
+        m_ForwardToFirstResponseDelayHist[i]->init(10);
+
+        m_FirstResponseToCompletionDelayHist.push_back(new Stats::Histogram());
+        m_FirstResponseToCompletionDelayHist[i]->init(10);
+    }
+
+    for (int i = 0; i < RubyRequestType_NUM; i++) {
+        m_hitTypeMachLatencyHist.push_back(std::vector<Stats::Histogram *>());
+        m_missTypeMachLatencyHist.push_back(std::vector<Stats::Histogram *>());
+
+        for (int j = 0; j < MachineType_NUM; j++) {
+            m_hitTypeMachLatencyHist[i].push_back(new Stats::Histogram());
+            m_hitTypeMachLatencyHist[i][j]->init(10);
+
+            m_missTypeMachLatencyHist[i].push_back(new Stats::Histogram());
+            m_missTypeMachLatencyHist[i][j]->init(10);
+        }
+    }
 }

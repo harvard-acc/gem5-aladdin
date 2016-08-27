@@ -96,8 +96,6 @@ TsunamiIO::read(PacketPtr pkt)
     DPRINTF(Tsunami, "io read  va=%#x size=%d IOPorrt=%#x\n", pkt->getAddr(),
             pkt->getSize(), daddr);
 
-    pkt->allocate();
-
     if (pkt->getSize() == sizeof(uint8_t)) {
         switch(daddr) {
           // PIC1 mask read
@@ -284,6 +282,13 @@ TsunamiIO::unserialize(Checkpoint *cp, const string &section)
     // Unserialize the timers
     pitimer.unserialize("pitimer", cp, section);
     rtc.unserialize("rtc", cp, section);
+}
+
+void
+TsunamiIO::startup()
+{
+    rtc.startup();
+    pitimer.startup();
 }
 
 TsunamiIO *

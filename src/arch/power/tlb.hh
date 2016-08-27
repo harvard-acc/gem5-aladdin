@@ -39,6 +39,7 @@
 
 #include <map>
 
+#include "arch/generic/tlb.hh"
 #include "arch/power/isa_traits.hh"
 #include "arch/power/pagetable.hh"
 #include "arch/power/utility.hh"
@@ -46,8 +47,6 @@
 #include "base/statistics.hh"
 #include "mem/request.hh"
 #include "params/PowerTLB.hh"
-#include "sim/fault_fwd.hh"
-#include "sim/tlb.hh"
 
 class ThreadContext;
 
@@ -63,9 +62,13 @@ struct TlbEntry
     {
     }
 
-    TlbEntry(Addr asn, Addr vaddr, Addr paddr)
+    TlbEntry(Addr asn, Addr vaddr, Addr paddr,
+             bool uncacheable, bool read_only)
         : _pageStart(paddr)
     {
+        if (uncacheable || read_only)
+            warn("Power TlbEntry does not support uncacheable"
+                 " or read-only mappings\n");
     }
 
     void
@@ -129,6 +132,8 @@ class TLB : public BaseTLB
     typedef PowerTLBParams Params;
     TLB(const Params *p);
     virtual ~TLB();
+
+    void takeOverFrom(BaseTLB *otlb) {}
 
     int probeEntry(Addr vpn,uint8_t) const;
     PowerISA::PTE *getEntry(unsigned) const;

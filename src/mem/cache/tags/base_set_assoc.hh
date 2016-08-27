@@ -149,7 +149,7 @@ public:
      * Invalidate the given block.
      * @param blk The block to invalidate.
      */
-    void invalidate(BlkType *blk)
+    void invalidate(CacheBlk *blk)
     {
         assert(blk);
         assert(blk->isValid());
@@ -172,13 +172,13 @@ public:
      * @param lat The access latency.
      * @return Pointer to the cache block if found.
      */
-    BlkType* accessBlock(Addr addr, bool is_secure, Cycles &lat,
+    CacheBlk* accessBlock(Addr addr, bool is_secure, Cycles &lat,
                                  int context_src)
     {
         Addr tag = extractTag(addr);
         int set = extractSet(addr);
         BlkType *blk = sets[set].findBlk(tag, is_secure);
-        lat = hitLatency;
+        lat = accessLatency;;
 
         // Access all tags in parallel, hence one in each way.  The data side
         // either accesses all blocks in parallel, or one block sequentially on
@@ -195,7 +195,7 @@ public:
         if (blk != NULL) {
             if (blk->whenReady > curTick()
                 && cache->ticksToCycles(blk->whenReady - curTick())
-                > hitLatency) {
+                > accessLatency) {
                 lat = cache->ticksToCycles(blk->whenReady - curTick());
             }
             blk->refCount += 1;
@@ -212,7 +212,7 @@ public:
      * @param asid The address space ID.
      * @return Pointer to the cache block if found.
      */
-    BlkType* findBlock(Addr addr, bool is_secure) const;
+    CacheBlk* findBlock(Addr addr, bool is_secure) const;
 
     /**
      * Find an invalid block to evict for the address provided.
@@ -221,7 +221,7 @@ public:
      * @param addr The addr to a find a replacement candidate for.
      * @return The candidate block.
      */
-    BlkType* findVictim(Addr addr) const
+    CacheBlk* findVictim(Addr addr)
     {
         BlkType *blk = NULL;
         int set = extractSet(addr);
@@ -242,12 +242,12 @@ public:
      * @param pkt Packet holding the address to update
      * @param blk The block to update.
      */
-     void insertBlock(PacketPtr pkt, BlkType *blk)
+     void insertBlock(PacketPtr pkt, CacheBlk *blk)
      {
          Addr addr = pkt->getAddr();
          MasterID master_id = pkt->req->masterId();
          uint32_t task_id = pkt->req->taskId();
-         bool is_secure = pkt->isSecure();
+
          if (!blk->isTouched) {
              tagsInUse++;
              blk->isTouched = true;
@@ -275,10 +275,9 @@ public:
          }
 
          blk->isTouched = true;
+
          // Set tag for new block.  Caller is responsible for setting status.
          blk->tag = extractTag(addr);
-         if (is_secure)
-             blk->status |= BlkSecure;
 
          // deal with what we are bringing in
          assert(master_id < cache->system->maxMasters());
@@ -313,16 +312,6 @@ public:
     }
 
     /**
-     * Get the block offset from an address.
-     * @param addr The address to get the offset of.
-     * @return The block offset.
-     */
-    int extractBlkOffset(Addr addr) const
-    {
-        return (addr & blkMask);
-    }
-
-    /**
      * Align an address to the block size.
      * @param addr the address to align.
      * @return The block address.
@@ -334,8 +323,7 @@ public:
 
     /**
      * Regenerate the block address from the tag.
-     * @param tag The tag of the block.
-     * @param set The set of the block.
+     * @param tag The tag of the block.  * @param set The set of the block.
      * @return The block address.
      */
     Addr regenerateBlkAddr(Addr tag, unsigned set) const
@@ -343,14 +331,6 @@ public:
         return ((tag << tagShift) | ((Addr)set << setShift));
     }
 
-    /**
-     * Return the hit latency.
-     * @return the hit latency.
-     */
-    Cycles getHitLatency() const
-    {
-        return hitLatency;
-    }
     /**
      *iterated through all blocks and clear all locks
      *Needed to clear all lock tracking at once
@@ -384,8 +364,7 @@ public:
      *
      * \param visitor Visitor to call on each block.
      */
-    template <typename V>
-    void forEachBlk(V &visitor) {
+    void forEachBlk(CacheBlkVisitor &visitor) M5_ATTR_OVERRIDE {
         for (unsigned i = 0; i < numSets * assoc; ++i) {
             if (!visitor(blks[i]))
                 return;

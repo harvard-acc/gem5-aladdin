@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 ARM Limited
+ * Copyright (c) 2010, 2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -37,13 +37,15 @@
  * Authors: William Wang
  *          Ali Saidi
  *          Chris Emmons
+ *          Andreas Sandberg
  */
 #ifndef __BASE_BITMAP_HH__
 #define __BASE_BITMAP_HH__
 
-#include <fstream>
+#include <ostream>
 
-#include "base/vnc/convert.hh"
+#include "base/compiler.hh"
+#include "base/framebuffer.hh"
 
 /**
  * @file Declaration of a class that writes a frame buffer to a bitmap
@@ -54,61 +56,32 @@
 class  Bitmap
 {
   public:
-    /** Create a Bitmap creator that takes data in the given mode & size
-     * and outputs to an fstream
-     * @param mode the type of data that is being provided
-     * @param h the hight of the image
-     * @param w the width of the image
-     * @param d the data for the image in mode
+    /**
+     * Create a bitmap that takes data in a given mode & size and
+     * outputs to an ostream.
      */
-    Bitmap(VideoConvert::Mode mode, uint16_t w, uint16_t h, uint8_t *d);
+    Bitmap(const FrameBuffer *fb);
 
-    /** Destructor */
     ~Bitmap();
 
-    /** Provide the converter with the data that should be output. It will be
-     * converted into rgb8888 and write out when write() is called.
-     * @param d the data
-     */
-    void rawData(uint8_t* d) { data = d; }
-
-    /** Write the provided data into the fstream provided
+    /**
+     * Write the frame buffer data into the provided ostream
+     *
      * @param bmp stream to write to
      */
-    void write(std::ostream *bmp) const;
-
-    /** Gets a hash over the bitmap for quick comparisons to other bitmaps.
-     * @return hash of the bitmap
-     */
-    uint64_t getHash() const { return vc.getHash(data); }
+    void write(std::ostream &bmp) const;
 
 
   private:
-    VideoConvert::Mode mode;
-    uint16_t height;
-    uint16_t width;
-    uint8_t *data;
-
-    VideoConvert vc;
-
-    mutable char *headerBuffer;
-    static const size_t sizeofHeaderBuffer;
-
-    struct Magic
-    {
+    struct FileHeader {
         unsigned char magic_number[2];
-    };
-
-    struct Header
-    {
         uint32_t size;
         uint16_t reserved1;
         uint16_t reserved2;
         uint32_t offset;
-    };
+    } M5_ATTR_PACKED;
 
-    struct Info
-    {
+    struct InfoHeaderV1 { /* Aka DIB header */
         uint32_t Size;
         uint32_t Width;
         uint32_t Height;
@@ -120,7 +93,33 @@ class  Bitmap
         uint32_t YPelsPerMeter;
         uint32_t ClrUsed;
         uint32_t ClrImportant;
-    };
+    } M5_ATTR_PACKED;
+
+    struct CompleteV1Header {
+        FileHeader file;
+        InfoHeaderV1 info;
+    } M5_ATTR_PACKED;
+
+    struct BmpPixel32 {
+        BmpPixel32 &operator=(const Pixel &rhs) {
+            red = rhs.red;
+            green = rhs.green;
+            blue = rhs.blue;
+            padding = 0;
+
+            return *this;
+        }
+        uint8_t blue;
+        uint8_t green;
+        uint8_t red;
+        uint8_t padding;
+    } M5_ATTR_PACKED;
+
+    typedef BmpPixel32 PixelType;
+
+    const CompleteV1Header getCompleteHeader() const;
+
+    const FrameBuffer &fb;
 };
 
 #endif // __BASE_BITMAP_HH__

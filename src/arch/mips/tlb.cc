@@ -59,21 +59,6 @@ using namespace MipsISA;
 //  MIPS TLB
 //
 
-static inline mode_type
-getOperatingMode(MiscReg Stat)
-{
-    if ((Stat & 0x10000006) != 0 || (Stat & 0x18) ==0) {
-        return mode_kernel;
-    } else if ((Stat & 0x18) == 0x8) {
-        return mode_supervisor;
-    } else if ((Stat & 0x18) == 0x10) {
-        return mode_user;
-    } else {
-        return mode_number;
-    }
-}
-
-
 TLB::TLB(const Params *p)
     : BaseTLB(p), size(p->size), nlu(0)
 {
@@ -163,7 +148,7 @@ TLB::checkCacheability(RequestPtr &req)
     // address or by the TLB entry
     if ((req->getVaddr() & VAddrUncacheable) == VAddrUncacheable) {
         // mark request as uncacheable
-        req->setFlags(Request::UNCACHEABLE);
+        req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
     }
     return NoFault;
 }
@@ -184,7 +169,7 @@ TLB::insertAt(PTE &pte, unsigned Index, int _smallPages)
                  (pte.D0 << 2) | (pte.V0 <<1) | pte.G),
                 ((pte.PFN1 <<6) | (pte.C1 << 3) |
                  (pte.D1 << 2) | (pte.V1 <<1) | pte.G));
-        if (table[Index].V0 == true || table[Index].V1 == true) {
+        if (table[Index].V0 || table[Index].V1) {
             // Previous entry is valid
             PageTable::iterator i = lookupTable.find(table[Index].VPN);
             lookupTable.erase(i);

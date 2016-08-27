@@ -92,9 +92,11 @@ class CheckerThreadContext : public ThreadContext
 
     BaseCPU *getCpuPtr() { return actualTC->getCpuPtr(); }
 
-    int cpuId() { return actualTC->cpuId(); }
+    uint32_t socketId() const { return actualTC->socketId(); }
 
-    int contextId() { return actualTC->contextId(); }
+    int cpuId() const { return actualTC->cpuId(); }
+
+    int contextId() const { return actualTC->contextId(); }
 
     void setContextId(int id)
     {
@@ -103,7 +105,7 @@ class CheckerThreadContext : public ThreadContext
     }
 
     /** Returns this thread's ID number. */
-    int threadId() { return actualTC->threadId(); }
+    int threadId() const { return actualTC->threadId(); }
     void setThreadId(int id)
     {
         checkerTC->setThreadId(id);
@@ -155,16 +157,14 @@ class CheckerThreadContext : public ThreadContext
         checkerTC->setStatus(new_status);
     }
 
-    /// Set the status to Active.  Optional delay indicates number of
-    /// cycles to wait before beginning execution.
-    void activate(Cycles delay = Cycles(1))
-    { actualTC->activate(delay); }
+    /// Set the status to Active.
+    void activate() { actualTC->activate(); }
 
     /// Set the status to Suspended.
-    void suspend(Cycles delay) { actualTC->suspend(delay); }
+    void suspend() { actualTC->suspend(); }
 
     /// Set the status to Halted.
-    void halt(Cycles delay) { actualTC->halt(delay); }
+    void halt() { actualTC->halt(); }
 
     void dumpFuncProfile() { actualTC->dumpFuncProfile(); }
 
@@ -275,7 +275,7 @@ class CheckerThreadContext : public ThreadContext
     MicroPC microPC()
     { return actualTC->microPC(); }
 
-    MiscReg readMiscRegNoEffect(int misc_reg)
+    MiscReg readMiscRegNoEffect(int misc_reg) const
     { return actualTC->readMiscRegNoEffect(misc_reg); }
 
     MiscReg readMiscReg(int misc_reg)
@@ -300,6 +300,7 @@ class CheckerThreadContext : public ThreadContext
     int flattenIntIndex(int reg) { return actualTC->flattenIntIndex(reg); }
     int flattenFloatIndex(int reg) { return actualTC->flattenFloatIndex(reg); }
     int flattenCCIndex(int reg) { return actualTC->flattenCCIndex(reg); }
+    int flattenMiscIndex(int reg) { return actualTC->flattenMiscIndex(reg); }
 
     unsigned readStCondFailures()
     { return actualTC->readStCondFailures(); }
@@ -308,9 +309,6 @@ class CheckerThreadContext : public ThreadContext
     {
         actualTC->setStCondFailures(sc_failures);
     }
-
-    // @todo: Fix this!
-    bool misspeculating() { return actualTC->misspeculating(); }
 
     Counter readFuncExeInst() { return actualTC->readFuncExeInst(); }
 

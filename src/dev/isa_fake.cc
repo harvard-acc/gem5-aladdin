@@ -53,7 +53,6 @@ IsaFake::IsaFake(Params *p)
 Tick
 IsaFake::read(PacketPtr pkt)
 {
-    pkt->allocate();
     pkt->makeAtomicResponse();
 
     if (params()->warn_access != "")
@@ -110,7 +109,7 @@ IsaFake::write(PacketPtr pkt)
             data = pkt->get<uint8_t>();
             break;
           default:
-            panic("invalid access size!\n");
+            panic("invalid access size: %u\n", pkt->getSize());
         }
         warn("Device %s accessed by write to address %#x size=%d data=%#x\n",
                 name(), pkt->getAddr(), pkt->getSize(), data);

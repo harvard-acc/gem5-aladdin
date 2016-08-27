@@ -84,13 +84,14 @@ def template MicroDebugDeclare {{
 
 def template MicroDebugExecute {{
         Fault
-        %(class_name)s::execute(%(CPU_exec_context)s *xc,
+        %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
                 Trace::InstRecord *traceData) const
         {
             %(op_decl)s
             %(op_rd)s
             if (%(cond_test)s) {
-                return new GenericISA::M5DebugFault(func, message);
+                return std::make_shared<GenericISA::M5DebugFault>(func,
+                                                                  message);
             } else {
                 return NoFault;
             }

@@ -29,11 +29,11 @@
 // modified (rewritten) 05/20/05 by Dan Gibson to accomimdate FASTER
 // >32 bit set sizes
 
+#include <cassert>
 #include <cstdio>
 
 #include "base/misc.hh"
 #include "mem/ruby/common/Set.hh"
-#include "mem/ruby/system/System.hh"
 
 Set::Set()
 {
@@ -73,9 +73,9 @@ Set::clearExcess()
 {
     // now just ensure that no bits over the maximum size were set
 #ifdef _LP64
-    long mask = 0x7FFFFFFFFFFFFFFF;
+    unsigned long mask = 0x7FFFFFFFFFFFFFFF;
 #else
-    long mask = 0x7FFFFFFF;
+    unsigned long mask = 0x7FFFFFFF;
 #endif
 
     // the number of populated spaces in the higest-order array slot
@@ -100,22 +100,6 @@ Set::addSet(const Set& set)
     assert(getSize()==set.getSize());
     for (int i = 0; i < m_nArrayLen; i++)
         m_p_nArray[i] |= set.m_p_nArray[i];
-}
-
-/*
- * This function should randomly assign 1 to the bits in the set--it
- * should not clear the bits bits first, though?
- */
-void
-Set::addRandom()
-{
-
-    for (int i = 0; i < m_nArrayLen; i++) {
-        // this ensures that all 32 bits are subject to random effects,
-        // as RAND_MAX typically = 0x7FFFFFFF
-        m_p_nArray[i] |= random() ^ (random() << 4);
-    }
-    clearExcess();
 }
 
 /*
@@ -148,10 +132,9 @@ int
 Set::count() const
 {
     int counter = 0;
-    long mask;
 
     for (int i = 0; i < m_nArrayLen; i++) {
-        mask = (long)0x01;
+        unsigned long mask = 0x01;
 
         for (int j = 0; j < LONG_BITS; j++) {
             // FIXME - significant performance loss when array
@@ -188,14 +171,13 @@ NodeID
 Set::smallestElement() const
 {
     assert(count() > 0);
-    long x;
     for (int i = 0; i < m_nArrayLen; i++) {
         if (m_p_nArray[i] != 0) {
             // the least-set bit must be in here
-            x = m_p_nArray[i];
+            unsigned long x = m_p_nArray[i];
 
             for (int j = 0; j < LONG_BITS; j++) {
-                if (x & (unsigned long)1) {
+                if (x & 1) {
                     return LONG_BITS * i + j;
                 }
 
@@ -228,7 +210,7 @@ Set::isBroadcast() const
     }
 
     // now check the last word, which may not be fully loaded
-    long mask = 1;
+    unsigned long mask = 1;
     for (int j = 0; j < (m_nSize % LONG_BITS); j++) {
         if ((mask & m_p_nArray[m_nArrayLen-1]) == 0) {
             return false;
@@ -322,7 +304,7 @@ Set::setSize(int size)
         if (m_p_nArray && m_p_nArray != &m_p_nArray_Static[0])
             delete [] m_p_nArray;
 
-        m_p_nArray = new long[m_nArrayLen];
+        m_p_nArray = new unsigned long[m_nArrayLen];
     }
 
     clear();

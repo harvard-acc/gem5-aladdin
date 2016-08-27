@@ -37,11 +37,8 @@
 #include <iostream>
 #include <vector>
 
-#include "debug/RubyMemory.hh"
-#include "mem/protocol/MachineType.hh"
-#include "mem/ruby/common/Global.hh"
 #include "mem/ruby/common/Set.hh"
-#include "mem/ruby/system/MachineID.hh"
+#include "mem/ruby/common/MachineID.hh"
 
 class NetDest
 {
@@ -58,7 +55,6 @@ class NetDest
 
     void add(MachineID newElement);
     void addNetDest(const NetDest& netDest);
-    void addRandom();
     void setNetDest(MachineType machine, const Set& set);
     void remove(MachineID oldElement);
     void removeNetDest(const NetDest& netDest);
@@ -66,7 +62,7 @@ class NetDest
     void broadcast();
     void broadcast(MachineType machine);
     int count() const;
-    bool isEqual(const NetDest& netDest);
+    bool isEqual(const NetDest& netDest) const;
 
     // return the logical OR of this netDest and orNetDest
     NetDest OR(const NetDest& orNetDest) const;
@@ -111,11 +107,7 @@ class NetDest
         return vec_index;
     }
 
-    NodeID
-    bitIndex(NodeID index) const
-    {
-        return index;
-    }
+    NodeID bitIndex(NodeID index) const { return index; }
 
     std::vector<Set> m_bits;  // a vector of bit vectors - i.e. Sets
 };
@@ -129,4 +121,3 @@ operator<<(std::ostream& out, const NetDest& obj)
 }
 
 #endif // __MEM_RUBY_COMMON_NETDEST_HH__
-

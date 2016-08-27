@@ -67,17 +67,21 @@ BaseCache::CacheSlavePort::CacheSlavePort(const std::string &_name,
 
 BaseCache::BaseCache(const Params *p)
     : MemObject(p),
-      mshrQueue("MSHRs", p->mshrs, 4, MSHRQueue_MSHRs),
-      writeBuffer("write buffer", p->write_buffers, p->mshrs+1000,
+      cpuSidePort(nullptr), memSidePort(nullptr),
+      mshrQueue("MSHRs", p->mshrs, 4, p->demand_mshr_reserve, MSHRQueue_MSHRs),
+      writeBuffer("write buffer", p->write_buffers, p->mshrs+1000, 0,
                   MSHRQueue_WriteBuffer),
       blkSize(p->system->cacheLineSize()),
-      hitLatency(p->hit_latency),
+      lookupLatency(p->hit_latency),
+      forwardLatency(p->hit_latency),
+      fillLatency(p->response_latency),
       responseLatency(p->response_latency),
       numTarget(p->tgts_per_mshr),
       forwardSnoops(p->forward_snoops),
       isTopLevel(p->is_top_level),
       isPerfectCache(p->is_perfect_cache),
       blocked(0),
+      order(0),
       noTargetMSHR(NULL),
       missCount(p->max_miss_count),
       addrRanges(p->addr_ranges.begin(), p->addr_ranges.end()),
@@ -89,14 +93,14 @@ void
 BaseCache::CacheSlavePort::setBlocked()
 {
     assert(!blocked);
-    DPRINTF(CachePort, "Cache port %s blocking new requests\n", name());
+    DPRINTF(CachePort, "Port is blocking new requests\n");
     blocked = true;
     // if we already scheduled a retry in this cycle, but it has not yet
     // happened, cancel it
     if (sendRetryEvent.scheduled()) {
-       owner.deschedule(sendRetryEvent);
-       DPRINTF(CachePort, "Cache port %s deschedule retry\n", name());
-       mustSendRetry = true;
+        owner.deschedule(sendRetryEvent);
+        DPRINTF(CachePort, "Port descheduled retry\n");
+        mustSendRetry = true;
     }
 }
 
@@ -104,16 +108,23 @@ void
 BaseCache::CacheSlavePort::clearBlocked()
 {
     assert(blocked);
-    DPRINTF(CachePort, "Cache port %s accepting new requests\n", name());
+    DPRINTF(CachePort, "Port is accepting new requests\n");
     blocked = false;
     if (mustSendRetry) {
-        DPRINTF(CachePort, "Cache port %s sending retry\n", name());
-        mustSendRetry = false;
-        // @TODO: need to find a better time (next bus cycle?)
+        // @TODO: need to find a better time (next cycle?)
         owner.schedule(sendRetryEvent, curTick() + 1);
     }
 }
 
+void
+BaseCache::CacheSlavePort::processSendRetry()
+{
+    DPRINTF(CachePort, "Port is sending retry\n");
+
+    // reset the flag and call retry
+    mustSendRetry = false;
+    sendRetryReq();
+}
 
 void
 BaseCache::init()
@@ -141,6 +152,17 @@ BaseCache::getSlavePort(const std::string &if_name, PortID idx)
     } else {
         return MemObject::getSlavePort(if_name, idx);
     }
+}
+
+bool
+BaseCache::inRange(Addr addr) const
+{
+    for (const auto& r : addrRanges) {
+        if (r.contains(addr)) {
+            return true;
+       }
+    }
+    return false;
 }
 
 void
@@ -773,21 +795,7 @@ BaseCache::drain(DrainManager *dm)
 BaseCache *
 BaseCacheParams::create()
 {
-    unsigned numSets = size / (assoc * system->cacheLineSize());
-
     assert(tags);
 
-    if (dynamic_cast<FALRU*>(tags)) {
-        if (numSets != 1)
-            fatal("Got FALRU tags with more than one set\n");
-        return new Cache<FALRU>(this);
-    } else if (dynamic_cast<LRU*>(tags)) {
-        if (numSets == 1)
-            warn("Consider using FALRU tags for a fully associative cache\n");
-        return new Cache<LRU>(this);
-    } else if (dynamic_cast<RandomRepl*>(tags)) {
-        return new Cache<RandomRepl>(this);
-    } else {
-        fatal("No suitable tags selected\n");
-    }
+    return new Cache(this);
 }

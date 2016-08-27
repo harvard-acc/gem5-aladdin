@@ -1,0 +1,65 @@
+// Copyright (c) 2008 The Regents of The University of Michigan
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met: redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer;
+// redistributions in binary form must reproduce the above copyright
+// notice, this list of conditions and the following disclaimer in the
+// documentation and/or other materials provided with the distribution;
+// neither the name of the copyright holders nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Authors: Gabe Black
+
+////////////////////////////////////////////////////////////////////
+//
+// Decode the three byte opcodes with the 0f3a prefix.
+//
+format WarnUnimpl {
+    'X86ISA::ThreeByte0F3AOpcode': decode LEGACY_OP {
+        1: decode OPCODE_OP {
+            0x08: roundps_Vdq_Wdq_Ib();
+            0x09: roundpd_Vdq_Wdq_Ib();
+            0x0A: roundss_Vss_Wss_Ib();
+            0x0B: roundsd_Vsd_Wsd_Ib();
+            0x0C: blendps_Vdq_Wdq_Ib();
+            0x0D: blendpd_Vdq_Wdq_Ib();
+            0x0E: pblendw_Vdq_Wdq_Ib();
+            0x0F: palignr_Vdq_Wdq_Ib();
+            0x14: pextrb_Rd_or_Mb_Vdq_Ib();
+            0x15: decode MODRM_MOD {
+                0x3: Inst::PEXTRW(Rd,Vdq,Ib);
+                default: pextrw_Mw_Vdq_Ib();
+            }
+            0x16: pextrd_pextrq_Ed_or_Eq_Vdq_Ib();
+            0x17: extractps_Ed_Vdq_Ib();
+            0x20: pinsrb_Vdq_Rd_or_Rq_or_Mb_Ib();
+            0x21: insertps_Vdq_Udq_or_Md_Ib();
+            0x22: pinsrd_pinsrq_Vdq_Ed_or_Eq_Ib();
+            0x40: dpps_Vdq_Wdq_Ib();
+            0x41: dppd_Vdq_Wdq_Ib();
+            0x42: pcmpistrm_Vdq_Wdq_Ib();
+            0x43: pcmpistri_Vdq_Wdq_Ib();
+            default: Inst::UD2();
+        }
+        default: decode OPCODE_OP {
+            0x0F: palignr_Pq_Qq_Ib();
+            default: Inst::UD2();
+        }
+    }
+}

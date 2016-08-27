@@ -56,7 +56,7 @@ PowerLiveProcess::PowerLiveProcess(LiveProcessParams *params,
 
     // Set up break point (Top of Heap)
     brk_point = objFile->dataBase() + objFile->dataSize() + objFile->bssSize();
-    brk_point = roundUp(brk_point, VMPageSize);
+    brk_point = roundUp(brk_point, PageBytes);
 
     // Set up region for mmaps. For now, start at bottom of kuseg space.
     mmap_start = mmap_end = 0x70000000L;
@@ -67,7 +67,7 @@ PowerLiveProcess::initState()
 {
     Process::initState();
 
-    argsInit(MachineBytes, VMPageSize);
+    argsInit(MachineBytes, PageBytes);
 }
 
 void
@@ -98,7 +98,7 @@ PowerLiveProcess::argsInit(int intSize, int pageSize)
         //XXX Figure out what these should be
         auxv.push_back(auxv_t(M5_AT_HWCAP, features));
         //The system page size
-        auxv.push_back(auxv_t(M5_AT_PAGESZ, PowerISA::VMPageSize));
+        auxv.push_back(auxv_t(M5_AT_PAGESZ, PowerISA::PageBytes));
         //Frequency at which times() increments
         auxv.push_back(auxv_t(M5_AT_CLKTCK, 0x64));
         // For statically linked executables, this is the virtual address of the
@@ -277,15 +277,14 @@ PowerLiveProcess::setSyscallArg(ThreadContext *tc,
 }
 
 void
-PowerLiveProcess::setSyscallReturn(ThreadContext *tc,
-        SyscallReturn return_value)
+PowerLiveProcess::setSyscallReturn(ThreadContext *tc, SyscallReturn sysret)
 {
     Cr cr = tc->readIntReg(INTREG_CR);
-    if (return_value.successful()) {
+    if (sysret.successful()) {
         cr.cr0.so = 0;
     } else {
         cr.cr0.so = 1;
     }
     tc->setIntReg(INTREG_CR, cr);
-    tc->setIntReg(ReturnValueReg, return_value.value());
+    tc->setIntReg(ReturnValueReg, sysret.encodedValue());
 }

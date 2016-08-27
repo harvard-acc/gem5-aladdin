@@ -44,7 +44,6 @@
 #include "debug/Timer.hh"
 #include "dev/arm/amba_device.hh"
 #include "dev/arm/rtc_pl031.hh"
-#include "dev/mc146818.hh"
 #include "mem/packet.hh"
 #include "mem/packet_access.hh"
 
@@ -62,7 +61,6 @@ PL031::read(PacketPtr pkt)
     assert(pkt->getAddr() >= pioAddr && pkt->getAddr() < pioAddr + pioSize);
     assert(pkt->getSize() == 4);
     Addr daddr = pkt->getAddr() - pioAddr;
-    pkt->allocate();
     uint32_t data;
 
     DPRINTF(Timer, "Reading from RTC at offset: %#x\n", daddr);
@@ -125,7 +123,6 @@ PL031::write(PacketPtr pkt)
     assert(pkt->getAddr() >= pioAddr && pkt->getAddr() < pioAddr + pioSize);
     assert(pkt->getSize() == 4);
     Addr daddr = pkt->getAddr() - pioAddr;
-    pkt->allocate();
     DPRINTF(Timer, "Writing to RTC at offset: %#x\n", daddr);
 
     switch (daddr) {

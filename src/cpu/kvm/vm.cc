@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright 2014 Google, Inc.
+ * Copyright (c) 2012, 2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -124,6 +125,16 @@ Kvm::capCoalescedMMIO() const
     return checkExtension(KVM_CAP_COALESCED_MMIO);
 }
 
+int
+Kvm::capNumMemSlots() const
+{
+#ifdef KVM_CAP_NR_MEMSLOTS
+    return checkExtension(KVM_CAP_NR_MEMSLOTS);
+#else
+    return 0;
+#endif
+}
+
 bool
 Kvm::capOneReg() const
 {
@@ -180,10 +191,11 @@ Kvm::capXSave() const
 #endif
 }
 
+
+#if defined(__i386__) || defined(__x86_64__)
 bool
 Kvm::getSupportedCPUID(struct kvm_cpuid2 &cpuid) const
 {
-#if defined(__i386__) || defined(__x86_64__)
     if (ioctl(KVM_GET_SUPPORTED_CPUID, (void *)&cpuid) == -1) {
         if (errno == E2BIG)
             return false;
@@ -191,9 +203,6 @@ Kvm::getSupportedCPUID(struct kvm_cpuid2 &cpuid) const
             panic("KVM: Failed to get supported CPUID (errno: %i)\n", errno);
     } else
         return true;
-#else
-    panic("KVM: getSupportedCPUID is unsupported on this platform.\n");
-#endif
 }
 
 const Kvm::CPUIDVector &
@@ -219,7 +228,6 @@ Kvm::getSupportedCPUID() const
 bool
 Kvm::getSupportedMSRs(struct kvm_msr_list &msrs) const
 {
-#if defined(__i386__) || defined(__x86_64__)
     if (ioctl(KVM_GET_MSR_INDEX_LIST, (void *)&msrs) == -1) {
         if (errno == E2BIG)
             return false;
@@ -227,9 +235,6 @@ Kvm::getSupportedMSRs(struct kvm_msr_list &msrs) const
             panic("KVM: Failed to get supported CPUID (errno: %i)\n", errno);
     } else
         return true;
-#else
-    panic("KVM: getSupportedCPUID is unsupported on this platform.\n");
-#endif
 }
 
 const Kvm::MSRIndexVector &
@@ -250,6 +255,9 @@ Kvm::getSupportedMSRs() const
 
     return supportedMSRCache;
 }
+
+#endif // x86-specific
+
 
 int
 Kvm::checkExtension(int extension) const
@@ -288,6 +296,10 @@ KvmVM::KvmVM(KvmVMParams *params)
       started(false),
       nextVCPUID(0)
 {
+    maxMemorySlot = kvm.capNumMemSlots();
+    /* If we couldn't determine how memory slots there are, guess 32. */
+    if (!maxMemorySlot)
+        maxMemorySlot = 32;
     /* Setup the coalesced MMIO regions */
     for (int i = 0; i < params->coalescedMMIO.size(); ++i)
         coalesceMMIO(params->coalescedMMIO[i]);
@@ -323,7 +335,13 @@ KvmVM::delayedStartup()
             DPRINTF(Kvm, "Mapping region: 0x%p -> 0x%llx [size: 0x%llx]\n",
                     pmem, range.start(), range.size());
 
-            setUserMemoryRegion(slot, pmem, range, 0 /* flags */);
+            if (range.interleaved()) {
+                panic("Tried to map an interleaved memory range into "
+                      "a KVM VM.\n");
+            }
+
+            const MemSlot slot = allocMemSlot(range.size());
+            setupMemSlot(slot, pmem, range.start(), 0/* flags */);
         } else {
             DPRINTF(Kvm, "Zero-region not mapped: [0x%llx]\n", range.start());
             hack("KVM: Zero memory handled as IO\n");
@@ -331,17 +349,58 @@ KvmVM::delayedStartup()
     }
 }
 
-void
-KvmVM::setUserMemoryRegion(uint32_t slot,
-                           void *host_addr, AddrRange guest_range,
-                           uint32_t flags)
+const KvmVM::MemSlot
+KvmVM::allocMemSlot(uint64_t size)
 {
-    if (guest_range.interleaved())
-        panic("Tried to map an interleaved memory range into a KVM VM.\n");
+    if (!size)
+        panic("Memory slots must have non-zero size.\n");
 
-    setUserMemoryRegion(slot, host_addr,
-                        guest_range.start(), guest_range.size(),
-                        flags);
+    std::vector<MemorySlot>::iterator pos;
+    for (pos = memorySlots.begin(); pos != memorySlots.end(); pos++) {
+        if (!pos->size) {
+            pos->size = size;
+            pos->active = false;
+            return pos->slot;
+        }
+    }
+
+    uint32_t nextSlot = memorySlots.size();
+    if (nextSlot > maxMemorySlot)
+        panic("Out of memory slots.\n");
+
+    MemorySlot slot;
+    slot.size = size;
+    slot.slot = nextSlot;
+    slot.active = false;
+
+    memorySlots.push_back(slot);
+    return MemSlot(slot.slot);
+}
+
+void
+KvmVM::setupMemSlot(const KvmVM::MemSlot num, void *host_addr, Addr guest,
+                    uint32_t flags)
+{
+    MemorySlot &slot = memorySlots.at(num.num);
+    slot.active = true;
+    setUserMemoryRegion(num.num, host_addr, guest, slot.size, flags);
+}
+
+void
+KvmVM::disableMemSlot(const KvmVM::MemSlot num)
+{
+    MemorySlot &slot = memorySlots.at(num.num);
+    if (slot.active)
+        setUserMemoryRegion(num.num, NULL, 0, 0, 0);
+    slot.active = false;
+}
+
+void
+KvmVM::freeMemSlot(const KvmVM::MemSlot num)
+{
+    disableMemSlot(num.num);
+    MemorySlot &slot = memorySlots.at(num.num);
+    slot.size = 0;
 }
 
 void
@@ -427,6 +486,23 @@ KvmVM::setIRQLine(uint32_t irq, bool high)
 }
 
 int
+KvmVM::createDevice(uint32_t type, uint32_t flags)
+{
+#if defined(KVM_CREATE_DEVICE)
+    struct kvm_create_device dev = { type, 0, flags };
+
+    if (ioctl(KVM_CREATE_DEVICE, &dev) == -1) {
+        panic("KVM: Failed to create device (errno: %i)\n",
+              errno);
+    }
+
+    return dev.fd;
+#else
+    panic("Kernel headers don't support KVM_CREATE_DEVICE\n");
+#endif
+}
+
+int
 KvmVM::createVCPU(long vcpuID)
 {
     int fd;
@@ -443,6 +519,17 @@ KvmVM::allocVCPUID()
 {
     return nextVCPUID++;
 }
+
+#if defined(__aarch64__)
+void
+KvmVM::kvmArmPreferredTarget(struct kvm_vcpu_init &target) const
+{
+    if (ioctl(KVM_ARM_PREFERRED_TARGET, &target) == -1) {
+        panic("KVM: Failed to get ARM preferred CPU target (errno: %i)\n",
+              errno);
+    }
+}
+#endif
 
 int
 KvmVM::ioctl(int request, long p1) const

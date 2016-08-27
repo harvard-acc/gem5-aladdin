@@ -52,13 +52,6 @@ NetDest::addNetDest(const NetDest& netDest)
 }
 
 void
-NetDest::addRandom()
-{
-    int i = random()%m_bits.size();
-    m_bits[i].addRandom();
-}
-
-void
 NetDest::setNetDest(MachineType machine, const Set& set)
 {
     // assure that there is only one set of destinations for this machine
@@ -102,7 +95,7 @@ NetDest::broadcast()
 void
 NetDest::broadcast(MachineType machineType)
 {
-    for (int i = 0; i < MachineType_base_count(machineType); i++) {
+    for (NodeID i = 0; i < MachineType_base_count(machineType); i++) {
         MachineID mach = {machineType, i};
         add(mach);
     }
@@ -146,7 +139,7 @@ NetDest::smallestElement() const
 {
     assert(count() > 0);
     for (int i = 0; i < m_bits.size(); i++) {
-        for (int j = 0; j < m_bits[i].getSize(); j++) {
+        for (NodeID j = 0; j < m_bits[i].getSize(); j++) {
             if (m_bits[i].isElement(j)) {
                 MachineID mach = {MachineType_from_base_level(i), j};
                 return mach;
@@ -160,7 +153,7 @@ MachineID
 NetDest::smallestElement(MachineType machine) const
 {
     int size = m_bits[MachineType_base_level(machine)].getSize();
-    for (int j = 0; j < size; j++) {
+    for (NodeID j = 0; j < size; j++) {
         if (m_bits[MachineType_base_level(machine)].isElement(j)) {
             MachineID mach = {machine, j};
             return mach;
@@ -275,3 +268,13 @@ NetDest::print(std::ostream& out) const
     out << "]";
 }
 
+bool
+NetDest::isEqual(const NetDest& n) const
+{
+    assert(m_bits.size() == n.m_bits.size());
+    for (unsigned int i = 0; i < m_bits.size(); ++i) {
+        if (!m_bits[i].isEqual(n.m_bits[i]))
+            return false;
+    }
+    return true;
+}

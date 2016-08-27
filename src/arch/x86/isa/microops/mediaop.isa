@@ -27,7 +27,7 @@
 // Authors: Gabe Black
 
 def template MediaOpExecute {{
-        Fault %(class_name)s::execute(%(CPU_exec_context)s *xc,
+        Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
                 Trace::InstRecord *traceData) const
         {
             Fault fault = NoFault;
@@ -74,7 +74,7 @@ def template MediaOpImmDeclare {{
 }};
 
 def template MediaOpRegConstructor {{
-    inline %(class_name)s::%(class_name)s(
+    %(class_name)s::%(class_name)s(
             ExtMachInst machInst, const char * instMnem, uint64_t setFlags,
             InstRegIndex _src1, InstRegIndex _src2, InstRegIndex _dest,
             uint8_t _srcSize, uint8_t _destSize, uint16_t _ext) :
@@ -87,7 +87,7 @@ def template MediaOpRegConstructor {{
 }};
 
 def template MediaOpImmConstructor {{
-    inline %(class_name)s::%(class_name)s(
+    %(class_name)s::%(class_name)s(
             ExtMachInst machInst, const char * instMnem, uint64_t setFlags,
             InstRegIndex _src1, uint16_t _imm8, InstRegIndex _dest,
             uint8_t _srcSize, uint8_t _destSize, uint16_t _ext) :
@@ -1506,6 +1506,6 @@ let {{
     class Emms(MediaOp):
         def __init__(self):
             super(Emms, self).__init__('InstRegIndex(MISCREG_FTW)',
-                    'InstRegIndex(0)', 'InstRegIndex(0)', 0)
+                    'InstRegIndex(0)', 'InstRegIndex(0)', 2)
         code = 'FTW = 0xFFFF;'
 }};

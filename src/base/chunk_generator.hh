@@ -83,7 +83,6 @@ class ChunkGenerator
     {
         // chunkSize must be a power of two
         assert(chunkSize == 0 || isPowerOf2(chunkSize));
-        assert(totalSize >= 0);
 
         // set up initial chunk.
         curAddr = startAddr;
@@ -122,6 +121,12 @@ class ChunkGenerator
      * @return True if yes, false if more to go.
      */
     bool done() const { return (curSize == 0); }
+
+    /**
+     * Is this the last chunk?
+     * @return True if yes, false if more to go.
+     */
+    bool last() const { return (sizeLeft == 0); }
 
     /**
      * Advance generator to next chunk.

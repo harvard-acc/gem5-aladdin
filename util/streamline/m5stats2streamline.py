@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2012 ARM Limited
+# Copyright (c) 2012, 2014 ARM Limited
 # All rights reserved
 #
 # The license below extends only to copyright in the software and shall
@@ -56,7 +56,7 @@
 #
 # <dest .apc folder>: Destination .apc folder path
 #
-# APC project generation based on Gator v12 (DS-5 v5.13)
+# APC project generation based on Gator v17 (DS-5 v5.17)
 # Subsequent versions should be backward compatible
 
 import re, sys, os
@@ -78,7 +78,7 @@ parser = argparse.ArgumentParser(
 
         Visit http://www.gem5.org/Streamline for more details.
 
-        APC project generation based on Gator v12 (DS-5 v5.13)
+        APC project generation based on Gator v17 (DS-5 v5.17)
         Subsequent versions should be backward compatible
         """)
 
@@ -142,18 +142,18 @@ def parseConfig(config_file):
         print "ERROR: config file '", config_file, "' not found"
         sys.exit(1)
 
-    if config.has_section("system.cpu"):
+    if config.has_section("system.cluster.cpu"):
         num_cpus = 1
     else:
         num_cpus = 0
-        while config.has_section("system.cpu" + str(num_cpus)):
+        while config.has_section("system.cluster.cpu" + str(num_cpus)):
             num_cpus += 1
 
-    if config.has_section("system.l2"):
+    if config.has_section("system.cluster.l2_cache"):
         num_l2 = 1
     else:
         num_l2 = 0
-        while config.has_section("system.l2" + str(num_l2)):
+        while config.has_section("system.cluster.l2_cache" + str(num_l2)):
             num_l2 += 1
 
     print "Num CPUs:", num_cpus
@@ -198,8 +198,26 @@ class Event(object):
 #  - string
 ############################################################
 
-#  variable length packed 4-byte signed value
 def packed32(x):
+    ret = []
+    more = True
+    while more:
+        b = x & 0x7f
+        x = x >> 7
+        if (((x == 0) and ((b & 0x40) == 0)) or \
+            ((x == -1) and ((b & 0x40) != 0))):
+            more = False
+        else:
+            b = b | 0x80
+        ret.append(b)
+    return ret
+
+# For historical reasons, 32/64-bit versions of functions are presevered
+def packed64(x):
+    return packed32(x)
+
+#  variable length packed 4-byte signed value
+def unsigned_packed32(x):
     ret = []
     if ((x & 0xffffff80) == 0):
         ret.append(x & 0x7f)
@@ -224,7 +242,7 @@ def packed32(x):
     return ret
 
 #  variable length packed 8-byte signed value
-def packed64(x):
+def unsigned_packed64(x):
     ret = []
     if ((x & 0xffffffffffffff80) == 0):
         ret.append(x & 0x7f)
@@ -382,7 +400,11 @@ def addFrameHeader(frame_type, body, core):
 #  - uptime: packed64
 def summaryFrame(timestamp, uptime):
     frame_type = "Summary"
-    body = packed64(timestamp) + packed64(uptime)
+    newline_canary = stringList("1\n2\r\n3\r4\n\r5")
+    monotonic_delta = packed64(0)
+    end_of_attr = stringList("")
+    body = newline_canary + packed64(timestamp) + packed64(uptime)
+    body += monotonic_delta + end_of_attr
     ret = addFrameHeader(frame_type, body, 0)
     return ret
 
@@ -415,10 +437,23 @@ def threadNameFrame(timestamp, thread_id, name):
 
 # Core name message
 #  - name: string
-def coreNameFrame(name):
+#  - core_id: packed32
+#  - cpuid: packed32
+def coreNameFrame(name, core_id, cpuid):
     frame_type = "Name"
     packed_code = packed32(3)
-    body = packed_code + stringList(name)
+    body = packed_code + packed32(core_id) + packed32(cpuid) + stringList(name)
+    ret = addFrameHeader(frame_type, body, 0)
+    return ret
+
+# IRQ Cookie name message
+#  - cookie: packed32
+#  - name: string
+#  - irq: packed32
+def irqCookieNameFrame(cookie, name, irq):
+    frame_type = "Name"
+    packed_code = packed32(5)
+    body = packed_code + packed32(cookie) + stringList(name) + packed32(irq)
     ret = addFrameHeader(frame_type, body, 0)
     return ret
 
@@ -678,7 +713,7 @@ def writeXmlFile(xml, filename):
 
 # StatsEntry that contains individual statistics
 class StatsEntry(object):
-    def __init__(self, name, group, group_index, per_cpu, per_switchcpu, key):
+    def __init__(self, name, group, group_index, per_cpu, key):
 
         # Full name of statistics
         self.name = name
@@ -701,7 +736,6 @@ class StatsEntry(object):
 
         # Whether this stat is use per CPU or not
         self.per_cpu = per_cpu
-        self.per_switchcpu = per_switchcpu
 
         # Key used in .apc protocol (as described in captured.xml)
         self.key = key
@@ -726,16 +760,11 @@ class StatsEntry(object):
             self.per_cpu_name = []
             self.per_cpu_found = []
             for i in range(num_cpus):
-                # Resuming from checkpoints results in using "switch_cpus"
-                if per_switchcpu:
-                    per_cpu_name = "system.switch_cpus"
-                else:
-                    per_cpu_name = "system.cpu"
-
-                # No CPU number appends if num_cpus == 1
                 if num_cpus > 1:
-                    per_cpu_name += str(i)
-                per_cpu_name += "." + self.name
+                    per_cpu_name = re.sub("#", str(i), self.name)
+                else:
+                    per_cpu_name = re.sub("#", "", self.name)
+
                 self.per_cpu_name.append(per_cpu_name)
                 print "\t", per_cpu_name
 
@@ -760,10 +789,10 @@ class Stats(object):
         self.tick_list = []
         self.next_key = 1
 
-    def register(self, name, group, group_index, per_cpu, per_switchcpu):
+    def register(self, name, group, group_index, per_cpu):
         print "registering stat:", name, "group:", group, group_index
         self.stats_list.append(StatsEntry(name, group, group_index, per_cpu, \
-            per_switchcpu, self.next_key))
+            self.next_key))
         self.next_key += 1
 
     # Union of all stats to accelerate parsing speed
@@ -801,17 +830,7 @@ def registerStats(config_file):
         per_cpu_stats_list = config.get('PER_CPU_STATS', group).split('\n')
         for item in per_cpu_stats_list:
             if item:
-                stats.register(item, group, i, True, False)
-                i += 1
-
-    per_cpu_stat_groups = config.options('PER_SWITCHCPU_STATS')
-    for group in per_cpu_stat_groups:
-        i = 0
-        per_cpu_stats_list = \
-            config.get('PER_SWITCHCPU_STATS', group).split('\n')
-        for item in per_cpu_stats_list:
-            if item:
-                stats.register(item, group, i, True, True)
+                stats.register(item, group, i, True)
                 i += 1
 
     per_l2_stat_groups = config.options('PER_L2_STATS')
@@ -821,13 +840,11 @@ def registerStats(config_file):
         for item in per_l2_stats_list:
             if item:
                 for l2 in range(num_l2):
-                    name = item
-                    prefix = "system.l2"
                     if num_l2 > 1:
-                        prefix += str(l2)
-                    prefix += "."
-                    name = prefix + name
-                    stats.register(name, group, i, False, False)
+                        name = re.sub("#", str(l2), item)
+                    else:
+                        name = re.sub("#", "", item)
+                    stats.register(name, group, i, False)
                 i += 1
 
     other_stat_groups = config.options('OTHER_STATS')
@@ -836,7 +853,7 @@ def registerStats(config_file):
         other_stats_list = config.get('OTHER_STATS', group).split('\n')
         for item in other_stats_list:
             if item:
-                stats.register(item, group, i, False, False)
+                stats.register(item, group, i, False)
                 i += 1
 
     stats.createStatsRegex()
@@ -999,7 +1016,8 @@ def doCapturedXML(output_path, stats):
 
     xml = ET.Element("captured")
     xml.set("version", "1")
-    xml.set("protocol", "12")
+    xml.set("protocol", "17")
+    xml.set("backtrace_processing", "none")
 
     target = ET.SubElement(xml, "target")
     target.set("name", "gem5")
@@ -1010,6 +1028,7 @@ def doCapturedXML(output_path, stats):
     for stat in stats.stats_list:
         s = ET.SubElement(counters, "counter")
         stat_name = re.sub("\.", "_", stat.short_name)
+        stat_name = re.sub("#", "", stat_name)
         s.set("title", stat.group)
         s.set("name", stat_name)
         s.set("color", "0x00000000")

@@ -43,6 +43,10 @@ import math
 import m5
 from m5.objects import *
 from m5.defines import buildEnv
+from m5.util import addToPath, fatal
+
+import MemConfig
+addToPath('../topologies')
 
 def define_options(parser):
     # By default, ruby uses the simple timing cpu
@@ -51,6 +55,9 @@ def define_options(parser):
     parser.add_option("--ruby-clock", action="store", type="string",
                       default='2GHz',
                       help="Clock for blocks running at Ruby system's speed")
+
+    parser.add_option("--access-backing-store", action="store_true", default=False,
+                      help="Should ruby maintain a second copy of memory")
 
     # Options related to cache structure
     parser.add_option("--ports", action="store", type="int", default=4,
@@ -72,21 +79,66 @@ def define_options(parser):
                       help="high order address bit to use for numa mapping. " \
                            "0 = highest bit, not specified = lowest bit")
 
-    # ruby sparse memory options
-    parser.add_option("--use-map", action="store_true", default=False)
-    parser.add_option("--map-levels", type="int", default=4)
-
     parser.add_option("--recycle-latency", type="int", default=10,
                       help="Recycle latency for ruby controller input buffers")
 
     parser.add_option("--random_seed", type="int", default=1234,
                       help="Used for seeding the random number generator")
 
-    parser.add_option("--ruby_stats", type="string", default="ruby.stats")
-
     protocol = buildEnv['PROTOCOL']
     exec "import %s" % protocol
     eval("%s.define_options(parser)" % protocol)
+
+def setup_memory_controllers(system, ruby, dir_cntrls, options):
+    ruby.block_size_bytes = options.cacheline_size
+    ruby.memory_size_bits = 48
+    block_size_bits = int(math.log(options.cacheline_size, 2))
+
+    if options.numa_high_bit:
+        numa_bit = options.numa_high_bit
+    else:
+        # if the numa_bit is not specified, set the directory bits as the
+        # lowest bits above the block offset bits, and the numa_bit as the
+        # highest of those directory bits
+        dir_bits = int(math.log(options.num_dirs, 2))
+        numa_bit = block_size_bits + dir_bits - 1
+
+    index = 0
+    mem_ctrls = []
+    crossbars = []
+
+    # Sets bits to be used for interleaving.  Creates memory controllers
+    # attached to a directory controller.  A separate controller is created
+    # for each address range as the abstract memory can handle only one
+    # contiguous address range as of now.
+    for dir_cntrl in dir_cntrls:
+        dir_cntrl.directory.numa_high_bit = numa_bit
+
+        crossbar = None
+        if len(system.mem_ranges) > 1:
+            crossbar = IOXBar()
+            crossbars.append(crossbar)
+            dir_cntrl.memory = crossbar.slave
+
+        for r in system.mem_ranges:
+            mem_ctrl = MemConfig.create_mem_ctrl(
+                MemConfig.get(options.mem_type), r, index, options.num_dirs,
+                int(math.log(options.num_dirs, 2)), options.cacheline_size)
+
+            mem_ctrls.append(mem_ctrl)
+
+            if crossbar != None:
+                mem_ctrl.port = crossbar.master
+            else:
+                mem_ctrl.port = dir_cntrl.memory
+
+        index += 1
+
+    system.mem_ctrls = mem_ctrls
+
+    if len(crossbars) > 0:
+        ruby.crossbars = crossbars
+
 
 def create_topology(controllers, options):
     """ Called from create_system in configs/ruby/<protocol>.py
@@ -98,17 +150,44 @@ def create_topology(controllers, options):
     topology = eval("Topo.%s(controllers)" % options.topology)
     return topology
 
-def create_system(options, system, piobus = None, dma_ports = []):
+def create_system(options, full_system, system, piobus = None, dma_ports = []):
 
-    system.ruby = RubySystem(stats_filename = options.ruby_stats,
-                             no_mem_vec = options.use_map)
+    system.ruby = RubySystem()
     ruby = system.ruby
+
+    # Set the network classes based on the command line options
+    if options.garnet_network == "fixed":
+        NetworkClass = GarnetNetwork_d
+        IntLinkClass = GarnetIntLink_d
+        ExtLinkClass = GarnetExtLink_d
+        RouterClass = GarnetRouter_d
+        InterfaceClass = GarnetNetworkInterface_d
+
+    elif options.garnet_network == "flexible":
+        NetworkClass = GarnetNetwork
+        IntLinkClass = GarnetIntLink
+        ExtLinkClass = GarnetExtLink
+        RouterClass = GarnetRouter
+        InterfaceClass = GarnetNetworkInterface
+
+    else:
+        NetworkClass = SimpleNetwork
+        IntLinkClass = SimpleIntLink
+        ExtLinkClass = SimpleExtLink
+        RouterClass = Switch
+        InterfaceClass = None
+
+    # Instantiate the network object so that the controllers can connect to it.
+    network = NetworkClass(ruby_system = ruby, topology = options.topology,
+            routers = [], ext_links = [], int_links = [], netifs = [])
+    ruby.network = network
 
     protocol = buildEnv['PROTOCOL']
     exec "import %s" % protocol
     try:
         (cpu_sequencers, dir_cntrls, topology) = \
-             eval("%s.create_system(options, system, piobus, dma_ports, ruby)"
+             eval("%s.create_system(options, full_system, system, dma_ports,\
+                                    ruby)"
                   % protocol)
     except:
         print "Error: could not create sytem for ruby protocol %s" % protocol
@@ -118,6 +197,7 @@ def create_system(options, system, piobus = None, dma_ports = []):
     # independent of the protocol and kept in the protocol-agnostic
     # part (i.e. here).
     sys_port_proxy = RubyPortProxy(ruby_system = ruby)
+
     # Give the system port proxy a SimObject parent without creating a
     # full-fledged controller
     system.sys_port_proxy = sys_port_proxy
@@ -125,71 +205,44 @@ def create_system(options, system, piobus = None, dma_ports = []):
     # Connect the system port for loading of binaries etc
     system.system_port = system.sys_port_proxy.slave
 
-
-    #
-    # Set the network classes based on the command line options
-    #
-    if options.garnet_network == "fixed":
-        class NetworkClass(GarnetNetwork_d): pass
-        class IntLinkClass(GarnetIntLink_d): pass
-        class ExtLinkClass(GarnetExtLink_d): pass
-        class RouterClass(GarnetRouter_d): pass
-    elif options.garnet_network == "flexible":
-        class NetworkClass(GarnetNetwork): pass
-        class IntLinkClass(GarnetIntLink): pass
-        class ExtLinkClass(GarnetExtLink): pass
-        class RouterClass(GarnetRouter): pass
-    else:
-        class NetworkClass(SimpleNetwork): pass
-        class IntLinkClass(SimpleIntLink): pass
-        class ExtLinkClass(SimpleExtLink): pass
-        class RouterClass(Switch): pass
-
-
     # Create the network topology
-    network = NetworkClass(ruby_system = ruby, topology = topology.description,
-                           routers = [], ext_links = [], int_links = [])
     topology.makeTopology(options, network, IntLinkClass, ExtLinkClass,
-                          RouterClass)
+            RouterClass)
+
+    if InterfaceClass != None:
+        netifs = [InterfaceClass(id=i) for (i,n) in enumerate(network.ext_links)]
+        network.netifs = netifs
 
     if options.network_fault_model:
         assert(options.garnet_network == "fixed")
         network.enable_fault_model = True
         network.fault_model = FaultModel()
 
-    #
-    # Loop through the directory controlers.
-    # Determine the total memory size of the ruby system and verify it is equal
-    # to physmem.  However, if Ruby memory is using sparse memory in SE
-    # mode, then the system should not back-up the memory state with
-    # the Memory Vector and thus the memory size bytes should stay at 0.
-    # Also set the numa bits to the appropriate values.
-    #
-    total_mem_size = MemorySize('0B')
+    setup_memory_controllers(system, ruby, dir_cntrls, options)
 
-    dir_bits = int(math.log(options.num_dirs, 2))
-    ruby.block_size_bytes = options.cacheline_size
-    block_size_bits = int(math.log(options.cacheline_size, 2))
+    # Connect the cpu sequencers and the piobus
+    if piobus != None:
+        for cpu_seq in cpu_sequencers:
+            cpu_seq.pio_master_port = piobus.slave
+            cpu_seq.mem_master_port = piobus.slave
 
-    if options.numa_high_bit:
-        numa_bit = options.numa_high_bit
-    else:
-        # if the numa_bit is not specified, set the directory bits as the
-        # lowest bits above the block offset bits, and the numa_bit as the
-        # highest of those directory bits
-        numa_bit = block_size_bits + dir_bits - 1
+            if buildEnv['TARGET_ISA'] == "x86":
+                cpu_seq.pio_slave_port = piobus.master
 
-    for dir_cntrl in dir_cntrls:
-        total_mem_size.value += dir_cntrl.directory.size.value
-        dir_cntrl.directory.numa_high_bit = numa_bit
-
-    phys_mem_size = sum(map(lambda r: r.size(), system.mem_ranges))
-    assert(total_mem_size.value == phys_mem_size)
-
-    ruby_profiler = RubyProfiler(ruby_system = ruby,
-                                 num_of_sequencers = len(cpu_sequencers))
-    ruby.network = network
-    ruby.profiler = ruby_profiler
-    ruby.mem_size = total_mem_size
-    ruby._cpu_ruby_ports = cpu_sequencers
+    ruby._cpu_ports = cpu_sequencers
+    ruby.num_of_sequencers = len(cpu_sequencers)
     ruby.random_seed    = options.random_seed
+
+    # Create a backing copy of physical memory in case required
+    if options.access_backing_store:
+        ruby.access_backing_store = True
+        ruby.phys_mem = SimpleMemory(range=system.mem_ranges[0],
+                                     in_addr_map=False)
+
+def send_evicts(options):
+    # currently, 2 scenarios warrant forwarding evictions to the CPU:
+    # 1. The O3 model must keep the LSQ coherent with the caches
+    # 2. The x86 mwait instruction is built on top of coherence invalidations
+    if options.cpu_type == "detailed" or buildEnv['TARGET_ISA'] == 'x86':
+        return True
+    return False

@@ -42,8 +42,10 @@
  *          Andreas Hansson
  */
 
-#include "arch/registers.hh"
-#include "config/the_isa.hh"
+#include <vector>
+
+#include "cpu/base.hh"
+#include "cpu/thread_context.hh"
 #include "debug/LLSC.hh"
 #include "debug/MemoryAccess.hh"
 #include "mem/abstract_mem.hh"
@@ -57,7 +59,14 @@ AbstractMemory::AbstractMemory(const Params *p) :
     confTableReported(p->conf_table_reported), inAddrMap(p->in_addr_map),
     _system(NULL)
 {
-    if (size() % TheISA::PageBytes != 0)
+}
+
+void
+AbstractMemory::init()
+{
+    assert(system());
+
+    if (size() % _system->getPageBytes() != 0)
         panic("Memory Size not divisible by page size\n");
 }
 
@@ -260,6 +269,12 @@ AbstractMemory::checkLockedAddrList(PacketPtr pkt)
             if (i->addr == paddr) {
                 DPRINTF(LLSC, "Erasing lock record: context %d addr %#x\n",
                         i->contextId, paddr);
+                // For ARM, a spinlock would typically include a Wait
+                // For Event (WFE) to conserve energy. The ARMv8
+                // architecture specifies that an event is
+                // automatically generated when clearing the exclusive
+                // monitor to wake up the processor in WFE.
+                system()->getThreadContext(i->contextId)->getCpuPtr()->wakeup();
                 i = lockedAddrList.erase(i);
             } else {
                 i++;
@@ -294,7 +309,7 @@ AbstractMemory::checkLockedAddrList(PacketPtr pkt)
                     A, system()->getMasterName(pkt->req->masterId()),          \
                     pkt->getSize(), pkt->getAddr(),                            \
                     pkt->req->isUncacheable() ? 'U' : 'C');                    \
-            DDUMP(MemoryAccess, pkt->getPtr<uint8_t>(), pkt->getSize());       \
+            DDUMP(MemoryAccess, pkt->getConstPtr<uint8_t>(), pkt->getSize());  \
         }                                                                      \
     } while (0)
 
@@ -319,19 +334,18 @@ AbstractMemory::access(PacketPtr pkt)
     uint8_t *hostAddr = pmemAddr + pkt->getAddr() - range.start();
 
     if (pkt->cmd == MemCmd::SwapReq) {
-        TheISA::IntReg overwrite_val;
-        bool overwrite_mem;
+        std::vector<uint8_t> overwrite_val(pkt->getSize());
         uint64_t condition_val64;
         uint32_t condition_val32;
 
         if (!pmemAddr)
             panic("Swap only works if there is real memory (i.e. null=False)");
-        assert(sizeof(TheISA::IntReg) >= pkt->getSize());
 
-        overwrite_mem = true;
+        bool overwrite_mem = true;
         // keep a copy of our possible write value, and copy what is at the
         // memory address into the packet
-        std::memcpy(&overwrite_val, pkt->getPtr<uint8_t>(), pkt->getSize());
+        std::memcpy(&overwrite_val[0], pkt->getConstPtr<uint8_t>(),
+                    pkt->getSize());
         std::memcpy(pkt->getPtr<uint8_t>(), hostAddr, pkt->getSize());
 
         if (pkt->req->isCondSwap()) {
@@ -348,7 +362,7 @@ AbstractMemory::access(PacketPtr pkt)
         }
 
         if (overwrite_mem)
-            std::memcpy(hostAddr, &overwrite_val, pkt->getSize());
+            std::memcpy(hostAddr, &overwrite_val[0], pkt->getSize());
 
         assert(!pkt->req->isInstFetch());
         TRACE_PACKET("Read/Write");
@@ -365,10 +379,17 @@ AbstractMemory::access(PacketPtr pkt)
         bytesRead[pkt->req->masterId()] += pkt->getSize();
         if (pkt->req->isInstFetch())
             bytesInstRead[pkt->req->masterId()] += pkt->getSize();
+    } else if (pkt->isInvalidate()) {
+        // no need to do anything
+        // this clause is intentionally before the write clause: the only
+        // transaction that is both a write and an invalidate is
+        // WriteInvalidate, and for the sake of consistency, it does not
+        // write to memory.  in a cacheless system, there are no WriteInv's
+        // because the Write -> WriteInvalidate rewrite happens in the cache.
     } else if (pkt->isWrite()) {
         if (writeOK(pkt)) {
             if (pmemAddr) {
-                memcpy(hostAddr, pkt->getPtr<uint8_t>(), pkt->getSize());
+                memcpy(hostAddr, pkt->getConstPtr<uint8_t>(), pkt->getSize());
                 DPRINTF(MemoryAccess, "%s wrote %x bytes to address %x\n",
                         __func__, pkt->getSize(), pkt->getAddr());
             }
@@ -377,8 +398,6 @@ AbstractMemory::access(PacketPtr pkt)
             numWrites[pkt->req->masterId()]++;
             bytesWritten[pkt->req->masterId()] += pkt->getSize();
         }
-    } else if (pkt->isInvalidate()) {
-        // no need to do anything
     } else {
         panic("unimplemented");
     }
@@ -403,7 +422,7 @@ AbstractMemory::functionalAccess(PacketPtr pkt)
         pkt->makeResponse();
     } else if (pkt->isWrite()) {
         if (pmemAddr)
-            memcpy(hostAddr, pkt->getPtr<uint8_t>(), pkt->getSize());
+            memcpy(hostAddr, pkt->getConstPtr<uint8_t>(), pkt->getSize());
         TRACE_PACKET("Write");
         pkt->makeResponse();
     } else if (pkt->isPrint()) {

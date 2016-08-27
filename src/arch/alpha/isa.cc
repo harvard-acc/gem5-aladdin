@@ -40,7 +40,7 @@ namespace AlphaISA
 {
 
 ISA::ISA(Params *p)
-    : SimObject(p)
+    : SimObject(p), system(p->system)
 {
     clear();
     initializeIprTable();
@@ -74,7 +74,7 @@ ISA::unserialize(Checkpoint *cp, const std::string &section)
 
 
 MiscReg
-ISA::readMiscRegNoEffect(int misc_reg, ThreadID tid)
+ISA::readMiscRegNoEffect(int misc_reg, ThreadID tid) const
 {
     switch (misc_reg) {
       case MISCREG_FPCR:

@@ -27,45 +27,55 @@
 # Authors: Ali Saidi
 
 import os, sys
-from os.path import isdir, join as joinpath
+from os.path import join as joinpath
 from os import environ as env
 
 config_path = os.path.dirname(os.path.abspath(__file__))
 config_root = os.path.dirname(config_path)
 
-def disk(file):
-    system()
-    return joinpath(disk.dir, file)
+def searchpath(path, filename):
+    for p in path:
+        f = joinpath(p, filename)
+        if os.path.exists(f):
+            return f
+    raise IOError, "Can't find file '%s' on path." % filename
 
-def binary(file):
+def disk(filename):
     system()
-    return joinpath(binary.dir, file)
+    return searchpath(disk.path, filename)
 
-def script(file):
+def binary(filename):
     system()
-    return joinpath(script.dir, file)
+    return searchpath(binary.path, filename)
+
+def script(filename):
+    system()
+    return searchpath(script.path, filename)
 
 def system():
-    if not system.dir:
+    if not system.path:
         try:
-                path = env['M5_PATH'].split(':')
+            path = env['M5_PATH'].split(':')
         except KeyError:
-                path = [ '/dist/m5/system', '/n/poolfs/z/dist/m5/system' ]
+            path = [ '/dist/m5/system', '/n/poolfs/z/dist/m5/system' ]
 
-        for system.dir in path:
-            if os.path.isdir(system.dir):
-                break
-        else:
-            raise ImportError, "Can't find a path to system files."
+        # expand '~' and '~user' in paths
+        path = map(os.path.expanduser, path)
 
-    if not binary.dir:
-        binary.dir = joinpath(system.dir, 'binaries')
-    if not disk.dir:
-        disk.dir = joinpath(system.dir, 'disks')
-    if not script.dir:
-        script.dir = joinpath(config_root, 'boot')
+        # filter out non-existent directories
+        system.path = filter(os.path.isdir, path)
 
-system.dir = None
-binary.dir = None
-disk.dir = None
-script.dir = None
+        if not system.path:
+            raise IOError, "Can't find a path to system files."
+
+    if not binary.path:
+        binary.path = [joinpath(p, 'binaries') for p in system.path]
+    if not disk.path:
+        disk.path = [joinpath(p, 'disks') for p in system.path]
+    if not script.path:
+        script.path = [joinpath(config_root, 'boot')]
+
+system.path = None
+binary.path = None
+disk.path = None
+script.path = None

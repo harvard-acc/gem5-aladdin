@@ -51,7 +51,7 @@
 
 class BaseCPU;
 class Event;
-
+class ProbeManager;
 /**
  * Abstract superclass for simulation objects.  Represents things that
  * correspond to physical components and can be specified via the
@@ -90,6 +90,9 @@ class SimObject : public EventManager, public Serializable, public Drainable
     /** List of all instantiated simulation objects. */
     static SimObjectList simObjectList;
 
+    /** Manager coordinates hooking up probe points with listeners. */
+    ProbeManager *probeManager;
+
   protected:
     /** Cached copy of the object parameters. */
     const SimObjectParams *_params;
@@ -98,7 +101,7 @@ class SimObject : public EventManager, public Serializable, public Drainable
     typedef SimObjectParams Params;
     const Params *params() const { return _params; }
     SimObject(const Params *_params);
-    virtual ~SimObject() {}
+    virtual ~SimObject();
 
   public:
 
@@ -141,6 +144,21 @@ class SimObject : public EventManager, public Serializable, public Drainable
      * Reset statistics associated with this object.
      */
     virtual void resetStats();
+
+    /**
+     * Register probe points for this object.
+     */
+    virtual void regProbePoints();
+
+    /**
+     * Register probe listeners for this object.
+     */
+    virtual void regProbeListeners();
+
+    /**
+     * Get the probe manager for this object.
+     */
+    ProbeManager *getProbeManager();
 
     /**
      * startup() is the final initialization call before simulation.

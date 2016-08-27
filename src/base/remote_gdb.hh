@@ -1,4 +1,5 @@
 /*
+ * Copyright 2014 Google, Inc.
  * Copyright (c) 2002-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -36,6 +37,7 @@
 #include <map>
 
 #include "arch/types.hh"
+#include "base/intmath.hh"
 #include "base/pollevent.hh"
 #include "base/socket.hh"
 #include "cpu/pc_event.hh"
@@ -103,18 +105,33 @@ class BaseRemoteGDB
     virtual const char * gdb_command(char cmd);
 
   protected:
-    class Event : public PollEvent
+    class InputEvent : public PollEvent
     {
       protected:
         BaseRemoteGDB *gdb;
 
       public:
-        Event(BaseRemoteGDB *g, int fd, int e);
+        InputEvent(BaseRemoteGDB *g, int fd, int e);
         void process(int revent);
     };
 
-    friend class Event;
-    Event *event;
+    class TrapEvent : public Event
+    {
+      protected:
+        int _type;
+        BaseRemoteGDB *gdb;
+
+      public:
+        TrapEvent(BaseRemoteGDB *g) : gdb(g)
+        {}
+
+        void type(int t) { _type = t; }
+        void process();
+    };
+
+    friend class InputEvent;
+    InputEvent *inputEvent;
+    TrapEvent trapEvent;
     GDBListener *listener;
     int number;
 
@@ -136,16 +153,25 @@ class BaseRemoteGDB
     class GdbRegCache
     {
       public:
-        GdbRegCache(size_t newSize) : regs(new uint64_t[newSize]), size(newSize)
+        GdbRegCache(size_t newSize) :
+            regs64(new uint64_t[divCeil(newSize, sizeof(uint64_t))]),
+            size(newSize)
         {}
         ~GdbRegCache()
         {
-            delete [] regs;
+            delete [] regs64;
         }
 
-        uint64_t * regs;
+        union {
+            uint64_t *regs64;
+            uint32_t *regs32;
+            uint16_t *regs16;
+            uint8_t *regs8;
+            void *regs;
+        };
+        // Size of cache in bytes.
         size_t size;
-        size_t bytes() { return size * sizeof(uint64_t); }
+        size_t bytes() { return size; }
     };
 
     GdbRegCache gdbregs;
@@ -183,15 +209,37 @@ class BaseRemoteGDB
     }
 
   protected:
+    class SingleStepEvent : public Event
+    {
+      protected:
+        BaseRemoteGDB *gdb;
+
+      public:
+        SingleStepEvent(BaseRemoteGDB *g) : gdb(g)
+        {}
+
+        void process();
+    };
+
+    SingleStepEvent singleStepEvent;
+
     virtual void getregs() = 0;
     virtual void setregs() = 0;
 
-    virtual void clearSingleStep() = 0;
-    virtual void setSingleStep() = 0;
+    void clearSingleStep();
+    void setSingleStep();
 
     PCEventQueue *getPcEventQueue();
+    EventQueue *getComInstEventQueue();
+
+    /// Schedule an event which will be triggered "delta" instructions later.
+    void scheduleInstCommitEvent(Event *ev, int delta);
+    /// Deschedule an instruction count based event.
+    void descheduleInstCommitEvent(Event *ev);
 
   protected:
+    virtual bool checkBpLen(size_t len);
+
     class HardBreakpoint : public PCEvent
     {
       private:
@@ -242,18 +290,18 @@ BaseRemoteGDB::write(Addr addr, T data)
 class GDBListener
 {
   protected:
-    class Event : public PollEvent
+    class InputEvent : public PollEvent
     {
       protected:
         GDBListener *listener;
 
       public:
-        Event(GDBListener *l, int fd, int e);
+        InputEvent(GDBListener *l, int fd, int e);
         void process(int revent);
     };
 
-    friend class Event;
-    Event *event;
+    friend class InputEvent;
+    InputEvent *inputEvent;
 
   protected:
     ListenSocket listener;

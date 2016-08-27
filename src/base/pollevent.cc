@@ -44,6 +44,7 @@
 #include "base/types.hh"
 #include "sim/async.hh"
 #include "sim/core.hh"
+#include "sim/eventq.hh"
 #include "sim/serialize.hh"
 
 using namespace std;
@@ -57,6 +58,7 @@ PollEvent::PollEvent(int _fd, int _events)
 {
     pfd.fd = _fd;
     pfd.events = _events;
+    pfd.revents = 0;
 }
 
 PollEvent::~PollEvent()
@@ -223,5 +225,7 @@ PollQueue::setupAsyncIO(int fd, bool set)
     if (set) {
         async_event = true;
         async_io = true;
+        /* Wake up some event queue to handle event */
+        getEventQueue(0)->wakeup();
     }
 }

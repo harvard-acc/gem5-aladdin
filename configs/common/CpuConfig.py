@@ -50,9 +50,9 @@ _cpu_classes = {}
 _cpu_aliases_all = [
     ("timing", "TimingSimpleCPU"),
     ("atomic", "AtomicSimpleCPU"),
-    ("inorder", "InOrderCPU"),
+    ("minor", "MinorCPU"),
     ("detailed", "DerivO3CPU"),
-    ("kvm", ("ArmKvmCPU", "X86KvmCPU")),
+    ("kvm", ("ArmKvmCPU", "ArmV8KvmCPU", "X86KvmCPU")),
     ]
 
 # Filtered list of aliases. Only aliases for existing CPUs exist in

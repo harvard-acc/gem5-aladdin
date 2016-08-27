@@ -130,7 +130,7 @@ output decoder {{
 
 // This template provides the execute functions for a load
 def template LoadExecute {{
-        Fault %(class_name)s::execute(%(CPU_exec_context)s *xc,
+        Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
                 Trace::InstRecord *traceData) const
         {
             Fault fault = NoFault;
@@ -158,7 +158,7 @@ def template LoadExecute {{
 }};
 
 def template LoadInitiateAcc {{
-        Fault %(class_name)s::initiateAcc(%(CPU_exec_context)s * xc,
+        Fault %(class_name)s::initiateAcc(CPU_EXEC_CONTEXT * xc,
                 Trace::InstRecord * traceData) const
         {
             Fault fault = NoFault;
@@ -178,7 +178,7 @@ def template LoadInitiateAcc {{
 }};
 
 def template LoadCompleteAcc {{
-        Fault %(class_name)s::completeAcc(PacketPtr pkt, %(CPU_exec_context)s * xc,
+        Fault %(class_name)s::completeAcc(PacketPtr pkt, CPU_EXEC_CONTEXT * xc,
                 Trace::InstRecord * traceData) const
         {
             Fault fault = NoFault;
@@ -195,7 +195,7 @@ def template LoadCompleteAcc {{
 
 // This template provides the execute functions for a store
 def template StoreExecute {{
-        Fault %(class_name)s::execute(%(CPU_exec_context)s *xc,
+        Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
                 Trace::InstRecord *traceData) const
         {
             Fault fault = NoFault;
@@ -226,7 +226,7 @@ def template StoreExecute {{
 }};
 
 def template StoreInitiateAcc {{
-        Fault %(class_name)s::initiateAcc(%(CPU_exec_context)s * xc,
+        Fault %(class_name)s::initiateAcc(CPU_EXEC_CONTEXT * xc,
                 Trace::InstRecord * traceData) const
         {
             Fault fault = NoFault;
@@ -251,7 +251,7 @@ def template StoreInitiateAcc {{
 }};
 
 def template StoreCompleteAcc {{
-        Fault %(class_name)s::completeAcc(PacketPtr, %(CPU_exec_context)s * xc,
+        Fault %(class_name)s::completeAcc(PacketPtr, CPU_EXEC_CONTEXT * xc,
                 Trace::InstRecord * traceData) const
         {
             return NoFault;
@@ -260,7 +260,7 @@ def template StoreCompleteAcc {{
 
 def template EACompExecute {{
     Fault
-    %(class_name)s::eaComp(%(CPU_exec_context)s *xc,
+    %(class_name)s::eaComp(CPU_EXEC_CONTEXT *xc,
                                    Trace::InstRecord *traceData) const
     {
         Addr EA;
@@ -303,15 +303,15 @@ let {{
     # and we're dealing with doubles
     BlockAlignmentFaultCheck = '''
         if (RD & 0xe)
-            fault = new IllegalInstruction;
+            fault = std::make_shared<IllegalInstruction>();
         else if (EA & 0x3f)
-            fault = new MemAddressNotAligned;
+            fault = std::make_shared<MemAddressNotAligned>();
     '''
     TwinAlignmentFaultCheck = '''
         if (RD & 0x1)
-            fault = new IllegalInstruction;
+            fault = std::make_shared<IllegalInstruction>();
         else if (EA & 0xf)
-            fault = new MemAddressNotAligned;
+            fault = std::make_shared<MemAddressNotAligned>();
     '''
     # XXX Need to take care of pstate.hpriv as well. The lower ASIs
     # are split into ones that are available in priv and hpriv, and
@@ -320,9 +320,9 @@ let {{
         if ((!Pstate.priv && !Hpstate.hpriv &&
              !asiIsUnPriv((ASI)EXT_ASI)) ||
             (!Hpstate.hpriv && asiIsHPriv((ASI)EXT_ASI)))
-            fault = new PrivilegedAction;
+            fault = std::make_shared<PrivilegedAction>();
         else if (asiIsAsIfUser((ASI)EXT_ASI) && !Pstate.priv)
-            fault = new PrivilegedAction;
+            fault = std::make_shared<PrivilegedAction>();
     '''
 
     TruncateEA = '''

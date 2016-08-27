@@ -52,6 +52,7 @@ class ObjectFile
         Mips,
         X86_64,
         I386,
+        Arm64,
         Arm,
         Thumb,
         Power
@@ -62,7 +63,8 @@ class ObjectFile
         Tru64,
         Linux,
         Solaris,
-        LinuxArmOABI
+        LinuxArmOABI,
+        FreeBSD
     };
 
   protected:
@@ -84,7 +86,8 @@ class ObjectFile
     void close();
 
     virtual bool loadSections(PortProxy& memProxy, Addr addrMask =
-            std::numeric_limits<Addr>::max());
+                              std::numeric_limits<Addr>::max(),
+                              Addr offset = 0);
     virtual bool loadGlobalSymbols(SymbolTable *symtab, Addr addrMask =
             std::numeric_limits<Addr>::max()) = 0;
     virtual bool loadLocalSymbols(SymbolTable *symtab, Addr addrMask =
@@ -114,7 +117,8 @@ class ObjectFile
     Section data;
     Section bss;
 
-    bool loadSection(Section *sec, PortProxy& memProxy, Addr addrMask);
+    bool loadSection(Section *sec, PortProxy& memProxy, Addr addrMask,
+                     Addr offset = 0);
     void setGlobalPointer(Addr global_ptr) { globalPtr = global_ptr; }
 
   public:

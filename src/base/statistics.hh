@@ -57,6 +57,7 @@
 #include <iosfwd>
 #include <list>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -66,7 +67,6 @@
 #include "base/cast.hh"
 #include "base/cprintf.hh"
 #include "base/intmath.hh"
-#include "base/refcnt.hh"
 #include "base/str.hh"
 #include "base/types.hh"
 
@@ -228,12 +228,12 @@ class DataWrap : public InfoAccess
     /**
      * Copy constructor, copies are not allowed.
      */
-    DataWrap(const DataWrap &stat);
+    DataWrap(const DataWrap &stat) {}
 
     /**
      * Can't copy stats.
      */
-    void operator=(const DataWrap &);
+    void operator=(const DataWrap &) {}
 
   public:
     DataWrap()
@@ -741,7 +741,7 @@ class ScalarBase : public DataWrap<Derived, ScalarInfoProxy>
 class ProxyInfo : public ScalarInfo
 {
   public:
-    std::string str() const { return to_string(value()); }
+    std::string str() const { return std::to_string(value()); }
     size_type size() const { return 1; }
     bool check() const { return true; }
     void prepare() { }
@@ -777,6 +777,25 @@ class FunctorProxy : public ProxyInfo
     Result total() const { return (*functor)(); }
 };
 
+/**
+ * A proxy similar to the FunctorProxy, but allows calling a method of a bound
+ * object, instead of a global free-standing function.
+ */
+template <class T, class V>
+class MethodProxy : public ProxyInfo
+{
+  private:
+    T *object;
+    typedef V (T::*MethodPointer) () const;
+    MethodPointer method;
+
+  public:
+    MethodProxy(T *obj, MethodPointer meth) : object(obj), method(meth) {}
+    Counter value() const { return (object->*method)(); }
+    Result result() const { return (object->*method)(); }
+    Result total() const { return (object->*method)(); }
+};
+
 template <class Derived>
 class ValueBase : public DataWrap<Derived, ScalarInfoProxy>
 {
@@ -801,6 +820,22 @@ class ValueBase : public DataWrap<Derived, ScalarInfoProxy>
     functor(T &func)
     {
         proxy = new FunctorProxy<T>(func);
+        this->setInit();
+        return this->self();
+    }
+
+    /**
+     * Extended functor that calls the specified method of the provided object.
+     *
+     * @param obj Pointer to the object whose method should be called.
+     * @param method Pointer of the function / method of the object.
+     * @return Updated stats item.
+     */
+    template <class T, class V>
+    Derived &
+    method(T *obj,  V (T::*method)() const)
+    {
+        proxy = new MethodProxy<T,V>(obj, method);
         this->setInit();
         return this->self();
     }
@@ -1057,7 +1092,7 @@ class VectorBase : public DataWrapVec<Derived, VectorInfoProxy>
 
   public:
     VectorBase()
-        : storage(NULL)
+        : storage(nullptr), _size(0)
     {}
 
     ~VectorBase()
@@ -1197,7 +1232,7 @@ class Vector2dBase : public DataWrapVec2d<Derived, Vector2dInfoProxy>
 
   public:
     Vector2dBase()
-        : storage(NULL)
+        : x(0), y(0), _size(0), storage(nullptr)
     {}
 
     ~Vector2dBase()
@@ -1326,7 +1361,8 @@ class DistStor
         /** The number of buckets. Equal to (max-min)/bucket_size. */
         size_type buckets;
 
-        Params() : DistParams(Dist) {}
+        Params() : DistParams(Dist), min(0), max(0), bucket_size(0),
+                   buckets(0) {}
     };
 
   private:
@@ -1470,7 +1506,7 @@ class HistStor
         /** The number of buckets.. */
         size_type buckets;
 
-        Params() : DistParams(Hist) {}
+        Params() : DistParams(Hist), buckets(0) {}
     };
 
   private:
@@ -1502,6 +1538,7 @@ class HistStor
     void grow_up();
     void grow_out();
     void grow_convert();
+    void add(HistStor *);
 
     /**
      * Add a value to the distribution for the given number of times.
@@ -1531,7 +1568,7 @@ class HistStor
         size_type index =
             (int64_t)std::floor((val - min_bucket) / bucket_size);
 
-        assert(index >= 0 && index < size());
+        assert(index < size());
         cvec[index] += number;
 
         sum += val * number;
@@ -1840,6 +1877,12 @@ class DistBase : public DataWrap<Derived, DistInfoProxy>
     {
         data()->reset(this->info());
     }
+
+    /**
+     *  Add the argument distribution to the this distibution.
+     */
+    void add(DistBase &d) { data()->add(d.data()); }
+
 };
 
 template <class Stat>
@@ -2007,7 +2050,7 @@ class DistProxy
  * Base class for formula statistic node. These nodes are used to build a tree
  * that represents the formula.
  */
-class Node : public RefCounted
+class Node
 {
   public:
     /**
@@ -2032,8 +2075,8 @@ class Node : public RefCounted
     virtual std::string str() const = 0;
 };
 
-/** Reference counting pointer to a function Node. */
-typedef RefCountingPtr<Node> NodePtr;
+/** Shared pointer to a function Node. */
+typedef std::shared_ptr<Node> NodePtr;
 
 class ScalarStatNode : public Node
 {
@@ -2128,7 +2171,7 @@ class ConstNode : public Node
     const VResult &result() const { return vresult; }
     Result total() const { return vresult[0]; };
     size_type size() const { return 1; }
-    std::string str() const { return to_string(vresult[0]); }
+    std::string str() const { return std::to_string(vresult[0]); }
 };
 
 template <class T>
@@ -2158,7 +2201,7 @@ class ConstVectorNode : public Node
         size_type size = this->size();
         std::string tmp = "(";
         for (off_type i = 0; i < size; i++)
-            tmp += csprintf("%s ",to_string(vresult[i]));
+            tmp += csprintf("%s ", std::to_string(vresult[i]));
         tmp += ")";
         return tmp;
     }
@@ -2946,13 +2989,20 @@ class Temp
      * Copy the given pointer to this class.
      * @param n A pointer to a Node object to copy.
      */
-    Temp(NodePtr n) : node(n) { }
+    Temp(const NodePtr &n) : node(n) { }
+
+    Temp(NodePtr &&n) : node(std::move(n)) { }
 
     /**
      * Return the node pointer.
      * @return the node pointer.
      */
     operator NodePtr&() { return node; }
+
+    /**
+     * Makde gcc < 4.6.3 happy and explicitly get the underlying node.
+     */
+    NodePtr getNodePtr() const { return node; }
 
   public:
     /**
@@ -3112,51 +3162,51 @@ class Temp
 inline Temp
 operator+(Temp l, Temp r)
 {
-    return NodePtr(new BinaryNode<std::plus<Result> >(l, r));
+    return Temp(std::make_shared<BinaryNode<std::plus<Result> > >(l, r));
 }
 
 inline Temp
 operator-(Temp l, Temp r)
 {
-    return NodePtr(new BinaryNode<std::minus<Result> >(l, r));
+    return Temp(std::make_shared<BinaryNode<std::minus<Result> > >(l, r));
 }
 
 inline Temp
 operator*(Temp l, Temp r)
 {
-    return NodePtr(new BinaryNode<std::multiplies<Result> >(l, r));
+    return Temp(std::make_shared<BinaryNode<std::multiplies<Result> > >(l, r));
 }
 
 inline Temp
 operator/(Temp l, Temp r)
 {
-    return NodePtr(new BinaryNode<std::divides<Result> >(l, r));
+    return Temp(std::make_shared<BinaryNode<std::divides<Result> > >(l, r));
 }
 
 inline Temp
 operator-(Temp l)
 {
-    return NodePtr(new UnaryNode<std::negate<Result> >(l));
+    return Temp(std::make_shared<UnaryNode<std::negate<Result> > >(l));
 }
 
 template <typename T>
 inline Temp
 constant(T val)
 {
-    return NodePtr(new ConstNode<T>(val));
+    return Temp(std::make_shared<ConstNode<T> >(val));
 }
 
 template <typename T>
 inline Temp
 constantVector(T val)
 {
-    return NodePtr(new ConstVectorNode<T>(val));
+    return Temp(std::make_shared<ConstVectorNode<T> >(val));
 }
 
 inline Temp
 sum(Temp val)
 {
-    return NodePtr(new SumNode<std::plus<Result> >(val));
+    return Temp(std::make_shared<SumNode<std::plus<Result> > >(val));
 }
 
 /** Dump all statistics data to the registered outputs */
@@ -3164,6 +3214,15 @@ void dump();
 void reset();
 void enable();
 bool enabled();
+
+/**
+ * Register reset and dump handlers.  These are the functions which
+ * will actually perform the whole statistics reset/dump actions
+ * including processing the reset/dump callbacks
+ */
+typedef void (*Handler)();
+
+void registerHandlers(Handler reset_handler, Handler dump_handler);
 
 /**
  * Register a callback that should be called whenever statistics are
@@ -3176,6 +3235,16 @@ void registerResetCallback(Callback *cb);
  * about to be dumped
  */
 void registerDumpCallback(Callback *cb);
+
+/**
+ * Process all the callbacks in the reset callbacks queue
+ */
+void processResetQueue();
+
+/**
+ * Process all the callbacks in the dump callbacks queue
+ */
+void processDumpQueue();
 
 std::list<Info *> &statsList();
 

@@ -36,10 +36,9 @@ nb_cores = 8
 cpus = [ MemTest() for i in xrange(nb_cores) ]
 
 # system simulated
-system = System(cpu = cpus, funcmem = SimpleMemory(in_addr_map = False),
-                funcbus = NoncoherentBus(),
+system = System(cpu = cpus,
                 physmem = SimpleMemory(),
-                membus = CoherentBus(width=16))
+                membus = SystemXBar())
 # Dummy voltage domain for all our clock domains
 system.voltage_domain = VoltageDomain()
 system.clk_domain = SrcClockDomain(clock = '1GHz',
@@ -50,7 +49,7 @@ system.clk_domain = SrcClockDomain(clock = '1GHz',
 system.cpu_clk_domain = SrcClockDomain(clock = '2GHz',
                                        voltage_domain = system.voltage_domain)
 
-system.toL2Bus = CoherentBus(clk_domain = system.cpu_clk_domain, width=16)
+system.toL2Bus = L2XBar(clk_domain = system.cpu_clk_domain)
 system.l2c = L2Cache(clk_domain = system.cpu_clk_domain, size='64kB', assoc=8)
 system.l2c.cpu_side = system.toL2Bus.master
 
@@ -62,14 +61,10 @@ for cpu in cpus:
     # All cpus are associated with cpu_clk_domain
     cpu.clk_domain = system.cpu_clk_domain
     cpu.l1c = L1Cache(size = '32kB', assoc = 4)
-    cpu.l1c.cpu_side = cpu.test
+    cpu.l1c.cpu_side = cpu.port
     cpu.l1c.mem_side = system.toL2Bus.slave
-    system.funcbus.slave = cpu.functional
 
 system.system_port = system.membus.slave
-
-# connect reference memory to funcbus
-system.funcmem.port = system.funcbus.master
 
 # connect memory to membus
 system.physmem.port = system.membus.master
@@ -81,6 +76,4 @@ system.physmem.port = system.membus.master
 
 root = Root( full_system = False, system = system )
 root.system.mem_mode = 'timing'
-#root.trace.flags="Cache CachePort MemoryAccess"
-#root.trace.cycle=1
 

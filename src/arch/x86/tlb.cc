@@ -38,6 +38,7 @@
  */
 
 #include <cstring>
+#include <memory>
 
 #include "arch/generic/mmapped_ipr.hh"
 #include "arch/x86/insts/microldstop.hh"
@@ -186,7 +187,7 @@ TLB::translateInt(RequestPtr req, ThreadContext *tc)
 
         MiscRegIndex regNum;
         if (!msrAddrToIndex(regNum, vaddr))
-            return new GeneralProtection(0);
+            return std::make_shared<GeneralProtection>(0);
 
         //The index is multiplied by the size of a MiscReg so that
         //any memory dependence calculations will not see these as
@@ -205,7 +206,7 @@ TLB::translateInt(RequestPtr req, ThreadContext *tc)
             req->setFlags(Request::MMAPPED_IPR);
             req->setPaddr(MISCREG_PCI_CONFIG_ADDRESS * sizeof(MiscReg));
         } else if ((IOPort & ~mask(2)) == 0xCFC) {
-            req->setFlags(Request::UNCACHEABLE);
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
             Addr configAddress =
                 tc->readMiscRegNoEffect(MISCREG_PCI_CONFIG_ADDRESS);
             if (bits(configAddress, 31, 31)) {
@@ -216,7 +217,7 @@ TLB::translateInt(RequestPtr req, ThreadContext *tc)
                 req->setPaddr(PhysAddrPrefixIO | IOPort);
             }
         } else {
-            req->setFlags(Request::UNCACHEABLE);
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
             req->setPaddr(PhysAddrPrefixIO | IOPort);
         }
         return NoFault;
@@ -231,14 +232,21 @@ TLB::finalizePhysical(RequestPtr req, ThreadContext *tc, Mode mode) const
 {
     Addr paddr = req->getPaddr();
 
-    // Check for an access to the local APIC
-    if (FullSystem) {
+    AddrRange m5opRange(0xFFFF0000, 0xFFFFFFFF);
+
+    if (m5opRange.contains(paddr)) {
+        if (m5opRange.contains(paddr)) {
+            req->setFlags(Request::MMAPPED_IPR | Request::GENERIC_IPR);
+            req->setPaddr(GenericISA::iprAddressPseudoInst(
+                            (paddr >> 8) & 0xFF,
+                            paddr & 0xFF));
+        }
+    } else if (FullSystem) {
+        // Check for an access to the local APIC
         LocalApicBase localApicBase =
             tc->readMiscRegNoEffect(MISCREG_APIC_BASE);
         AddrRange apicRange(localApicBase.base * PageBytes,
                             (localApicBase.base + 1) * PageBytes - 1);
-
-        AddrRange m5opRange(0xFFFF0000, 0xFFFFFFFF);
 
         if (apicRange.contains(paddr)) {
             // The Intel developer's manuals say the below restrictions apply,
@@ -253,14 +261,9 @@ TLB::finalizePhysical(RequestPtr req, ThreadContext *tc, Mode mode) const
                 return new GeneralProtection(0);
             */
             // Force the access to be uncacheable.
-            req->setFlags(Request::UNCACHEABLE);
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
             req->setPaddr(x86LocalAPICAddress(tc->contextId(),
                                               paddr - apicRange.start()));
-        } else if (m5opRange.contains(paddr)) {
-            req->setFlags(Request::MMAPPED_IPR | Request::GENERIC_IPR);
-            req->setPaddr(GenericISA::iprAddressPseudoInst(
-                              (paddr >> 8) & 0xFF,
-                              paddr & 0xFF));
         }
     }
 
@@ -298,14 +301,14 @@ TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
             if (!(seg == SEGMENT_REG_TSG || seg == SYS_SEGMENT_REG_IDTR ||
                         seg == SEGMENT_REG_HS || seg == SEGMENT_REG_LS)
                     && !tc->readMiscRegNoEffect(MISCREG_SEG_SEL(seg)))
-                return new GeneralProtection(0);
+                return std::make_shared<GeneralProtection>(0);
             bool expandDown = false;
             SegAttr attr = tc->readMiscRegNoEffect(MISCREG_SEG_ATTR(seg));
             if (seg >= SEGMENT_REG_ES && seg <= SEGMENT_REG_HS) {
                 if (!attr.writable && (mode == Write || storeCheck))
-                    return new GeneralProtection(0);
+                    return std::make_shared<GeneralProtection>(0);
                 if (!attr.readable && mode == Read)
-                    return new GeneralProtection(0);
+                    return std::make_shared<GeneralProtection>(0);
                 expandDown = attr.expandDown;
 
             }
@@ -321,10 +324,10 @@ TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
                 DPRINTF(TLB, "Checking an expand down segment.\n");
                 warn_once("Expand down segments are untested.\n");
                 if (offset <= limit || endOffset <= limit)
-                    return new GeneralProtection(0);
+                    return std::make_shared<GeneralProtection>(0);
             } else {
                 if (offset > limit || endOffset > limit)
-                    return new GeneralProtection(0);
+                    return std::make_shared<GeneralProtection>(0);
             }
         }
         if (m5Reg.submode != SixtyFourBitMode ||
@@ -361,7 +364,8 @@ TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
                         }
                     }
                     if (!success) {
-                        return new PageFault(vaddr, true, mode, true, false);
+                        return std::make_shared<PageFault>(vaddr, true, mode,
+                                                           true, false);
                     } else {
                         Addr alignedVaddr = p->pTable->pageAlign(vaddr);
                         DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
@@ -383,19 +387,21 @@ TLB::translate(RequestPtr req, ThreadContext *tc, Translation *translation,
                 // The page must have been present to get into the TLB in
                 // the first place. We'll assume the reserved bits are
                 // fine even though we're not checking them.
-                return new PageFault(vaddr, true, mode, inUser, false);
+                return std::make_shared<PageFault>(vaddr, true, mode, inUser,
+                                                   false);
             }
             if (storeCheck && badWrite) {
                 // This would fault if this were a write, so return a page
                 // fault that reflects that happening.
-                return new PageFault(vaddr, true, Write, inUser, false);
+                return std::make_shared<PageFault>(vaddr, true, Write, inUser,
+                                                   false);
             }
 
             Addr paddr = entry->paddr | (vaddr & mask(entry->logBytes));
             DPRINTF(TLB, "Translated %#x -> %#x.\n", vaddr, paddr);
             req->setPaddr(paddr);
             if (entry->uncacheable)
-                req->setFlags(Request::UNCACHEABLE);
+                req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
         } else {
             //Use the address which already has segmentation applied.
             DPRINTF(TLB, "Paging disabled.\n");

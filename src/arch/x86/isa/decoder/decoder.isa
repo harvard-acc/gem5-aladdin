@@ -43,16 +43,12 @@
 decode LEGACY_LOCK default Unknown::unknown()
 {
     //No lock prefix
-    0x0: decode OPCODE_NUM default Unknown::unknown()
+    0x0: decode OPCODE_TYPE default Unknown::unknown()
     {
-        0x0: M5InternalError::error(
-            {{"Saw an ExtMachInst with zero opcode bytes!"}});
-        //1 byte opcodes
         ##include "one_byte_opcodes.isa"
-        //2 byte opcodes
         ##include "two_byte_opcodes.isa"
-        //3 byte opcodes
-        ##include "three_byte_opcodes.isa"
+        ##include "three_byte_0f38_opcodes.isa"
+        ##include "three_byte_0f3a_opcodes.isa"
     }
     //Lock prefix
     ##include "locked_opcodes.isa"

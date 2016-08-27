@@ -121,13 +121,15 @@ class ThreadContext
 
     virtual BaseCPU *getCpuPtr() = 0;
 
-    virtual int cpuId() = 0;
+    virtual int cpuId() const = 0;
 
-    virtual int threadId() = 0;
+    virtual uint32_t socketId() const = 0;
+
+    virtual int threadId() const = 0;
 
     virtual void setThreadId(int id) = 0;
 
-    virtual int contextId() = 0;
+    virtual int contextId() const = 0;
 
     virtual void setContextId(int id) = 0;
 
@@ -163,15 +165,14 @@ class ThreadContext
 
     virtual void setStatus(Status new_status) = 0;
 
-    /// Set the status to Active.  Optional delay indicates number of
-    /// cycles to wait before beginning execution.
-    virtual void activate(Cycles delay = Cycles(1)) = 0;
+    /// Set the status to Active.
+    virtual void activate() = 0;
 
     /// Set the status to Suspended.
-    virtual void suspend(Cycles delay = Cycles(0)) = 0;
+    virtual void suspend() = 0;
 
     /// Set the status to Halted.
-    virtual void halt(Cycles delay = Cycles(0)) = 0;
+    virtual void halt() = 0;
 
     virtual void dumpFuncProfile() = 0;
 
@@ -224,7 +225,7 @@ class ThreadContext
 
     virtual MicroPC microPC() = 0;
 
-    virtual MiscReg readMiscRegNoEffect(int misc_reg) = 0;
+    virtual MiscReg readMiscRegNoEffect(int misc_reg) const = 0;
 
     virtual MiscReg readMiscReg(int misc_reg) = 0;
 
@@ -235,6 +236,7 @@ class ThreadContext
     virtual int flattenIntIndex(int reg) = 0;
     virtual int flattenFloatIndex(int reg) = 0;
     virtual int flattenCCIndex(int reg) = 0;
+    virtual int flattenMiscIndex(int reg) = 0;
 
     virtual uint64_t
     readRegOtherThread(int misc_reg, ThreadID tid)
@@ -252,9 +254,6 @@ class ThreadContext
     virtual unsigned readStCondFailures() = 0;
 
     virtual void setStCondFailures(unsigned sc_failures) = 0;
-
-    // Only really makes sense for old CPU model.  Still could be useful though.
-    virtual bool misspeculating() = 0;
 
     // Same with st cond failures.
     virtual Counter readFuncExeInst() = 0;
@@ -320,13 +319,15 @@ class ProxyThreadContext : public ThreadContext
 
     BaseCPU *getCpuPtr() { return actualTC->getCpuPtr(); }
 
-    int cpuId() { return actualTC->cpuId(); }
+    int cpuId() const { return actualTC->cpuId(); }
 
-    int threadId() { return actualTC->threadId(); }
+    uint32_t socketId() const { return actualTC->socketId(); }
 
-    void setThreadId(int id) { return actualTC->setThreadId(id); }
+    int threadId() const { return actualTC->threadId(); }
 
-    int contextId() { return actualTC->contextId(); }
+    void setThreadId(int id) { actualTC->setThreadId(id); }
+
+    int contextId() const { return actualTC->contextId(); }
 
     void setContextId(int id) { actualTC->setContextId(id); }
 
@@ -357,16 +358,14 @@ class ProxyThreadContext : public ThreadContext
 
     void setStatus(Status new_status) { actualTC->setStatus(new_status); }
 
-    /// Set the status to Active.  Optional delay indicates number of
-    /// cycles to wait before beginning execution.
-    void activate(Cycles delay = Cycles(1))
-    { actualTC->activate(delay); }
+    /// Set the status to Active.
+    void activate() { actualTC->activate(); }
 
     /// Set the status to Suspended.
-    void suspend(Cycles delay = Cycles(0)) { actualTC->suspend(); }
+    void suspend() { actualTC->suspend(); }
 
     /// Set the status to Halted.
-    void halt(Cycles delay = Cycles(0)) { actualTC->halt(); }
+    void halt() { actualTC->halt(); }
 
     void dumpFuncProfile() { actualTC->dumpFuncProfile(); }
 
@@ -430,7 +429,7 @@ class ProxyThreadContext : public ThreadContext
     void setPredicate(bool val)
     { actualTC->setPredicate(val); }
 
-    MiscReg readMiscRegNoEffect(int misc_reg)
+    MiscReg readMiscRegNoEffect(int misc_reg) const
     { return actualTC->readMiscRegNoEffect(misc_reg); }
 
     MiscReg readMiscReg(int misc_reg)
@@ -451,14 +450,14 @@ class ProxyThreadContext : public ThreadContext
     int flattenCCIndex(int reg)
     { return actualTC->flattenCCIndex(reg); }
 
+    int flattenMiscIndex(int reg)
+    { return actualTC->flattenMiscIndex(reg); }
+
     unsigned readStCondFailures()
     { return actualTC->readStCondFailures(); }
 
     void setStCondFailures(unsigned sc_failures)
     { actualTC->setStCondFailures(sc_failures); }
-
-    // @todo: Fix this!
-    bool misspeculating() { return actualTC->misspeculating(); }
 
     void syscall(int64_t callnum)
     { actualTC->syscall(callnum); }

@@ -43,6 +43,7 @@
 #include <map>
 #include <vector>
 
+#include "base/bitunion.hh"
 #include "base/types.hh"
 
 class IniFile;
@@ -58,18 +59,41 @@ class EventQueue;
  * SimObject shouldn't cause the version number to increase, only changes to
  * existing objects such as serializing/unserializing more state, changing sizes
  * of serialized arrays, etc. */
-static const uint64_t gem5CheckpointVersion = 0x0000000000000008;
+static const uint64_t gem5CheckpointVersion = 0x000000000000000e;
 
 template <class T>
 void paramOut(std::ostream &os, const std::string &name, const T &param);
+
+template <typename DataType, typename BitUnion>
+void paramOut(std::ostream &os, const std::string &name,
+              const BitfieldBackend::BitUnionOperators<DataType, BitUnion> &p)
+{
+    paramOut(os, name, p.__data);
+}
 
 template <class T>
 void paramIn(Checkpoint *cp, const std::string &section,
              const std::string &name, T &param);
 
+template <typename DataType, typename BitUnion>
+void paramIn(Checkpoint *cp, const std::string &section,
+             const std::string &name,
+             BitfieldBackend::BitUnionOperators<DataType, BitUnion> &p)
+{
+    paramIn(cp, section, name, p.__data);
+}
+
 template <class T>
 bool optParamIn(Checkpoint *cp, const std::string &section,
              const std::string &name, T &param);
+
+template <typename DataType, typename BitUnion>
+bool optParamIn(Checkpoint *cp, const std::string &section,
+                const std::string &name,
+                BitfieldBackend::BitUnionOperators<DataType, BitUnion> &p)
+{
+    return optParamIn(cp, section, name, p.__data);
+}
 
 template <class T>
 void arrayParamOut(std::ostream &os, const std::string &name,
@@ -255,14 +279,28 @@ class SerializableClass
 SerializableClass the##OBJ_CLASS##Class(CLASS_NAME,                        \
                                          OBJ_CLASS::createForUnserialize);
 
+// Base class to wrap object resolving functionality.  This can be
+// provided to Checkpoint to allow it to map object names onto
+// object C++ objects in which to unserialize
+class SimObjectResolver
+{
+  public:
+    virtual ~SimObjectResolver() { }
+
+    // Find a SimObject given a full path name
+    virtual SimObject *resolveSimObject(const std::string &name) = 0;
+};
+
 class Checkpoint
 {
   private:
 
     IniFile *db;
 
+    SimObjectResolver &objNameResolver;
+
   public:
-    Checkpoint(const std::string &cpt_dir);
+    Checkpoint(const std::string &cpt_dir, SimObjectResolver &resolver);
     ~Checkpoint();
 
     const std::string cptDir;
