@@ -54,7 +54,7 @@ class SweepParam(namedtuple(
 
 # A loop inside a benchmark. It is given a name and a line number in which it
 # appears in the source file.
-Loop = namedtuple("Loop", "name, line_num, trip_count")
+Loop = namedtuple("Loop", "name, label, trip_count")
 
 # An array inside a benchmark.
 #   Use the array's name and size in the appropriate fields.
@@ -97,14 +97,14 @@ class Benchmark(object):
     # useful for composability studies.
     self.separate_kernels = False
 
-  def add_loop(self, loop_name, line_num, trip_count=ALWAYS_UNROLL):
-    """ Add a loop, its line number, and its trip count to the benchmark.
+  def add_loop(self, loop_name, label, trip_count=ALWAYS_UNROLL):
+    """ Add a loop, its label, and its trip count to the benchmark.
 
     If the loop is not tagged, the loop_name should be the name of the kernel
     function to which it belongs.
     """
     self.loops.append(Loop(name=loop_name,
-                           line_num=line_num,
+                           label=label,
                            trip_count=trip_count))
 
   def add_array(self, name, size, word_size, partition_type=PARTITION_CYCLIC,
