@@ -66,7 +66,7 @@ Array = namedtuple(
 
 class Benchmark(object):
   """ A benchmark description object. """
-  def __init__(self, name, source_file, harness_file=""):
+  def __init__(self, name, source_file):
     """ Construct a benchmark description object.
 
     Args:
@@ -86,10 +86,6 @@ class Benchmark(object):
     self.exec_cmd = ""
     # If being run as a binary under gem5, use these arguments to execute the binary.
     self.run_args = ""
-    # Test harness, if applicable. If used, test_harness is assumed to contain
-    # main(); otherwise, source_file is used, and test_harness MUST be the empty
-    # string "".
-    self.test_harness = harness_file
     # For more sophisticated benchmark suites, use a Makefile located in the
     # directory of the source file to generate the traces.
     self.makefile = False
