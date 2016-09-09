@@ -669,7 +669,7 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
   if simulator.startswith("gem5"):
     run_cmd = ("%(gem5_home)s/build/X86/gem5.opt "
                #"--stats-db-file=stats.db "
-               "--outdir=%(output_path)s/%(outdir)s "
+               "--outdir=%(output_path)s "
                "%(gem5_home)s/configs/aladdin/aladdin_se.py "
                "--num-cpus=%(num_cpus)s "
                "--mem-size=4GB "
@@ -703,12 +703,9 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
   perfect_bus_flag = "--is_perfect_bus=1 " if perfect_bus  else ""
   if enable_l2:
     file_name = "run_L2.sh"
-    outdir = "with_L2"
   elif perfect_l1:
     file_name = "run_perfect_l1.sh"
-    outdir = "perfect_l1"
   else:
-    outdir = "no_L2"
     file_name = "run.sh"
   for benchmark in workload:
     print "------------------------------------"
@@ -734,7 +731,6 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
         cmd = run_cmd % {"gem5_home": gem5_home,
                          "output_path": abs_output_path,
                          "aladdin_cfg_path": abs_cfg_path,
-                         "outdir": outdir,
                          "num_cpus": num_cpus,
                          "l2cache_flag": l2cache_flag,
                          "mem_flag": mem_flag,
@@ -957,10 +953,7 @@ def main():
   parser.add_argument("--username", help="Username for the Condor scripts. If "
       "this is not provided, Python will try to figure it out.")
   parser.add_argument("--enable_l2", action="store_true", help="Enable the L2 "
-      "cache during simulations if applicable. This will cause the simulation "
-      "output to be dumped to a directory called outputs/with_L2. Without this "
-      "flag, GEM5 output is stored to outputs/no_L2. If generating Condor "
-      "scripts, this flag will run L2-enabled simulations.")
+      "cache during simulations if applicable.")
   parser.add_argument("--perfect_l1", action="store_true", help="Enable the "
       "perfect l1 cache during simulations if applicable. This will cause the "
       "simulation output to be dumped to a directory called outputs/perfect_l1."
