@@ -4,7 +4,9 @@ import ConfigParser
 import getpass
 import math
 import os
+import shutil
 import sys
+import subprocess
 
 from benchmark_configs import benchmarks
 
@@ -60,6 +62,8 @@ L2CACHE_DEFAULTS = {
   "cache_hit_latency": 6,
   "cache_line_sz": 64
 }
+
+DYNAMIC_TRACE = "dynamic_trace.gz"
 
 def generate_smart_config_name(set_params):
   """ Generate a config name that only contains parameters which were swept.
@@ -393,7 +397,7 @@ def generate_gem5_config(benchmark, kernel, params, write_new=True):
     os.makedirs(output_dir)
 
   trace_file = (
-      "%s_dynamic_trace.gz" % kernel if benchmark.separate_kernels else "dynamic_trace.gz")
+      "%s_dynamic_trace.gz" % kernel if benchmark.separate_kernels else DYNAMIC_TRACE)
 
   for key in GEM5_DEFAULTS.iterkeys():
     if key in params:
@@ -774,150 +778,63 @@ def run_sweeps(workload, simulator, output_dir, source_dir, dry_run, enable_l2,
         os.system(cmd)
   os.chdir(cwd)
 
-def handle_local_makefile(benchmark, output_dir, source_dir):
-  """ Invoke a benchmark-local Makefile for instrumentation.
-
-  There are five requirements:
-
-    1. Define the environment variable WORKLOAD to specify the kernels being
-       traced.
-    2. Define the environment variable ACCEL_NAME to specify the name of the
-       benchmark. This determines into which subfolder the trace is ultimately
-       placed.
-    3. The Makefile must have a target called "autotrace" which will compile the
-       traces and copy them to TARGET_DIR. It should fail if TARGET_DIR is not
-       defined. Depending on the Makefile, the complete dynamic trace may or may
-       not be automatically split up into smaller traces for each function or
-       loop iteration.
-    4. If the generated trace needs to be divided into separate traces, set the
-       environment variable SPLIT_TRACE to 1. In separated trace mode, the names
-       of the divided traces must be of the format <kernel>_trace. If the
-       benchmark or kernel is being simulated on its own, then the trace file
-       should be named "dynamic_trace".
-  """
-  # Set the appropriate environment variable and run the Makefile.
-  cwd = os.getcwd()
-  source_file_loc = "%s/%s" % (source_dir, benchmark.source_file)
-  print "Source: %s" % source_file_loc
-  # If traces are being placed, then put them into separate kernel directories.
-  # Otherwise, put the trace under the benchmark.name directory.
-  trace_subdir = benchmark.name
-  trace_abs_dir = os.path.abspath("%s/%s/inputs" % (output_dir, trace_subdir))
-  print "trace directory : %s" % trace_abs_dir
-  if not os.path.isdir(trace_abs_dir):
-    os.makedirs(trace_abs_dir)
-  print "trace abs directory : %s" % trace_abs_dir
-  print ",".join(benchmark.kernels)
-  os.environ["TARGET_DIR"] = trace_abs_dir
-  os.environ["ACCEL_NAME"] = benchmark.name
-  os.environ["WORKLOAD"] = ",".join(benchmark.kernels)
-  if benchmark.separate_kernels:
-    os.environ["SPLIT_TRACE"] = "1"
-  elif "SPLIT_TRACE" in os.environ:
-    del os.environ["SPLIT_TRACE"]
-  os.chdir(os.path.dirname(source_file_loc))
-  os.system("make autotrace")
-  os.chdir(cwd)
-  return
-
 def generate_traces(workload, output_dir, source_dir, memory_type, simulator):
   """ Generates dynamic traces for each workload.
 
-  If the workloads do not have local Makefiles and were not configured as such,
-  then the traces are placed into <output_dir>/<benchmark>/inputs. This
-  compilation procedure is very simple and assumes that all the relevant code is
-  contained inside a single source file, with the exception that a separate test
-  harness can be specified through the Benchmark description objects.
+  This is accomplished by invoking the benchmark suite's own Makefiles.  The
+  Makefiles must implement the following build targets:
 
-  If the workloads do have local Makefiles and were configured as such in the
-  benchmark config script, then that local Makefile is invoked. See
-  handle_local_makefile() for more details.
-
-  Args:
-    workload: A list of Benchmark description objects.
-    output_dir: The primary configuration output directory.
-    source_dir: The top-level directory of the benchmark suite.
+    1. clean-trace: Deletes any existing traces, object files, LLVM IR, and any
+       other intermediate files associated with building the instrumented binary.
+    2. trace-binary: Build the instrumented binary.
+    3. dma-trace-binary: Same as above, but with -DDMA_MODE in CFLAGS.
+    4. run-trace: Execute the instrumented binary to produce the trace
+       (dynamic_trace.gz).
   """
   if not "TRACER_HOME" in os.environ:
     raise Exception("Set TRACER_HOME directory as an environment variable")
+  fdevnull = open(os.devnull, "w")
   cwd = os.getcwd()
-  trace_dir = "inputs"
   for benchmark in workload:
-    if benchmark.makefile:
-      handle_local_makefile(benchmark, output_dir, source_dir)
-    else:
-      if not memory_type:
-        sys.exit("For SHOC and MachSuite, you need to specify the memory type.")
-      if not simulator:
-        sys.exit("For SHOC and MachSuite, you need to specify the simulator.")
-      trace_output_dir = "%s/%s/%s/%s" % (
-          cwd, output_dir, benchmark.name, trace_dir)
-      if not os.path.exists(trace_output_dir):
-        os.makedirs(trace_output_dir)
-      print benchmark.name
-      os.chdir(trace_output_dir)
-      if workload == benchmarks["SHOC"]:
-        source_file_prefix = "%s/%s/%s" % (source_dir, benchmark.name, benchmark.source_file)
-      elif workload == benchmarks["MACHSUITE"]:
-        source_file_prefix = "%s/%s/%s/%s" % (source_dir, \
-          benchmark.name.split('-')[0], benchmark.name.split('-')[1], benchmark.source_file)
-      output_file_prefix = ("%s/%s/%s/inputs/%s" %
-                            (cwd, output_dir, benchmark.name, benchmark.source_file))
-      source_file = source_file_prefix + ".c"
-      obj = output_file_prefix + ".llvm"
-      opt_obj = output_file_prefix + "-opt.llvm"
-      test_file = "%s/%s" % ( source_dir, benchmark.test_harness)
-      test_obj = output_file_prefix + "_test.llvm"
-      full_llvm = output_file_prefix + "_full.llvm"
-      full_s = output_file_prefix + "_full.s"
-      executable = output_file_prefix + "-instrumented"
-      os.environ["WORKLOAD"]=",".join(benchmark.kernels)
-      all_objs = [opt_obj]
+    print "Building traces for", benchmark.name
+    bmk_source_dir = os.path.join(source_dir, benchmark.source_file);
+    trace_orig_path = os.path.join(bmk_source_dir, DYNAMIC_TRACE)
+    os.chdir(bmk_source_dir)
+    trace_target = "trace-binary" if not memory_type & DMA else "dma-trace-binary"
 
-      defines = " "
-      if (memory_type & DMA or (memory_type & SPAD and
-          (simulator == "gem5-cpu" or simulator == "gem5-cache"))):
-        defines += "-DDMA_MODE "
-        dma_file = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.c"
-        dma_obj = os.getenv("ALADDIN_HOME") + "/gem5/dma_interface.llvm"
-        os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-                  "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
-                  "-o " + dma_obj + " " + dma_file)
-        all_objs.insert(0, dma_obj)
-      # Compile the source file.
-      os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-                "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
-                "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
-                "-o " + obj + " " + source_file)
-      # Compile the test harness if applicable.
-      if benchmark.test_harness:
-        all_objs.append(test_obj)
-        os.system("clang -g -O1 -S -fno-slp-vectorize -fno-vectorize "
-                  "-I" + os.environ["ALADDIN_HOME"] + " " + defines +
-                  "-fno-unroll-loops -fno-inline -fno-builtin -emit-llvm " +
-                  "-o " + test_obj + " " + test_file)
+    # Clean, rebuild the instrumented binary, and regenerate the trace.
+    ret = subprocess.call("make clean-trace",
+                          stdout=fdevnull, stderr=subprocess.STDOUT, shell=True)
+    if ret:
+      print "[ERROR] Failed to clean the existing trace."
+      continue
+    ret = subprocess.call("make %s" % trace_target,
+                          stdout=fdevnull, stderr=subprocess.STDOUT, shell=True)
+    if ret:
+      print "[ERROR] Failed to build the instrumented binary. Skipping trace generation."
+      continue
+    ret = subprocess.call("make run-trace",
+                          stdout=fdevnull, stderr=subprocess.STDOUT, shell=True)
+    if ret:
+      print "[ERROR] Failed to execute the instrumented binary and generate the trace."
+      continue
 
-      # Finish compilation, linking, and then execute the instrumented code to
-      # get the dynamic trace.
-      os.system("opt -S -load=" + os.getenv("TRACER_HOME") +
-                "/full-trace/full_trace.so -fulltrace " + obj + " -o " + opt_obj)
-      os.system("llvm-link -o " + full_llvm + " " + " ".join(all_objs) + " " +
-                os.getenv("TRACER_HOME") + "/profile-func/trace_logger.llvm")
-      os.system("llc -O0 -disable-fp-elim -filetype=asm -o " + full_s + " " + full_llvm)
-      os.system("gcc -O0 -fno-inline -o " + executable + " " + full_s + " -lm -lz")
-      # Change directory so that the dynamic_trace file gets put in the right
-      # place.
-      os.chdir("%s/%s/%s/inputs" % (cwd, output_dir, benchmark.name))
-      if workload == benchmarks["SHOC"]:
-        os.system(executable)
-      elif workload == benchmarks["MACHSUITE"]:
-        print (executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
-         (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
-         source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
-        os.system(executable + " %s/%s/%s/input.data %s/%s/%s/check.data" % \
-         (source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1],\
-         source_dir, benchmark.name.split('-')[0], benchmark.name.split('-')[1]))
-      os.chdir(cwd)
+    # Move them to the right place.
+    trace_abs_dir = os.path.abspath(os.path.join(cwd, output_dir, benchmark.name, "inputs"))
+    if not os.path.isdir(trace_abs_dir):
+      os.makedirs(trace_abs_dir)
+    # Moves and overwrites a trace at the destination if it already exists.
+    os.rename(trace_orig_path, os.path.join(trace_abs_dir, DYNAMIC_TRACE))
+
+    # Cleanup.
+    ret = subprocess.call("make clean-trace",
+                          stdout=fdevnull, stderr=subprocess.STDOUT, shell=True)
+    if ret:
+      print "[ERROR] Failed to clean up after building and generating traces."
+
+  fdevnull.close()
+  os.chdir(cwd)
+  return
 
 def generate_condor_scripts(workload, simulator, output_dir, source_dir,
                             username, enable_l2, perfect_l1, perfect_bus, experiment_name):
