@@ -229,15 +229,8 @@ if options.aladdin_cfg_file:
       datapath.tlbPageBytes = config.getint(accel, "tlb_page_size")
       datapath.numOutStandingWalks = config.getint(
           accel, "tlb_max_outstanding_walks")
-      datapath.loadQueueSize = config.getint(accel, "load_queue_size")
-      datapath.loadBandwidth = config.getint(accel, "load_bandwidth")
-      datapath.loadQueueCacheConfig = config.get(accel, "cacti_lq_config")
-      datapath.storeQueueSize = config.getint(accel, "store_queue_size")
-      datapath.storeBandwidth = config.getint(accel, "store_bandwidth")
-      datapath.storeQueueCacheConfig = config.get(accel, "cacti_sq_config")
       datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
     if memory_type == "spad" or memory_type == "dma" or memory_type == "hybrid":
-      datapath.spadPorts = config.getint(accel, "spad_ports")
       datapath.dmaSetupLatency = config.getint(accel, "dma_setup_latency")
       datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
       datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
