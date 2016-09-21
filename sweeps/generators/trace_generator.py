@@ -35,7 +35,10 @@ class TraceGenerator(object):
       bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir);
       trace_orig_path = os.path.join(bmk_source_dir, DYNAMIC_TRACE)
       os.chdir(bmk_source_dir)
-      trace_target = "trace-binary" if not self.sweep.memory_type & DMA else "dma-trace-binary"
+      if self.sweep.simulator == "aladdin":
+        trace_target = "trace-binary"
+      else:
+        trace_target = "dma-trace-binary"
 
       # Clean, rebuild the instrumented binary, and regenerate the trace.
       ret = subprocess.call("make clean-trace",

@@ -108,10 +108,20 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
 
   def printArray(self, obj):
     """ Print array partitioning parameters. """
+    str_format = "%(memory_type)s,%(partition_type)s,%(name)s,%(size)d,%(word_length)d"
+    if obj["memory_type"] == params.SPAD:
+      if (obj["partition_type"] == params.CYCLIC or
+          obj["partition_type"] == params.BLOCK):
+        str_format += ",%(partition_factor)s"
+
+    # Make some adjustments to the values first.
     obj["size"] = obj["size"] * obj["word_length"]
-    self.output.write("partition,%(partition_type)s,%(name)s,%(size)d,%(word_length)d" % obj)
-    if obj["partition_type"] != "complete":
-      self.output.write(",%(partition_factor)s" % obj)
+    if obj["memory_type"] == params.SPAD:
+      obj["memory_type"] = params.PARTITION
+    else:
+      obj["memory_type"] = params.CACHE
+
+    self.output.write(str_format % obj)
     self.output.write("\n")
 
   def printLoop_(self, obj):
