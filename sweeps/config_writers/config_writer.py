@@ -17,11 +17,6 @@ class ConfigWriter(object):
     self.next_sweep_id_ = {}
 
   @abc.abstractmethod
-  def write(self, sweep):
-    """ Write configuration files for this sweep. """
-    pass
-
-  @abc.abstractmethod
   def is_applicable(self, sweep):
     """ Check if this config writer should produce output for this sweep. """
     pass
@@ -68,6 +63,8 @@ class ConfigWriter(object):
 
 class JsonConfigWriter(ConfigWriter):
   """ Specialization of ConfigWriter to handle JSON inputfiles. """
+  __metaclass__ = abc.ABCMeta
+
   def __init__(self):
     super(JsonConfigWriter, self).__init__()
 
@@ -107,4 +104,15 @@ class JsonConfigWriter(ConfigWriter):
         # sweep. Check and skip if so.
         continue
 
-      self.write(sweep_content)
+      self.writeSweep(sweep_content)
+    self.writeLast(sweeps)
+
+  @abc.abstractmethod
+  def writeSweep(self, sweep):
+    """ Called for each sweep. """
+    pass
+
+  @abc.abstractmethod
+  def writeLast(self, all_sweeps):
+    """ Called after going through all sweeps. """
+    pass

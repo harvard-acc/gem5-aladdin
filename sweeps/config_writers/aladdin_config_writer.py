@@ -32,17 +32,19 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
             simulator == "gem5-cache" or
             simulator == "gem5-cpu")
 
-  def write(self, sweep):
-    base_output_dir = sweep["output_dir"]
-    self.writeRecursive_(sweep)
+  def writeSweep(self, sweep):
+    self.writeSweepRecursive_(sweep)
 
-  def writeRecursive_(self, obj):
+  def writeLast(self, all_sweeps):
+    pass
+
+  def writeSweepRecursive_(self, obj):
     for name, child_obj in self.iterdicttypes(obj):
       identifier = self.get_identifier(name)
       assert(identifier)
       printer = self.getPrintMethod(identifier)
       printer(child_obj)
-      self.writeRecursive_(child_obj)
+      self.writeSweepRecursive_(child_obj)
 
       if identifier == self.topLevelType:
         # The top level object has to prepare the output directories
