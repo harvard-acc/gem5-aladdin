@@ -8,7 +8,7 @@ import config_writer
 
 ALADDIN_PATH = os.path.join(os.environ["ALADDIN_HOME"], "common", "aladdin")
 
-class AladdinConfigWriter(config_writer.ConfigWriter):
+class AladdinConfigWriter(config_writer.JsonConfigWriter):
   """ Writes JSON design sweep dumps as Aladdin config files. """
 
   def __init__(self):
