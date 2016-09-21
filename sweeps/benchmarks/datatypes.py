@@ -12,6 +12,27 @@ class Benchmark(Sweepable):
   sweepable_params = [
       params.cycle_time,
       params.pipelining,
+      params.cache_size,
+      params.cache_assoc,
+      params.cache_hit_latency,
+      params.cache_line_sz,
+      params.tlb_hit_latency,
+      params.tlb_miss_latency,
+      params.tlb_page_size,
+      params.tlb_entries,
+      params.tlb_max_outstanding_walks,
+      params.tlb_assoc,
+      params.tlb_bandwidth,
+      params.load_bandwidth,
+      params.store_bandwidth,
+      params.l2cache_size,
+      params.enable_l2,
+      params.perfect_l1,
+      params.perfect_bus,
+      params.pipelined_dma,
+      params.ready_mode,
+      params.dma_multi_channel,
+      params.ignore_cache_flush,
   ]
 
   def __init__(self, name, source_dir):
