@@ -179,7 +179,7 @@ def config_cache(options, system):
         else:
             system.cpu[i].connectAllPorts(system.membus)
 
-    if options.aladdin_cfg_file:
+    if options.accel_cfg_file:
       for datapath in system.datapaths:
         # For now, we will connect all datapaths to a cache regardless of
         # whether they are needed or not.

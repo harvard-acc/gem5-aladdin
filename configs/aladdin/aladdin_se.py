@@ -187,9 +187,9 @@ if np > 0:
   for cpu in system.cpu:
       cpu.clk_domain = system.cpu_clk_domain
 
-if options.aladdin_cfg_file:
+if options.accel_cfg_file:
   config = ConfigParser.SafeConfigParser()
-  config.read(options.aladdin_cfg_file)
+  config.read(options.accel_cfg_file)
   accels = config.sections()
   if not accels:
     fatal("No accelerators were specified!")

@@ -139,8 +139,8 @@ def addCommonOptions(parser):
     parser.add_option("--xbar_width", type="int", default=8)
 
     # Aladdin Options
-    parser.add_option("--aladdin_cfg_file", default=None,
-                      help="Aladdin simulation configuration file.")
+    parser.add_option("--accel_cfg_file", default=None,
+                      help="Aladdin accelerator configuration file.")
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 

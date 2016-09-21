@@ -232,8 +232,7 @@ class Gem5ConfigWriter(ConfigWriter):
           "--cacheline_size=32 ",
           perfect_l1_flag,
           perfect_bus_flag,
-          # TODO: Rename this to accel_cfg_file (BUG=ALADDIN-44).
-          "--aladdin_cfg_file=" + gem5_cfg_path,
+          "--accel_cfg_file=" + gem5_cfg_path,
           benchmark["exec_cmd"] + benchmark["run_args"],
           "> " + stdout_path,
           "2> " + stderr_path,
