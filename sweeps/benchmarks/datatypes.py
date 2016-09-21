@@ -3,11 +3,6 @@ from xenon.base.designsweeptypes import ExhaustiveSweep
 
 import params
 
-# Memory system flags.
-SPAD = 0x1
-CACHE = 0x2
-DMA = 0x4
-
 class Benchmark(Sweepable):
   sweepable_params = [
       params.cycle_time,
@@ -101,14 +96,17 @@ class Array(Sweepable):
   sweepable_params = [
       params.partition_type,
       params.partition_factor,
+      params.memory_type,
   ]
 
-  def __init__(self, name, size, word_length, ptype=None, pfactor=None):
+  def __init__(self, name, size, word_length,
+               mtype=None, ptype=None, pfactor=None):
     super(Array, self).__init__(name)
     self.size = size
     self.word_length = word_length
     self.partition_type = ptype
     self.partition_factor = pfactor
+    self.memory_type = mtype
 
 class Function(Sweepable):
   sweepable_params = []
