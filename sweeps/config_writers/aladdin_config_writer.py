@@ -106,6 +106,7 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
 
   def printArray(self, obj):
     """ Print array partitioning parameters. """
+    obj["size"] = obj["size"] * obj["word_length"]
     self.output.write("partition,%(partition_type)s,%(name)s,%(size)d,%(word_length)d" % obj)
     if obj["partition_type"] != "complete":
       self.output.write(",%(partition_factor)s" % obj)
