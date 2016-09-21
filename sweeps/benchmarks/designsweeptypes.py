@@ -20,6 +20,8 @@ class Gem5DesignSweep(ExhaustiveSweep):
       self.memory_type = CACHE
     elif self.memory_type == "hybrid":
       self.memory_type = SPAD | CACHE
+    else:
+      raise ValueError("The value of memory_type was not recognized.")
 
   def generate_trace(self):
     self.fixArguments()

@@ -3,18 +3,19 @@
 # Primary runner for generating design sweeps through the Xenon system.
 
 import argparse
+import json
 import os
 import re
-import json
 
-from xenon.xenon_interpreter import XenonInterpreter
 from config_writers import *
+from xenon.xenon_interpreter import XenonInterpreter
 
 def run(input_file):
   interpreter = XenonInterpreter(input_file)
   genfiles = interpreter.run()
   writers = [
     aladdin_config_writer.AladdinConfigWriter,
+    gem5_config_writer.Gem5ConfigWriter,
   ]
   for genfile in genfiles:
     for writer_type in writers:
