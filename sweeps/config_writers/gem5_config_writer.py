@@ -5,7 +5,7 @@ import os
 
 from benchmarks import datatypes
 from benchmarks import params
-from config_writer import ConfigWriter
+import config_writer
 from xenon.base.datatypes import Param
 
 GEM5_HOME = os.path.abspath(os.path.join(os.environ["ALADDIN_HOME"], "..", ".."))
@@ -19,7 +19,7 @@ def buildParamDefaults():
       defaults[attr_name] = attr_value.format(attr_value.default)
   return defaults
 
-class Gem5ConfigWriter(ConfigWriter):
+class Gem5ConfigWriter(config_writer.JsonConfigWriter):
   """ Writes ini-file for gem5 plus CACTI cfgs. """
   def __init__(self):
     super(Gem5ConfigWriter, self).__init__()

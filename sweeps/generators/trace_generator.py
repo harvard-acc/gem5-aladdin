@@ -28,6 +28,7 @@ class TraceGenerator(object):
       raise Exception("Set TRACER_HOME directory as an environment variable")
     fdevnull = open(os.devnull, "w")
     cwd = os.getcwd()
+    genfiles = []
     for benchmark in self.sweep.iterattrvalues(objtype=Sweepable):
       assert(isinstance(benchmark, Benchmark))
       print "Building traces for", benchmark.name
@@ -61,6 +62,7 @@ class TraceGenerator(object):
       # Moves and overwrites a trace at the destination if it already exists.
       trace_new_path = os.path.join(trace_abs_dir, DYNAMIC_TRACE)
       os.rename(trace_orig_path, trace_new_path)
+      genfiles.append(trace_new_path)
 
       # Cleanup.
       ret = subprocess.call("make clean-trace",
@@ -70,4 +72,4 @@ class TraceGenerator(object):
 
     fdevnull.close()
     os.chdir(cwd)
-    return []
+    return genfiles
