@@ -1,0 +1,3 @@
+[submodule "sweeps/xenon"]
+	path = sweeps/xenon
+	url = https://github.com/xyzsam/xenon
