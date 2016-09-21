@@ -35,7 +35,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     self.generate_runscripts = is_applicable
     return is_applicable
 
-  def write(self, sweep):
+  def writeSweep(self, sweep):
     """ Write all configuration files. """
     cwd = os.getcwd()
     base_output_dir = os.path.join(cwd, sweep["output_dir"])
@@ -55,6 +55,9 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
         self.writeGem5Config(sweep, child_obj, sweep_dir)
         self.writeAllCactiConfigs(sweep, child_obj, sweep_dir)
         self.writeRunscript(sweep, child_obj, sweep_dir)
+
+  def writeLast(self, all_sweeps):
+    pass
 
   def addGlobalSweepParams(self, sweep, section, config_writer):
     global_params = ["memory_type"]

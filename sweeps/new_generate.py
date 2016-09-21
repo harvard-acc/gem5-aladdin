@@ -16,6 +16,7 @@ def run(input_file):
   writers = [
     aladdin_config_writer.AladdinConfigWriter,
     gem5_config_writer.Gem5ConfigWriter,
+    condor_writer.CondorWriter,
   ]
   for genfile in genfiles:
     for writer_type in writers:
