@@ -235,7 +235,7 @@ if options.aladdin_cfg_file:
       datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
       datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
       datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
-      datapath.issueDmaOpsASAP = config.getboolean(accel, "issue_dma_ops_asap")
+      datapath.issueDmaOpsASAP = config.getboolean(accel, "pipelined_dma")
       datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
     if (memory_type != "cache" and memory_type != "spad" and
         memory_type != "dma" and memory_type != "hybrid"):
