@@ -309,7 +309,8 @@ if options.ruby:
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
-    system.membus = SystemXBar(is_perfect_bus=options.is_perfect_bus, width=4)
+    system.membus = SystemXBar(is_perfect_bus=options.is_perfect_bus,
+                               width=options.xbar_width)
 
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)
