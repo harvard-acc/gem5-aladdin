@@ -32,9 +32,11 @@ class TraceGenerator(object):
     for benchmark in self.sweep.iterattrvalues(objtype=Sweepable):
       assert(isinstance(benchmark, Benchmark))
       print "Building traces for", benchmark.name
-      bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir);
-      trace_orig_path = os.path.join(bmk_source_dir, DYNAMIC_TRACE)
+      bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir)
+      if not os.path.isabs(bmk_source_dir):
+        bmk_source_dir = os.path.join(cwd, bmk_source_dir)
       os.chdir(bmk_source_dir)
+      trace_orig_path = os.path.join(bmk_source_dir, DYNAMIC_TRACE)
       if self.sweep.simulator == "aladdin":
         trace_target = "trace-binary"
       else:
