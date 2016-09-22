@@ -214,7 +214,13 @@ if options.accel_cfg_file:
         experimentName = config.get(accel, "experiment_name"),
         enableStatsDump = options.enable_stats_dump,
         executeStandalone = (np == 0))
-    if memory_type == "cache" or memory_type == "hybrid":
+    datapath.dmaSetupLatency = config.getint(accel, "dma_setup_latency")
+    datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
+    datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
+    datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
+    datapath.issueDmaOpsASAP = config.getboolean(accel, "pipelined_dma")
+    datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
+    if memory_type == "cache":
       options.cacheline_size = config.getint(accel, "cache_line_sz")
       datapath.cacheSize = config.get(accel, "cache_size")
       datapath.cacheAssoc = config.getint(accel, "cache_assoc")
@@ -230,15 +236,7 @@ if options.accel_cfg_file:
       datapath.numOutStandingWalks = config.getint(
           accel, "tlb_max_outstanding_walks")
       datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
-    if memory_type == "spad" or memory_type == "dma" or memory_type == "hybrid":
-      datapath.dmaSetupLatency = config.getint(accel, "dma_setup_latency")
-      datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
-      datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
-      datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
-      datapath.issueDmaOpsASAP = config.getboolean(accel, "pipelined_dma")
-      datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
-    if (memory_type != "cache" and memory_type != "spad" and
-        memory_type != "dma" and memory_type != "hybrid"):
+    if (memory_type != "cache" and memory_type != "spad"):
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
     datapaths.append(datapath)

@@ -192,7 +192,7 @@ def config_cache(options, system):
             is_perfect_cache=options.is_perfect_cache)
         if options.l2cache:
           datapath.addPrivateL1Dcache(aladdin_dcache, system.tol2bus)
-          datapath.connectPrivateScratchpad(system.tol2bus)
+          datapath.connectPrivateScratchpad(system.membus)
         else:
           datapath.addPrivateL1Dcache(aladdin_dcache, system.membus)
           datapath.connectPrivateScratchpad(system.membus)
