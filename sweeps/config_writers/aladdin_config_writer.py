@@ -17,9 +17,9 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
     self.output = StringIO.StringIO()
     self.printFunctionsMap = {
         "Benchmark": self.printBenchmark,
-        "Function": self.printFunction,
+        "Function": self.doNothing,
         "Array": self.printArray,
-        "Loop": self.do_nothing,  # Loops are handled by printFunction.
+        "Loop": self.printLoop,
     }
     self.generate_runscripts = False
 
@@ -33,20 +33,20 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
             simulator == "gem5-cpu")
 
   def writeSweep(self, sweep):
-    self.writeSweepRecursive_(sweep)
+    self.writeSweepRecursive_(None, sweep)
 
   def writeLast(self, all_sweeps):
     pass
 
-  def writeSweepRecursive_(self, obj):
+  def writeSweepRecursive_(self, parent, obj):
     for name, child_obj in self.iterdicttypes(obj):
-      identifier = self.get_identifier(name)
-      assert(identifier)
-      printer = self.getPrintMethod(identifier)
-      printer(child_obj)
-      self.writeSweepRecursive_(child_obj)
+      # Replace with check for type.
+      child_type = child_obj["type"]
+      printer = self.getPrintMethod(child_type)
+      printer(obj, child_obj)
+      self.writeSweepRecursive_(obj, child_obj)
 
-      if identifier == self.topLevelType:
+      if child_type == self.topLevelType:
         # The top level object has to prepare the output directories
         # and actually dump the output.
         benchmark = child_obj["name"]
@@ -85,48 +85,42 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
                ]
       f.write(" \\\n".join(lines))
 
-  def getPrintMethod(self, identifier):
-    return self.printFunctionsMap[identifier]
+  def getPrintMethod(self, obj_type):
+    return self.printFunctionsMap[obj_type]
 
-  def printBenchmark(self, benchmark):
+  def printBenchmark(self, parent, benchmark):
     """ Print benchmark-wide parameters. """
     toplevel_params = [params.cycle_time, params.pipelining, params.ready_mode]
     for param in toplevel_params:
       value = benchmark[param.name]
       self.output.write("%s,%s\n" % (param.name, param.format(value)))
 
-  def printFunction(self, obj):
+  def printFunction(self, parent, func):
     """ Print parameters per function. """
-    # While functions don't actually have any parameters to themselves, we use
-    # this function to print loop unrolling parameters, because the loop
-    # unrolling dictionary dumps don't know what function they belong to.
-    for loop in obj.iterkeys():
-      identifier = self.get_identifier(loop)
-      if identifier:
-        obj[loop]["func_name"] = obj["name"]
-        self.output.write(self.printLoop_(obj[loop]))
+    return
 
-  def printArray(self, obj):
+  def printArray(self, parent, array):
     """ Print array partitioning parameters. """
-    str_format = "%(memory_type)s,%(partition_type)s,%(name)s,%(size)d,%(word_length)d"
-    if obj["memory_type"] == params.SPAD:
-      if (obj["partition_type"] == params.CYCLIC or
-          obj["partition_type"] == params.BLOCK):
+    # Edit the array name if the parent is a function.
+    if parent["type"] == "Function":
+      array["name"] = "{0}.{1}".format(parent["name"], array["name"])
+
+    if array["memory_type"] == params.SPAD:
+      str_format = "partition,%(partition_type)s,%(name)s,%(size)d,%(word_length)d"
+      if (array["partition_type"] == params.CYCLIC or
+          array["partition_type"] == params.BLOCK):
         str_format += ",%(partition_factor)s"
-
-    # Make some adjustments to the values first.
-    obj["size"] = obj["size"] * obj["word_length"]
-    if obj["memory_type"] == params.SPAD:
-      obj["memory_type"] = params.PARTITION
     else:
-      obj["memory_type"] = params.CACHE
+      str_format = "cache,%(name)s,%(size)d,%(word_length)d"
 
-    self.output.write(str_format % obj)
+    array["size"] = array["size"] * array["word_length"]
+    self.output.write(str_format % array)
     self.output.write("\n")
 
-  def printLoop_(self, obj):
+  def printLoop(self, parent, loop):
     """ Print loop unrolling parameters. """
-    self.output.write("unrolling,%(func_name)s,%(name)s,%(unrolling)d\n" % obj)
+    loop["func_name"] = parent["name"]
+    self.output.write("unrolling,%(func_name)s,%(name)s,%(unrolling)d\n" % loop)
 
-  def do_nothing(*args):
+  def doNothing(*args):
     pass

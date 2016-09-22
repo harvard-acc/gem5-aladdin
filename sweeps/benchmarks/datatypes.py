@@ -38,31 +38,45 @@ class Benchmark(Sweepable):
     self.exec_cmd = ""
     self.run_args = ""
 
-  def add_array(self, array_name, array_size, array_word_length, **kwargs):
+  def add_array(self, *args):
     """ Add an array of this benchmark.
 
     Args:
-      array_name: Name of the array as it appears in the source.
-      array_size: Number of ELEMENTS in the array, NOT the number of bytes.
-      array_word_length: Bytes per ELEMENT.
-      **kwargs: See Array().
+      *args: Array constructor args.
     """
-    array = Array(array_name, array_size, array_word_length, **kwargs)
-    assert(not hasattr(self, array_name))
-    setattr(self, array_name, array)
+    array = Array(*args)
+    assert(not hasattr(self, array.name))
+    setattr(self, array.name, array)
 
-  def add_loop(self, function_name, loop_name, **kwargs):
+  def add_function_array(self, func, *args):
+    """ Add an array of this benchmark that does not belong to the kernel.
+
+    For example, if an array 'bar' were declared inside an inner function
+    'foo' (where 'foo' is not the top kernel function), the user would have to
+    refer to this array as 'foo.bar'.
+
+    Args:
+      func: Function name.
+      *args: Array constructor args.
+    """
+    array = Array(*args)
+    self.add_function(func)
+    getattr(self, func).add_array(func, *args)
+
+  def add_loop(self, function_name, *args):
     """ Add a loop of this benchmark.
 
     Args:
       function_name: The name of the function that contains this loop.
-      loop_name: The label that marks the start of this loop.
-      **kwargs: See Loop()
+      *args: Loop constructor args.
     """
+    self.add_function(function_name)
+    getattr(self, function_name).add_loop(*args)
+
+  def add_function(self, function_name):
     if not hasattr(self, function_name):
       f = Function(function_name)
       setattr(self, function_name, f)
-    getattr(self, function_name).add_loop(loop_name, **kwargs)
 
   def set_kernels(self, kernels):
     """ Set the kernels to be traced in this benchmark.
@@ -99,14 +113,11 @@ class Array(Sweepable):
       params.memory_type,
   ]
 
-  def __init__(self, name, size, word_length,
-               mtype=None, ptype=None, pfactor=None):
+  def __init__(self, name, size, word_length):
+    """ Creates an array. """
     super(Array, self).__init__(name)
     self.size = size
     self.word_length = word_length
-    self.partition_type = ptype
-    self.partition_factor = pfactor
-    self.memory_type = mtype
 
 class Function(Sweepable):
   sweepable_params = []
@@ -114,16 +125,21 @@ class Function(Sweepable):
   def __init__(self, name):
     super(Function, self).__init__(name)
 
-  def add_loop(self, loop_name, **kwargs):
-    assert(not hasattr(self, loop_name))
-    l = Loop(loop_name, **kwargs)
-    setattr(self, loop_name, l)
+  def add_array(self, func, *args):
+    a = Array(*args)
+    assert(not hasattr(self, a.name))
+    setattr(self, a.name, a)
+
+  def add_loop(self, *args):
+    l = Loop(*args)
+    assert(not hasattr(self, l.name))
+    setattr(self, l.name, l)
 
 class Loop(Sweepable):
   sweepable_params = [
       params.unrolling,
   ]
 
-  def __init__(self, name, unr=None):
+  def __init__(self, name):
+    """ Creates a loop. """
     super(Loop, self).__init__(name)
-    self.unrolling = unr
