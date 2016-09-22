@@ -43,3 +43,7 @@ class Gem5DesignSweep(ExhaustiveSweep):
   def generate_trace(self):
     generator = trace_generator.TraceGenerator(self)
     return generator.run()
+
+  def generate_dma_trace(self):
+    generator = trace_generator.TraceGenerator(self, dma=True)
+    return generator.run()

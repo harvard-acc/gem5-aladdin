@@ -7,9 +7,10 @@ from benchmarks.datatypes import *
 DYNAMIC_TRACE = "dynamic_trace.gz"
 
 class TraceGenerator(object):
-  def __init__(self, sweep):
+  def __init__(self, sweep, dma=False):
     # The configured design sweep object.
     self.sweep = sweep
+    self.dma_mode = dma
 
   def run(self):
     """ Generates dynamic traces for each workload.
@@ -37,10 +38,10 @@ class TraceGenerator(object):
         bmk_source_dir = os.path.join(cwd, bmk_source_dir)
       os.chdir(bmk_source_dir)
       trace_orig_path = os.path.join(bmk_source_dir, DYNAMIC_TRACE)
-      if self.sweep.simulator == "aladdin":
-        trace_target = "trace-binary"
-      else:
+      if self.dma_mode:
         trace_target = "dma-trace-binary"
+      else:
+        trace_target = "trace-binary"
 
       # Clean, rebuild the instrumented binary, and regenerate the trace.
       ret = subprocess.call("make clean-trace",
