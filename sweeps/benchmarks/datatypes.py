@@ -121,6 +121,10 @@ class Benchmark(Sweepable):
     """ If simulating with a CPU, set the command to execute. """
     self.exec_cmd = cmd
 
+  def set_run_args(self, args):
+    """ If simulating with a CPU, set the command-line arguments. """
+    self.run_args = args
+
 class Array(Sweepable):
   sweepable_params = [
       params.partition_type,
