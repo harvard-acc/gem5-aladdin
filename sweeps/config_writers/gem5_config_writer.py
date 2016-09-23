@@ -54,6 +54,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
 
         self.writeGem5Config(sweep, child_obj, sweep_dir)
         self.writeAllCactiConfigs(sweep, child_obj, sweep_dir)
+        self.setupRequiredFiles(child_obj, sweep_dir, sweep)
         self.writeRunscript(sweep, child_obj, sweep_dir)
 
   def writeLast(self, all_sweeps):
@@ -69,6 +70,24 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
         "cache": os.path.join(sweep_dir, "%s-cache.cfg" % benchmark_name),
         "tlb": os.path.join(sweep_dir, "%s-tlb.cfg" % benchmark_name),
     }
+
+  def setupRequiredFiles(self, this_config, sweep_dir, parent_sweep):
+    """ Symlink all required files into the sweep directory.
+
+    Args:
+      this_config: The JSON object for this sweep configuration.
+      sweep_dir: The directory this configuration is going into.
+      parent_sweep: The parent of this JSON object (a BaseDesignSweep).
+    """
+    cwd = os.getcwd()
+    for req_file in this_config["required_files"]:
+      source = os.path.join(parent_sweep["source_dir"], this_config["sub_dir"], req_file)
+      link = os.path.join(sweep_dir, req_file)
+      if not os.path.isabs(source):
+        source = os.path.join(cwd, source)
+      if os.path.lexists(link):
+        os.remove(link)
+      os.symlink(source, link)
 
   def writeGem5Config(self, sweep, benchmark, sweep_dir):
     """ Write the gem5.cfg file. """
@@ -236,7 +255,8 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
           perfect_l1_flag,
           perfect_bus_flag,
           "--accel_cfg_file=" + gem5_cfg_path,
-          benchmark["exec_cmd"] + benchmark["run_args"],
+          "-c " + benchmark["exec_cmd"],
+          "-o \"{}\"".format(benchmark["run_args"]),
           "> " + stdout_path,
           "2> " + stderr_path,
       ]
