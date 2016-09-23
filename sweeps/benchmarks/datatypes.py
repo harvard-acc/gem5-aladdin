@@ -37,6 +37,8 @@ class Benchmark(Sweepable):
     self.main_id = 0
     self.exec_cmd = ""
     self.run_args = ""
+    self.exec_cmd = ""
+    self.required_files = []
 
   def add_array(self, *args):
     """ Add an array of this benchmark.
@@ -104,7 +106,20 @@ class Benchmark(Sweepable):
     """
     self.main_id = main_id
 
-  # TODO: Leave off exec cmd for now.
+  def add_required_files(self, files):
+    """ Add required files for input/output.
+
+    These will be symlinked into the configuration directory. It is assumed
+    these files are located in the benchmark source directory.
+    """
+    if isinstance(files, list):
+      self.required_files.extend(files)
+    else:
+      self.required_files.append(files)
+
+  def set_exec_cmd(self, cmd):
+    """ If simulating with a CPU, set the command to execute. """
+    self.exec_cmd = cmd
 
 class Array(Sweepable):
   sweepable_params = [
