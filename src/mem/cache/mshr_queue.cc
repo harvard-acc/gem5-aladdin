@@ -76,7 +76,7 @@ MSHRQueue::findMatch(Addr blk_addr, bool is_secure) const
         // MSHR serving an uncacheable access
         if (!mshr->isUncacheable() && mshr->blkAddr == blk_addr &&
             mshr->isSecure == is_secure) {
-                return mshr;
+            return mshr;
         }
     }
     return NULL;

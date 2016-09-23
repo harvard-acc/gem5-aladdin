@@ -99,7 +99,6 @@ LRU::invalidate(CacheBlk *blk)
 {
     BaseSetAssoc::invalidate(blk);
 
-    BaseSetAssoc::invalidate(blk);
     // should be evicted before valid blocks
     int set = blk->set;
     sets[set].moveToTail(blk);

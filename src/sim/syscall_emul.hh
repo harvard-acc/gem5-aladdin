@@ -564,13 +564,9 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
 
     Process::FdMap *fdObj = process->sim_fd_obj(fd);
 
-    if (fdObj == NULL || ((fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN_FD)) {
+    if ((fdObj == NULL || fd < 0 || process->sim_fd(fd) < 0) && fd != ALADDIN_FD) {
         // doesn't map to any simulator fd: not a valid target fd
         return -EBADF;
-    }
-
-    if (fdObj->driver != NULL) {
-        return fdObj->driver->ioctl(process, tc, req);
     }
 
     if (OS::isTtyReq(req)) {
@@ -614,6 +610,10 @@ ioctlFunc(SyscallDesc *desc, int callnum, LiveProcess *process,
             req, paddr, tc->contextId(), tc->threadId());
       }
       return -ENOTTY;
+    }
+
+    if (fdObj->driver != NULL) {
+        return fdObj->driver->ioctl(process, tc, req);
     }
 
     warn("Unsupported ioctl call: ioctl(%d, 0x%x, ...) @ \n",

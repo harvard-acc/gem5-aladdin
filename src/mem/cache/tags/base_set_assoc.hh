@@ -323,7 +323,8 @@ public:
 
     /**
      * Regenerate the block address from the tag.
-     * @param tag The tag of the block.  * @param set The set of the block.
+     * @param tag The tag of the block.  
+     * @param set The set of the block.
      * @return The block address.
      */
     Addr regenerateBlkAddr(Addr tag, unsigned set) const
