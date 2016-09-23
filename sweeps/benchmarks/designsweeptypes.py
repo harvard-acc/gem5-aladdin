@@ -5,7 +5,7 @@ import os
 from xenon.base.designsweeptypes import ExhaustiveSweep
 
 from benchmarks import params
-from generators import trace_generator
+from generators import *
 
 class Gem5DesignSweep(ExhaustiveSweep):
   sweepable_params = [
@@ -46,4 +46,8 @@ class Gem5DesignSweep(ExhaustiveSweep):
 
   def generate_dma_trace(self):
     generator = trace_generator.TraceGenerator(self, dma=True)
+    return generator.run()
+
+  def generate_gem5_binary(self):
+    generator = gem5_binary_generator.Gem5BinaryGenerator(self)
     return generator.run()

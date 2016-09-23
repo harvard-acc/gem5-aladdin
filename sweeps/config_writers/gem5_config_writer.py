@@ -80,14 +80,32 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
       parent_sweep: The parent of this JSON object (a BaseDesignSweep).
     """
     cwd = os.getcwd()
+    bmk_name = this_config["name"]
+    bmk_src_dir = os.path.join(parent_sweep["source_dir"], this_config["sub_dir"])
     for req_file in this_config["required_files"]:
-      source = os.path.join(parent_sweep["source_dir"], this_config["sub_dir"], req_file)
-      link = os.path.join(sweep_dir, req_file)
+      source = os.path.join(bmk_src_dir, req_file)
+      link = os.path.join(sweep_dir, os.path.basename(req_file))
       if not os.path.isabs(source):
         source = os.path.join(cwd, source)
       if os.path.lexists(link):
         os.remove(link)
       os.symlink(source, link)
+
+    # If we are simulating with the CPU model, symlink the CPU binaries into
+    # the config directory and fail should they not exist.
+    if parent_sweep["simulator"] == "gem5-cpu":
+      nonaccel_bin = os.path.join(bmk_src_dir, "%s-gem5" % bmk_name)
+      accel_bin = os.path.join(bmk_src_dir, "%s-gem5-accel" % bmk_name)
+      if not (os.path.exists(nonaccel_bin) and os.path.exists(accel_bin)):
+        raise IOError("Cannot setup gem5 run directory before the benchmarks are built.")
+      link = os.path.join(sweep_dir, "%s-gem5" % bmk_name)
+      if os.path.lexists(link):
+        os.remove(link)
+      os.symlink(nonaccel_bin, link)
+      link = os.path.join(sweep_dir, "%s-gem5-accel" % bmk_name)
+      if os.path.lexists(link):
+        os.remove(link)
+      os.symlink(accel_bin, link)
 
   def writeGem5Config(self, sweep, benchmark, sweep_dir):
     """ Write the gem5.cfg file. """

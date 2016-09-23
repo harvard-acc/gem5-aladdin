@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # MachSuite benchmark definitions.
 
 from datatypes import *
