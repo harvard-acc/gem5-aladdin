@@ -10,7 +10,7 @@ generate trace
 generate gem5_binary
 
 set output_dir "cortexsuite_sweep"
-set source_dir ""
+set source_dir "/set/path/to/cortexsuite"
 set simulator "gem5-cpu"
 set memory_type "cache"
 
