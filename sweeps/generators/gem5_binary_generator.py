@@ -47,4 +47,5 @@ class Gem5BinaryGenerator(base_generator.Generator):
           genfiles.append("%s-gem5-accel" % benchmark.name)
 
         # Don't physically move them anywhere. We'll symlink them later.
+    os.chdir(cwd)
     return genfiles
