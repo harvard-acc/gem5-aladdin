@@ -82,11 +82,11 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     cwd = os.getcwd()
     bmk_name = this_config["name"]
     bmk_src_dir = os.path.join(parent_sweep["source_dir"], this_config["sub_dir"])
+    if not os.path.isabs(bmk_src_dir):
+      bmk_src_dir = os.path.realpath(bmk_src_dir)
     for req_file in this_config["required_files"]:
       source = os.path.join(bmk_src_dir, req_file)
       link = os.path.join(sweep_dir, os.path.basename(req_file))
-      if not os.path.isabs(source):
-        source = os.path.join(cwd, source)
       if os.path.lexists(link):
         os.remove(link)
       os.symlink(source, link)
@@ -252,6 +252,12 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
       mem_flag = "--mem-type=DDR3_1600_x64 "
       perfect_l1_flag = ""
 
+    if benchmark["exec_cmd"]:
+      exec_cmd = "-c {0} -o \"{1}\"".format(
+          benchmark["exec_cmd"], benchmark["run_args"])
+    else:
+      exec_cmd = ""
+
     with open(runscript_path, "w") as f:
       lines = [
           "#!/bin/sh",
@@ -273,8 +279,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
           perfect_l1_flag,
           perfect_bus_flag,
           "--accel_cfg_file=" + gem5_cfg_path,
-          "-c " + benchmark["exec_cmd"],
-          "-o \"{}\"".format(benchmark["run_args"]),
+          exec_cmd,
           "> " + stdout_path,
           "2> " + stderr_path,
       ]
