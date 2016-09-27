@@ -35,6 +35,7 @@ class TraceGenerator(base_generator.Generator):
       cwd = os.getcwd()
       genfiles = []
       for benchmark in self.sweep.iterattrvalues(objtype=Sweepable):
+        os.chdir(cwd)
         assert(isinstance(benchmark, Benchmark))
         print "Building traces for", benchmark.name
         bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir)
