@@ -1,0 +1,80 @@
+# Suggested constants for this benchmark suite.
+
+# TODO: Replace 0 and 1 with constants for FLATTEN and NO_UNROLL.
+set unrolling for bfs_bulk.bfs.loop_horizons                     1
+set unrolling for bfs_bulk.bfs.loop_neighbors                    0
+set unrolling for gemm_blocked.bbgemm.loopjj                     1
+set unrolling for gemm_blocked.bbgemm.loopkk                     1
+set unrolling for gemm_blocked.bbgemm.loopk                      0
+set unrolling for gemm_blocked.bbgemm.loopj                      0
+set unrolling for gemm_ncubed.gemm.outer                         1
+set unrolling for gemm_ncubed.gemm.inner                         0
+set unrolling for kmp_kmp.CPF.c2                                 1
+set unrolling for kmp_kmp.kmp.k2                                 1
+set unrolling for md_grid.md.loop_grid0_x                        1
+set unrolling for md_grid.md.loop_grid0_y                        1
+set unrolling for md_grid.md.loop_grid0_z                        1
+set unrolling for md_grid.md.loop_grid1_x                        1
+set unrolling for md_grid.md.loop_grid1_y                        1
+set unrolling for md_grid.md.loop_grid1_z                        1
+set unrolling for md_grid.md.loop_p                              0
+set unrolling for md_grid.md.loop_q                              0
+set unrolling for sort_radix.last_step_scan.last_2               0
+set unrolling for sort_radix.local_scan.local_2                  0
+set unrolling for sort_radix.hist.hist_2                         0
+set unrolling for sort_radix.update.update_2                     0
+set unrolling for sort_radix.ss_sort.sort_1                      1
+set unrolling for spmv_crs.spmv.spmv_2                           0
+set unrolling for spmv_ellpack.ellpack.ellpack_2                 0
+set unrolling for md_knn.md_kernel.loop_j                        0
+set unrolling for nw_nw.needwun.fill_in                          0
+set unrolling for nw_nw.needwun.trace                            1
+set unrolling for nw_nw.needwun.pad_a                            1
+set unrolling for nw_nw.needwun.pad_b                            1
+set unrolling for sort_merge.ms_mergesort.mergesort_label1       1
+set unrolling for sort_merge.ms_mergesort.mergesort_label2       1
+set unrolling for stencil_stencil2d.stencil.stencil_label1       1
+set unrolling for stencil_stencil2d.stencil.stencil_label3       0
+set unrolling for stencil_stencil2d.stencil.stencil_label4       0
+set unrolling for stencil_stencil3d.stencil3d.height_bound_col   1
+set unrolling for stencil_stencil3d.stencil3d.height_bound_row   0
+set unrolling for stencil_stencil3d.stencil3d.col_bound_height   1
+set unrolling for stencil_stencil3d.stencil3d.col_bound_row      0
+set unrolling for stencil_stencil3d.stencil3d.row_bound_height   1
+set unrolling for stencil_stencil3d.stencil3d.row_bound_col      0
+set unrolling for stencil_stencil3d.stencil3d.loop_height        1
+set unrolling for stencil_stencil3d.stencil3d.loop_row           0
+
+# These are small arrays and should be converted into registers.
+# We have to set memory_type and partition_type, since earlier there was
+# a global set command on memory_type.
+# TODO: In the future, we may support setting multiple attributes on a single
+# selection.
+set memory_type for aes_aes.rcon "spad"
+set memory_type for fft_transpose.twiddles8.reversed8 "spad"
+set memory_type for fft_transpose.data_x "spad"
+set memory_type for fft_transpose.data_y "spad"
+set memory_type for kmp_kmp.pattern "spad"
+set memory_type for kmp_kmp.kmpNext "spad"
+set memory_type for kmp_kmp.n_matches "spad"
+set memory_type for stencil_stencil2d.filter "spad"
+set memory_type for viterbi_viterbi.obs "spad"
+set memory_type for viterbi_viterbi.path "spad"
+
+set partition_type for aes_aes.rcon "complete"
+set partition_type for fft_transpose.twiddles8.reversed8 "complete"
+set partition_type for fft_transpose.data_x "complete"
+set partition_type for fft_transpose.data_y "complete"
+set partition_type for kmp_kmp.pattern "complete"
+set partition_type for kmp_kmp.kmpNext "complete"
+set partition_type for kmp_kmp.n_matches "complete"
+set partition_type for stencil_stencil2d.filter "complete"
+set partition_type for stencil_stencil3d.C "complete"
+set partition_type for viterbi_viterbi.obs "complete"
+set partition_type for viterbi_viterbi.path "complete"
+
+# These arrays should never be cached.
+set memory_type for aes_aes.sbox "spad"
+set memory_type for bfs_queue.queue "spad"
+set memory_type for fft_transpose.work_x "spad"
+set memory_type for fft_transpose.work_y "spad"
