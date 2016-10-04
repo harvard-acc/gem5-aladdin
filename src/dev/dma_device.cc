@@ -350,6 +350,12 @@ DmaPort::getPacketBaseAddr(PacketPtr pkt) {
   return state->baseAddr;
 }
 
+Event*
+DmaPort::getPacketCompletionEvent(PacketPtr pkt) {
+    DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
+    return state->completionEvent;
+}
+
 BaseMasterPort &
 DmaDevice::getMasterPort(const std::string &if_name, PortID idx)
 {

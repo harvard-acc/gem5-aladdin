@@ -170,6 +170,8 @@ class DmaPort : public MasterPort
 
     Addr getPacketBaseAddr(PacketPtr pkt);
 
+    Event* getPacketCompletionEvent(PacketPtr pkt);
+
   public:
 
     DmaPort(MemObject *dev, System *s, unsigned max_req);
