@@ -175,6 +175,8 @@ class DmaPort : public MasterPort
 
     size_t getPacketOffset(PacketPtr pkt);
 
+    Event* getPacketCompletionEvent(PacketPtr pkt);
+
   public:
 
     DmaPort(MemObject *dev, System *s, unsigned max_req);

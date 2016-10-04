@@ -355,6 +355,12 @@ DmaPort::getPacketOffset(PacketPtr pkt) {
     return state->offset;
 }
 
+Event*
+DmaPort::getPacketCompletionEvent(PacketPtr pkt) {
+    DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
+    return state->completionEvent;
+}
+
 BaseMasterPort &
 DmaDevice::getMasterPort(const std::string &if_name, PortID idx)
 {
