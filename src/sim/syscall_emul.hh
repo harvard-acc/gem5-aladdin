@@ -1362,7 +1362,11 @@ mmapFunc(SyscallDesc *desc, int num, LiveProcess *p, ThreadContext *tc)
       // offset, read the whole file, and then restore the original offset.
       off_t curr_fd_offset = lseek(sim_fd, 0, SEEK_CUR);
       lseek(sim_fd, offset, SEEK_SET);
-      read(sim_fd, buf, npages * TheISA::PageBytes);
+      ssize_t success = read(sim_fd, buf, npages * TheISA::PageBytes);
+      if (success == -1) {
+        perror("Could not read from mmapped file");
+        fatal("mmap: failed for fd %d.", tgt_fd);
+      }
       lseek(sim_fd, curr_fd_offset, SEEK_SET);
 
       // Write to simulated memory space.
