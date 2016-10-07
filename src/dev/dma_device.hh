@@ -102,22 +102,15 @@ class DmaPort : public MasterPort
         /** Number of bytes that have been acked for this transaction. */
         Addr numBytes;
 
-        /** Base DMA request address for this transaction. */
-        Addr baseAddr;
-
-        /** DMA request address offset. */
-        size_t offset;
+        /** DMA request address for this transaction. */
+        Addr addr;
 
         /** Amount to delay completion of dma by */
         const Tick delay;
 
-        DmaReqState(Event *ce, Addr tb, Addr base, size_t _offset, Tick _delay)
+        DmaReqState(Event *ce, Addr tb, Addr _addr, Tick _delay)
             : completionEvent(ce), totBytes(tb),
-              numBytes(0), baseAddr(base), offset(_offset), delay(_delay)
-        {}
-
-        DmaReqState(Event *ce, Addr tb, Addr base, Tick _delay)
-            : DmaReqState(ce, tb, base, 0, _delay)
+              numBytes(0), addr(_addr), delay(_delay)
         {}
 
     };
@@ -171,9 +164,7 @@ class DmaPort : public MasterPort
 
     void queueDma(unsigned channel_index, PacketPtr pkt);
 
-    Addr getPacketBaseAddr(PacketPtr pkt);
-
-    size_t getPacketOffset(PacketPtr pkt);
+    Addr getPacketAddr(PacketPtr pkt);
 
     Event* getPacketCompletionEvent(PacketPtr pkt);
 
@@ -186,9 +177,6 @@ class DmaPort : public MasterPort
 
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                          uint8_t *data, Tick delay, Request::Flags flag = 0);
-
-    RequestPtr dmaAction(Packet::Command cmd, Addr base_addr, int offset, int size,
-                         Event *event, uint8_t *data, Tick delay, Request::Flags flag = 0);
 
     bool dmaPending() const { return pendingCount > 0; }
 
@@ -208,13 +196,13 @@ class DmaDevice : public PioDevice
     void dmaWrite(Addr addr, int size, Event *event, uint8_t *data,
                   Tick delay = 0)
     {
-        dmaPort.dmaAction(MemCmd::WriteReq, addr, 0, size, event, data, delay);
+        dmaPort.dmaAction(MemCmd::WriteReq, addr, size, event, data, delay);
     }
 
     void dmaRead(Addr addr, int size, Event *event, uint8_t *data,
                  Tick delay = 0)
     {
-        dmaPort.dmaAction(MemCmd::ReadReq, addr, 0, size, event, data, delay);
+        dmaPort.dmaAction(MemCmd::ReadReq, addr, size, event, data, delay);
     }
 
     bool dmaPending() const { return dmaPort.dmaPending(); }
