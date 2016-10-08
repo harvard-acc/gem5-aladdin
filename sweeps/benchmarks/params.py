@@ -63,7 +63,7 @@ perfect_bus = IntParam("perfect_bus", 0)
 enable_l2 = IntParam("enable_l2", 0)
 
 # DMA settings.
-dma_setup_latency = IntParam("dma_setup_latency", 40)
+dma_setup_overhead = IntParam("dma_setup_overhead", 30)
 max_dma_requests = IntParam("max_dma_requests", 40)
 dma_chunk_size = IntParam("dma_chunk_size", 64)
 pipelined_dma = IntParam("pipelined_dma", 0)

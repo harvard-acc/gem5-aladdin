@@ -147,16 +147,16 @@ class DmaPort : public MasterPort
     unsigned maxRequests;
 
     /** Number of outstanding requests*/
-    unsigned numOfOutstandingRequests;
+    unsigned numOutstandingRequests;
 
     /** Keep track of the current channel index to send DMA request. */
-    int curr_channel_idx;
+    int currChannelIdx;
 
     /** DMA transaction chunk size. */
-    unsigned ChunkSize;
+    unsigned chunkSize;
 
     /** True if we want to interleave DMA requests from different channels.*/
-    bool multi_channel;
+    bool multiChannel;
 
     /** True if we should send invalidation packets before writes.
      *
@@ -179,8 +179,9 @@ class DmaPort : public MasterPort
 
     DmaPort(MemObject *dev, System *s, unsigned max_req);
 
-    DmaPort(MemObject *dev, System *s, unsigned max_req, unsigned chunk_size,
-            bool interleave=false, bool _invalidateOnWrite=false);
+    DmaPort(MemObject *dev, System *s, unsigned max_req,
+            unsigned _chunkSize, bool _multiChannel = false,
+            bool _invalidateOnWrite = false);
 
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                          uint8_t *data, Tick delay, Request::Flags flag = 0);

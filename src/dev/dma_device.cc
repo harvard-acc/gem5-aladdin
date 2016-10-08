@@ -49,18 +49,19 @@
 #include "sim/system.hh"
 
 DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
-                 unsigned _ChunkSize, bool multi_channel, bool _invalidateOnWrite)
+                 unsigned _chunkSize, bool _multiChannel,
+                 bool _invalidateOnWrite)
     : MasterPort(dev->name() + ".dma", dev), device(dev), sendEvent(this),
       sys(s), masterId(s->getMasterId(dev->name())),
       pendingCount(0), drainManager(NULL),
       inRetry(false), maxRequests(max_req),
-      ChunkSize(_ChunkSize),
-      multi_channel(multi_channel),
+      chunkSize(_chunkSize),
+      multiChannel(_multiChannel),
       invalidateOnWrite(_invalidateOnWrite)
 {
-  numOfOutstandingRequests = 0;
-  curr_channel_idx = 0;
-  DPRINTF(DMA, "Setting up DMA with transaction chunk size %d\n", ChunkSize);
+  numOutstandingRequests = 0;
+  currChannelIdx = 0;
+  DPRINTF(DMA, "Setting up DMA with transaction chunk size %d\n", chunkSize);
 }
 
 DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req)
@@ -71,7 +72,7 @@ DmaPort::handleResp(PacketPtr pkt, Tick delay)
 {
     // should always see a response with a sender state
     assert(pkt->isResponse());
-    numOfOutstandingRequests --;
+    numOutstandingRequests --;
 
     // get the DMA sender state
     DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
@@ -84,7 +85,7 @@ DmaPort::handleResp(PacketPtr pkt, Tick delay)
             state->numBytes, state->totBytes,
             state->completionEvent ?
             state->completionEvent->scheduled() : 0,
-            numOfOutstandingRequests);
+            numOutstandingRequests);
 
     assert(pendingCount != 0);
     pendingCount--;
@@ -215,7 +216,7 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
      * last channel that is just added. If we switch to the fixed-number of
      * channels model, we can let users to pick which channel they want to use,
      * or automatically pick the empty channel. */
-    for (ChunkGenerator gen(addr, size, ChunkSize);
+    for (ChunkGenerator gen(addr, size, chunkSize);
          !gen.done(); gen.next()) {
         req = new Request(gen.addr(), gen.size(), flag, masterId);
         req->taskId(ContextSwitchTaskId::DMA);
@@ -255,8 +256,8 @@ DmaPort::trySendTimingReq()
 {
     // send the first packet on the transmit list and schedule the
     // following send if it is successful
-    assert(transmitList[curr_channel_idx].size());
-    PacketPtr pkt = transmitList[curr_channel_idx].front();
+    assert(transmitList[currChannelIdx].size());
+    PacketPtr pkt = transmitList[currChannelIdx].front();
 
     DPRINTF(DMA, "Trying to send %s addr %#x of size %d\n", pkt->cmdString(),
             pkt->getAddr(), pkt->req->getSize());
@@ -264,47 +265,47 @@ DmaPort::trySendTimingReq()
     inRetry = !sendTimingReq(pkt);
     if (!inRetry) {
         // pop the first packet in the current channel
-        transmitList[curr_channel_idx].pop_front();
+        transmitList[currChannelIdx].pop_front();
         DPRINTF(DMA,
                "Sent %s addr %#x with size %d from channel %d. \n",
                 pkt->cmdString(),
                 pkt->getAddr(),
                 pkt->req->getSize());
         // Invalidations do not have responses, so they complete as soon as
-        // they send.
+        // they send and do not count as an outstanding request.
         if (pkt->cmd == MemCmd::InvalidationReq) {
           pendingCount--;
         } else {
-          numOfOutstandingRequests++;
+          numOutstandingRequests++;
         }
 
-        // Find next_channel_id
-        int next_channel_idx;
+        // Find next channel.
+        int nextChannelIdx;
         unsigned num_channels = transmitList.size();
         // If the current channel is empty, or DMA is in multi-channel mode,
         // move on to the next channel.
-        if (transmitList[curr_channel_idx].empty() || multi_channel) {
-          next_channel_idx = (curr_channel_idx + 1) % num_channels;
+        if (transmitList[currChannelIdx].empty() || multiChannel) {
+          nextChannelIdx = (currChannelIdx + 1) % num_channels;
           // Check whether next channel is empty
-          while (transmitList[next_channel_idx].empty()) {
-            if (next_channel_idx == curr_channel_idx) {
+          while (transmitList[nextChannelIdx].empty()) {
+            if (nextChannelIdx == currChannelIdx) {
               // no more packet after this one.
-              next_channel_idx = -1;
+              nextChannelIdx = -1;
               break;
             } else {
-              next_channel_idx = (next_channel_idx + 1) % num_channels;
+              nextChannelIdx = (nextChannelIdx + 1) % num_channels;
             }
           }
         } else {
           // DMA is not interleaving, and there are more packets to send in curr
           // channel.
-          next_channel_idx = curr_channel_idx;
+          nextChannelIdx = currChannelIdx;
         }
         // assign channel id.
-        curr_channel_idx = next_channel_idx;
+        currChannelIdx = nextChannelIdx;
         DPRINTF(DMA, "-- Done\n");
         // if there is more to do, then do so
-        if (curr_channel_idx != -1) {
+        if (currChannelIdx != -1) {
             // this should ultimately wait for as many cycles as the
             // device needs to send the packet, but currently the port
             // does not have any known width so simply wait a single
@@ -312,7 +313,7 @@ DmaPort::trySendTimingReq()
             device->schedule(sendEvent, device->clockEdge(Cycles(1)));
         } else {
           // Reset the channel idx for the next transfer.
-          curr_channel_idx = 0;
+          currChannelIdx = 0;
           transmitList.clear();
         }
     } else {
@@ -339,7 +340,7 @@ DmaPort::sendDma()
             DPRINTF(DMA, "Can't send immediately, waiting to send\n");
             return;
         }
-        if (numOfOutstandingRequests >= maxRequests) {
+        if (numOutstandingRequests >= maxRequests) {
             device->schedule(sendEvent, device->clockEdge(Cycles(1)));
             DPRINTF(DMA, "Too many outstanding requests, try again next cycle...\n");
             return;
