@@ -214,11 +214,11 @@ if options.accel_cfg_file:
         experimentName = config.get(accel, "experiment_name"),
         enableStatsDump = options.enable_stats_dump,
         executeStandalone = (np == 0))
-    datapath.dmaSetupLatency = config.getint(accel, "dma_setup_latency")
+    datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
     datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
     datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
     datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
-    datapath.issueDmaOpsASAP = config.getboolean(accel, "pipelined_dma")
+    datapath.pipelinedDma = config.getboolean(accel, "pipelined_dma")
     datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
     datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
     if memory_type == "cache":
