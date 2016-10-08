@@ -157,6 +157,13 @@ class DmaPort : public MasterPort
 
     /** True if we want to interleave DMA requests from different channels.*/
     bool multi_channel;
+
+    /** True if we should send invalidation packets before writes.
+     *
+     * This would invalidate every cache line touched by a dmaAction call that
+     * updates memory before issuing the write request.
+     */
+    bool invalidateOnWrite;
   protected:
 
     bool recvTimingResp(PacketPtr pkt);
@@ -173,7 +180,7 @@ class DmaPort : public MasterPort
     DmaPort(MemObject *dev, System *s, unsigned max_req);
 
     DmaPort(MemObject *dev, System *s, unsigned max_req, unsigned chunk_size,
-            bool interleave=false);
+            bool interleave=false, bool _invalidateOnWrite=false);
 
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                          uint8_t *data, Tick delay, Request::Flags flag = 0);
