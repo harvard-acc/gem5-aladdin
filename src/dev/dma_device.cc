@@ -49,13 +49,14 @@
 #include "sim/system.hh"
 
 DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
-                 unsigned _ChunkSize, bool multi_channel)
+                 unsigned _ChunkSize, bool multi_channel, bool _invalidateOnWrite)
     : MasterPort(dev->name() + ".dma", dev), device(dev), sendEvent(this),
       sys(s), masterId(s->getMasterId(dev->name())),
       pendingCount(0), drainManager(NULL),
       inRetry(false), maxRequests(max_req),
       ChunkSize(_ChunkSize),
-      multi_channel(multi_channel)
+      multi_channel(multi_channel),
+      invalidateOnWrite(_invalidateOnWrite)
 {
   numOfOutstandingRequests = 0;
   curr_channel_idx = 0;
@@ -190,11 +191,30 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
      * device. We will swtich to that after MICRO. */
     transmitList.push_back(std::deque<PacketPtr>());
     assert (transmitList.size() < MAX_CHANNELS);
+    unsigned channel_idx = transmitList.size() - 1;
+
+    MemCmd memcmd(cmd);
+    if (invalidateOnWrite && memcmd.isWrite()) {
+      // Invalidation requests have no completion events, generate no
+      // responses, and do not transmit data.
+      DmaReqState *invalidateReqState = new DmaReqState(nullptr, 0, addr, delay);
+      for (ChunkGenerator gen(addr, size, sys->cacheLineSize());
+           !gen.done(); gen.next()) {
+          req = new Request(gen.addr(), gen.size(), flag, masterId);
+          req->taskId(ContextSwitchTaskId::DMA);
+          PacketPtr pkt = new Packet(req, MemCmd::InvalidationReq);
+          pkt->senderState = invalidateReqState;
+
+          DPRINTF(DMA, "--Queuing invalidation request for addr: %#x size: %d in channel %d\n",
+                  gen.addr(), gen.size(), channel_idx);
+          queueDma(channel_idx, pkt);
+      }
+    }
+
     /* TODO: Currently as we dynamically add channels, the channel ID is the
      * last channel that is just added. If we switch to the fixed-number of
      * channels model, we can let users to pick which channel they want to use,
      * or automatically pick the empty channel. */
-    unsigned channel_idx = transmitList.size() - 1;
     for (ChunkGenerator gen(addr, size, ChunkSize);
          !gen.done(); gen.next()) {
         req = new Request(gen.addr(), gen.size(), flag, masterId);
@@ -250,6 +270,14 @@ DmaPort::trySendTimingReq()
                 pkt->cmdString(),
                 pkt->getAddr(),
                 pkt->req->getSize());
+        // Invalidations do not have responses, so they complete as soon as
+        // they send.
+        if (pkt->cmd == MemCmd::InvalidationReq) {
+          pendingCount--;
+        } else {
+          numOfOutstandingRequests++;
+        }
+
         // Find next_channel_id
         int next_channel_idx;
         unsigned num_channels = transmitList.size();
@@ -275,7 +303,6 @@ DmaPort::trySendTimingReq()
         // assign channel id.
         curr_channel_idx = next_channel_idx;
         DPRINTF(DMA, "-- Done\n");
-        numOfOutstandingRequests ++;
         // if there is more to do, then do so
         if (curr_channel_idx != -1) {
             // this should ultimately wait for as many cycles as the

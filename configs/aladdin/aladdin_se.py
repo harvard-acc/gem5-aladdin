@@ -220,6 +220,7 @@ if options.accel_cfg_file:
     datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
     datapath.issueDmaOpsASAP = config.getboolean(accel, "pipelined_dma")
     datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
+    datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
     if memory_type == "cache":
       options.cacheline_size = config.getint(accel, "cache_line_sz")
       datapath.cacheSize = config.get(accel, "cache_size")
