@@ -1,9 +1,9 @@
-use benchmarks.designsweeptypes
+use benchmarks.designsweeptypes.Gem5DesignSweep
 
 # I call this 'nosweep' because I don't sweep anything.
 begin Gem5DesignSweep nosweep
 
-use benchmarks.cortexsuite
+use benchmarks.cortexsuite.*
 
 generate configs
 generate trace
