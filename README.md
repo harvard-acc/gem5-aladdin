@@ -1,5 +1,7 @@
- laddin SoC Simulator
+gem5-Aladdin SoC Simulator
 ==============================
+
+[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=master)](https://travis-ci.org/harvard-acc/gem5-aladdin)
 
 Welcome to the gem5-Aladdin SoC simulator!
 
@@ -51,7 +53,7 @@ installing dependencies.
 In short, Aladdin's dependencies are:
 
 1. Boost Graph Library 1.55.0
-2. Recent version of GCC (4.5+ should be okay).
+2. GCC 4.8.1 or newer (we use C++11 features).
 3. LLVM 3.4 and Clang 3.4, 64-bit
 4. LLVM-Trace ([link](https://github.com/ysshao/LLVM-Tracer.git)).
 
