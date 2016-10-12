@@ -52,10 +52,10 @@ installing dependencies.
 
 In short, Aladdin's dependencies are:
 
-1. Boost Graph Library 1.55.0
+1. Boost Graph Library 1.55.0+
 2. GCC 4.8.1 or newer (we use C++11 features).
 3. LLVM 3.4 and Clang 3.4, 64-bit
-4. LLVM-Trace ([link](https://github.com/ysshao/LLVM-Tracer.git)).
+4. LLVM-Tracer ([link](https://github.com/ysshao/LLVM-Tracer.git)).
 
 ### Xenon dependencies ####
 
@@ -64,7 +64,7 @@ found [here](https://github.com/xyzsam/xenon).
 
 Xenon requires:
 
-1. Python 2.7.6
+1. Python 2.7.6+
 2. The pyparsing module
 
 ## Installation ##
@@ -80,28 +80,8 @@ Xenon requires:
 2. Setup the Aladdin and Xenon submodules.
 
   ```
-  mkdir src/aladdin
-  git submodule add --name aladdin -- https://github.com/ysshao/aladdin src/aladdin
-  mkdir sweeps/xenon
-  git submodule add --name xenon -- https://github.com/xyzsam/xenon sweeps/xenon
-  git submodule init
-  git submodule update
+  git submodule update --init --recursive
   ```
-
-  You can also create a `.gitmodules` file in the root of your repository with
-  the following contents:
-
-  ```
-  [submodule "aladdin"]
-    path = src/aladdin
-    url = https://github.com/ysshao/aladdin
-  [submodule "xenon"]
-    path = sweeps/xenon
-    url = https://github.com/xyzsam/xenon
-  ```
-
-  And then execute the last two commands from the above code (`init` and
-  `update`).
 
 ### Building gem5-Aladdin ###
 
@@ -115,8 +95,9 @@ Type the following command to build the simulator:
   ```
 
 This will build an optimized version of the gem5 binary (gem5.opt) for the
-specified architecture.  You can also replace `gem5.opt` with `gem5.debug` to
-build a binary suitable for use with a debugger.  See
+specified architecture.  You do *not* need to build Aladdin separately, unless
+you want to run Aladdin on its own. You can also replace `gem5.opt` with
+`gem5.debug` to build a binary suitable for use with a debugger.  See
 http://www.gem5.org/Build_System for more details and options.
 
 The basic source release includes these subdirectories:
