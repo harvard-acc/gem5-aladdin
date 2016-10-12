@@ -1,12 +1,12 @@
 # This imports the Gem5DesignSweep type into global scope.
-use benchmarks.designsweeptypes
+use benchmarks.designsweeptypes.Gem5DesignSweep
 
 begin Gem5DesignSweep single
 
-use benchmarks.machsuite
+use benchmarks.machsuite.*
 
 generate configs
-generate trace
+# generate trace
 
 # Set parameters.
 set output_dir "tmp2" # A comment
