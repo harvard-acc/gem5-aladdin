@@ -1,6 +1,6 @@
 # Definitions of sweep parameters.
 
-from xenon.base.datatypes import IntParam, StrParam
+from xenon.base.datatypes import IntParam, StrParam, BoolParam
 
 PARTITION = "partition"
 BLOCK = "block"
@@ -70,3 +70,4 @@ pipelined_dma = IntParam("pipelined_dma", 0)
 ready_mode = IntParam("ready_mode", 0)
 dma_multi_channel = IntParam("dma_multi_channel", 0)
 ignore_cache_flush = IntParam("ignore_cache_flush", 0)
+invalidate_on_dma_store = BoolParam("invalidate_on_dma_store", True)
