@@ -1,0 +1,18 @@
+use benchmarks.designsweeptypes.Gem5DesignSweep
+
+begin Gem5DesignSweep sweep
+
+use benchmarks.shoc.*
+
+generate configs
+generate dma_trace
+
+set output_dir "shoc" # A comment
+set source_dir "../src/aladdin/SHOC"
+set simulator "aladdin"
+set memory_type "spad"
+
+sweep cycle_time from 1 to 2
+sweep unrolling for triad.triad.triad from 1 to 8
+
+end sweep
