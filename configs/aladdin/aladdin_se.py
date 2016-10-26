@@ -224,6 +224,8 @@ if options.accel_cfg_file:
     if memory_type == "cache":
       options.cacheline_size = config.getint(accel, "cache_line_sz")
       datapath.cacheSize = config.get(accel, "cache_size")
+      datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
+      datapath.cacheQueueSize = config.get(accel, "cache_queue_size")
       datapath.cacheAssoc = config.getint(accel, "cache_assoc")
       datapath.cacheHitLatency = config.getint(accel, "cache_hit_latency")
       datapath.cacheLineSize = config.getint(accel, "cache_line_sz")

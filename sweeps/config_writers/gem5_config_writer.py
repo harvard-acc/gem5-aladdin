@@ -69,6 +69,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     return {
         "cache": os.path.join(sweep_dir, "%s-cache.cfg" % benchmark_name),
         "tlb": os.path.join(sweep_dir, "%s-tlb.cfg" % benchmark_name),
+        "queue": os.path.join(sweep_dir, "%s-queue.cfg" % benchmark_name),
     }
 
   def setupRequiredFiles(self, this_config, sweep_dir, parent_sweep):
@@ -160,18 +161,31 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     with open(cacti_config_files["cache"], "w") as f:
       self.writeCactiConfigFile_(f, cache_params)
 
-    tlb_params = {"cache_size": benchmark["tlb_entries"]*4,
+    tlb_params = {"cache_size": benchmark["tlb_entries"]*8,
                   "cache_assoc": 0,  # fully associative
                   "rw_ports": 0,
                   "exw_ports":  1,  # One write port for miss returns.
                   "exr_ports": rw_ports,
-                  "line_size": 4,  # 32b per TLB entry. in bytes
+                  "line_size": 8,  # 64b per TLB entry. in bytes
                   "banks" : 1,
                   "cache_type": "cache",
                   "search_ports": rw_ports,
-                  "io_bus_width" : 32}
+                  "io_bus_width" : 64}
     with open(cacti_config_files["tlb"], "w") as f:
       self.writeCactiConfigFile_(f, tlb_params)
+
+    queue_params = {"cache_size": benchmark["cache_queue_size"]*8,
+                    "cache_assoc": 0,  # fully associative
+                    "rw_ports": rw_ports,
+                    "exw_ports": 0,
+                    "exr_ports": 0,
+                    "line_size": 8,  # 64b (ignoring a few extra for status).
+                    "banks" : 1,
+                    "cache_type": "cache",
+                    "search_ports": rw_ports,
+                    "io_bus_width": 64}
+    with open(cacti_config_files["queue"], "w") as f:
+      self.writeCactiConfigFile_(f, queue_params)
 
   def writeCactiConfigFile_(self, config_file, params):
     """ Writes CACTI 6.5+ config files to the provided file handle. """
