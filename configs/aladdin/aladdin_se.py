@@ -165,6 +165,11 @@ if options.smt and options.num_cpus > 1:
 system = System(mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
+
+# The O3 model requires fetch buffer size at most the cache line size.
+if CPUClass.type == 'DerivO3CPU':
+  CPUClass.fetchBufferSize = min(CPUClass.fetchBufferSize, system.cache_line_size)
+
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
 
@@ -222,13 +227,12 @@ if options.accel_cfg_file:
     datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
     datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
     if memory_type == "cache":
-      options.cacheline_size = config.getint(accel, "cache_line_sz")
       datapath.cacheSize = config.get(accel, "cache_size")
       datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
       datapath.cacheQueueSize = config.get(accel, "cache_queue_size")
       datapath.cacheAssoc = config.getint(accel, "cache_assoc")
       datapath.cacheHitLatency = config.getint(accel, "cache_hit_latency")
-      datapath.cacheLineSize = config.getint(accel, "cache_line_sz")
+      datapath.cacheLineSize = options.cacheline_size
       datapath.cactiCacheConfig = config.get(accel, "cacti_cache_config")
       datapath.tlbEntries = config.getint(accel, "tlb_entries")
       datapath.tlbAssoc = config.getint(accel, "tlb_assoc")
