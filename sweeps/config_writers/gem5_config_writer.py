@@ -289,7 +289,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
           "--cpu-type=timing ",
           "--caches",
           l2cache_flag,
-          "--cacheline_size=32 ",
+          "--cacheline_size=%d " % benchmark["cache_line_sz"],
           perfect_l1_flag,
           perfect_bus_flag,
           "--accel_cfg_file=" + gem5_cfg_path,
