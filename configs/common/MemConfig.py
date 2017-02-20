@@ -39,6 +39,7 @@
 import m5
 from m5.defines import buildEnv
 import m5.objects
+from m5.objects import CommMonitor
 from m5.util import addToPath, fatal
 import inspect
 import sys
@@ -200,7 +201,15 @@ def config_mem(options, system):
 
     # Connect the controllers to the membus
     for i in xrange(len(system.mem_ctrls)):
-        system.mem_ctrls[i].port = system.membus.master
+        if options.record_dram_traffic:
+            monitor = CommMonitor(
+                trace_enable=True, trace_file="dram_%d.trc.gz" % i)
+            system.membus.master = monitor.slave
+            monitor.master = system.mem_ctrls[i].port
+            monitor_name = "dram_%d_monitor" % i
+            setattr(system, monitor_name, monitor)
+        else:
+            system.mem_ctrls[i].port = system.membus.master
 
     ## Aladdin memory configuration
     #if options.aladdin:
