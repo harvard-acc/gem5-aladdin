@@ -186,11 +186,11 @@ def config_cache(options, system):
             hit_latency=datapath.cacheHitLatency,
             response_latency=datapath.cacheHitLatency)
         if options.l2cache:
-          datapath.addPrivateL1Dcache(aladdin_dcache, system.tol2bus)
-          datapath.connectPrivateScratchpad(system.membus)
+          datapath.addPrivateL1Dcache(system, aladdin_dcache, system.tol2bus)
+          datapath.connectPrivateScratchpad(system, system.membus)
         else:
-          datapath.addPrivateL1Dcache(aladdin_dcache, system.membus)
-          datapath.connectPrivateScratchpad(system.membus)
+          datapath.addPrivateL1Dcache(system, aladdin_dcache, system.membus)
+          datapath.connectPrivateScratchpad(system, system.membus)
     return system
 
 # ExternalSlave provides a "port", but when that port connects to a cache,

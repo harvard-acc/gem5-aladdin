@@ -209,7 +209,10 @@ if options.accel_cfg_file:
     # Set the globally required parameters.
     datapath = HybridDatapath(
         clk_domain = clk_domain,
-        benchName = config.get(accel, "bench_name"),
+        benchName = accel,
+        # TODO: Ideally bench_name would change to output_prefix but that's a
+        # pretty big breaking change.
+        outputPrefix = config.get(accel, "bench_name"),
         traceFileName = config.get(accel, "trace_file_name"),
         configFileName = config.get(accel, "config_file_name"),
         acceleratorName = "datapath%d" % config.getint(accel, "accelerator_id"),
@@ -226,6 +229,7 @@ if options.accel_cfg_file:
     datapath.pipelinedDma = config.getboolean(accel, "pipelined_dma")
     datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
     datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
+    datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
     if memory_type == "cache":
       datapath.cacheSize = config.get(accel, "cache_size")
       datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
