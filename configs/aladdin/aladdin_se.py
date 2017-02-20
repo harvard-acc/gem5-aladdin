@@ -193,7 +193,15 @@ if np > 0:
       cpu.clk_domain = system.cpu_clk_domain
 
 if options.accel_cfg_file:
-  config = ConfigParser.SafeConfigParser()
+  # First read all default values.
+  default_cfg = ConfigParser.SafeConfigParser()
+  default_cfg_file = os.path.join(
+      os.path.dirname(os.path.realpath(__file__)), "aladdin_template.cfg")
+  default_cfg.read(default_cfg_file)
+  defaults = dict(i for i in default_cfg.items("DEFAULT"))
+
+  # Now read the actual supplied config file using the defaults.
+  config = ConfigParser.SafeConfigParser(defaults)
   config.read(options.accel_cfg_file)
   accels = config.sections()
   if not accels:
