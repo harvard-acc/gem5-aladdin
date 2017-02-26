@@ -195,7 +195,8 @@ def config_cache(options, system):
             system.cpu[i].connectAllPorts(system.membus)
 
     if options.accel_cfg_file:
-      for datapath in system.datapaths:
+      datapaths = system.find_all(HybridDatapath)[0]
+      for datapath in datapaths:
         # For now, we will connect all datapaths to a cache regardless of
         # whether they are needed or not.
         aladdin_dcache = dcache_class(

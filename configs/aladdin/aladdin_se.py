@@ -222,7 +222,7 @@ if options.accel_cfg_file:
         outputPrefix = config.get(accel, "bench_name"),
         traceFileName = config.get(accel, "trace_file_name"),
         configFileName = config.get(accel, "config_file_name"),
-        acceleratorName = "datapath%d" % config.getint(accel, "accelerator_id"),
+        acceleratorName = "%s_datapath" % accel,
         acceleratorId = config.getint(accel, "accelerator_id"),
         cycleTime = cycleTime,
         useDb = config.getboolean(accel, "use_db"),
@@ -258,7 +258,8 @@ if options.accel_cfg_file:
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
     datapaths.append(datapath)
-  system.datapaths = datapaths
+  for datapath in datapaths:
+    setattr(system, datapath.acceleratorName, datapath)
 
 # Sanity check
 if options.fastmem:
