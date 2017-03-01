@@ -41,8 +41,7 @@ external_type(Scalar, primitive="yes");
 
 structure(InPort, external = "yes", primitive="yes") {
   bool isReady();
-  void dequeue();
-  Cycles dequeue_getDelayCycles();
+  Cycles dequeue();
   void recycle();
   bool isEmpty();
 }
@@ -160,10 +159,6 @@ structure (CacheMemory, external = "yes") {
 
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {
 
-}
-
-structure (MemoryControl, inport="yes", outport="yes", external = "yes") {
-  void recordRequestType(CacheRequestType);
 }
 
 structure (DMASequencer, external = "yes") {

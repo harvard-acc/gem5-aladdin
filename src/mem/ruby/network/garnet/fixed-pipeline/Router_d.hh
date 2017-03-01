@@ -35,13 +35,12 @@
 #include <vector>
 
 #include "mem/ruby/common/NetDest.hh"
-#include "mem/ruby/network/BasicRouter.hh"
+#include "mem/ruby/network/garnet/fixed-pipeline/GarnetNetwork_d.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/flit_d.hh"
 #include "mem/ruby/network/garnet/NetworkHeader.hh"
-#include "mem/ruby/network/orion/NetworkPower.hh"
+#include "mem/ruby/network/BasicRouter.hh"
 #include "params/GarnetRouter_d.hh"
 
-class GarnetNetwork_d;
 class NetworkLink_d;
 class CreditLink_d;
 class InputUnit_d;
@@ -86,14 +85,13 @@ class Router_d : public BasicRouter
     void route_req(flit_d *t_flit, InputUnit_d* in_unit, int invc);
     void vcarb_req();
     void swarb_req();
+
     void printFaultVector(std::ostream& out);
     void printAggregateFaultProbability(std::ostream& out);
 
-    void calculate_power();
-    void calculate_performance_numbers();
-    double get_dynamic_power() const { return m_power_dyn; }
-    double get_static_power() const { return m_power_sta; }
-    double get_clk_power() const { return m_clk_power; }
+    void regStats();
+    void collateStats();
+    void resetStats();
 
     bool get_fault_vector(int temperature, float fault_vector[]){ 
         return m_network_ptr->fault_model->fault_vector(m_id, temperature, 
@@ -110,8 +108,6 @@ class Router_d : public BasicRouter
   private:
     int m_virtual_networks, m_num_vcs, m_vc_per_vnet;
     GarnetNetwork_d *m_network_ptr;
-    double sw_local_arbit_count, sw_global_arbit_count;
-    double crossbar_count;
 
     std::vector<InputUnit_d *> m_input_unit;
     std::vector<OutputUnit_d *> m_output_unit;
@@ -120,16 +116,17 @@ class Router_d : public BasicRouter
     SWallocator_d *m_sw_alloc;
     Switch_d *m_switch;
 
-    // Statistical variables for power
-    double m_power_dyn;
-    double m_power_sta;
-    double m_clk_power;
+    // Statistical variables required for power computations
+    Stats::Scalar m_buffer_reads;
+    Stats::Scalar m_buffer_writes;
 
-    // Statistical variables for performance
-    std::vector<double> buf_read_count;
-    std::vector<double> buf_write_count;
-    std::vector<double> vc_local_arbit_count;
-    std::vector<double> vc_global_arbit_count;
+    Stats::Scalar m_sw_local_arbiter_activity;
+    Stats::Scalar m_sw_global_arbiter_activity;
+
+    Stats::Scalar m_vc_local_arbiter_activity;
+    Stats::Scalar m_vc_global_arbiter_activity;
+
+    Stats::Scalar m_crossbar_activity;
 };
 
 #endif // __MEM_RUBY_NETWORK_GARNET_FIXED_PIPELINE_ROUTER_D_HH__

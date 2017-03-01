@@ -1,4 +1,17 @@
 /*
+ * Copyright 2014 Google, Inc.
+ * Copyright (c) 2013 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2002-2005 The Regents of The University of Michigan
  * Copyright (c) 2007-2008 The Florida State University
  * All rights reserved.
@@ -33,6 +46,8 @@
 #ifndef __ARCH_ARM_REMOTE_GDB_HH__
 #define __ARCH_ARM_REMOTE_GDB_HH__
 
+#include <algorithm>
+
 #include "base/remote_gdb.hh"
 
 class System;
@@ -40,32 +55,42 @@ class ThreadContext;
 
 namespace ArmISA
 {
-// registers for arm with vfpv3/neon
-const int NUMREGS   = 41;  /* r0-r15, cpsr, d0-d31, fpscr */
-const int REG_R0 = 0;
-const int REG_F0 = 8;
-const int REG_CPSR  = 8;   /* bit 512 to bit 543  */
-const int REG_FPSCR = 40;  /* bit 2592 to bit 2623 */
+
+// AArch32 registers with vfpv3/neon
+enum {
+    GDB32_R0 = 0,
+    GDB32_CPSR = 16,
+    GDB32_F0 = 17,
+    GDB32_FPSCR = 81,
+    GDB32_NUMREGS = 82
+};
+
+// AArch64 registers
+enum {
+    GDB64_X0 = 0,
+    GDB64_SPX = 31,
+    GDB64_PC = 32,
+    GDB64_CPSR = 33,
+    GDB64_V0 = 34,
+    GDB64_V0_32 = 2 * GDB64_V0,
+    GDB64_NUMREGS = 98
+};
+
+const int GDB_REG_BYTES M5_VAR_USED =
+    std::max(GDB64_NUMREGS * sizeof(uint64_t),
+             GDB32_NUMREGS * sizeof(uint32_t));
 
 class RemoteGDB : public BaseRemoteGDB
 {
+  protected:
+    bool acc(Addr addr, size_t len);
+    bool write(Addr addr, size_t size, const char *data);
 
-protected:
-  Addr notTakenBkpt;
-  Addr takenBkpt;
+    void getregs();
+    void setregs();
 
-protected:
-  bool acc(Addr addr, size_t len);
-  bool write(Addr addr, size_t size, const char *data);
-
-  void getregs();
-  void setregs();
-
-  void clearSingleStep();
-  void setSingleStep();
-
-public:
-  RemoteGDB(System *_system, ThreadContext *tc);
+  public:
+    RemoteGDB(System *_system, ThreadContext *tc);
 };
 } // namespace ArmISA
 

@@ -60,6 +60,7 @@
 #include "cpu/checker/cpu.hh"
 #include "cpu/checker/thread_context.hh"
 #include "cpu/exetrace.hh"
+#include "cpu/pred/bpred_unit.hh"
 #include "cpu/profile.hh"
 #include "cpu/simple_thread.hh"
 #include "cpu/smt.hh"
@@ -85,7 +86,10 @@ using namespace std;
 using namespace TheISA;
 
 BaseSimpleCPU::BaseSimpleCPU(BaseSimpleCPUParams *p)
-    : BaseCPU(p), traceData(NULL), thread(NULL)
+    : BaseCPU(p),
+      branchPred(p->branchPred),
+      traceData(NULL), thread(NULL), _status(Idle), interval_stats(false),
+      inst()
 {
     if (FullSystem)
         thread = new SimpleThread(this, 0, p->system, p->itb, p->dtb,
@@ -128,14 +132,6 @@ BaseSimpleCPU::BaseSimpleCPU(BaseSimpleCPUParams *p)
 BaseSimpleCPU::~BaseSimpleCPU()
 {
 }
-
-void
-BaseSimpleCPU::deallocateContext(ThreadID thread_num)
-{
-    // for now, these are equivalent
-    suspendContext(thread_num);
-}
-
 
 void
 BaseSimpleCPU::haltContext(ThreadID thread_num)
@@ -271,21 +267,34 @@ BaseSimpleCPU::regStats()
         .prereq(dcacheStallCycles)
         ;
 
-    icacheRetryCycles
-        .name(name() + ".icache_retry_cycles")
-        .desc("ICache total retry cycles")
-        .prereq(icacheRetryCycles)
+    statExecutedInstType
+        .init(Enums::Num_OpClass)
+        .name(name() + ".op_class")
+        .desc("Class of executed instruction")
+        .flags(total | pdf | dist)
         ;
-
-    dcacheRetryCycles
-        .name(name() + ".dcache_retry_cycles")
-        .desc("DCache total retry cycles")
-        .prereq(dcacheRetryCycles)
-        ;
+    for (unsigned i = 0; i < Num_OpClasses; ++i) {
+        statExecutedInstType.subname(i, Enums::OpClassStrings[i]);
+    }
 
     idleFraction = constant(1.0) - notIdleFraction;
     numIdleCycles = idleFraction * numCycles;
     numBusyCycles = (notIdleFraction)*numCycles;
+
+    numBranches
+        .name(name() + ".Branches")
+        .desc("Number of branches fetched")
+        .prereq(numBranches);
+
+    numPredictedBranches
+        .name(name() + ".predictedBranches")
+        .desc("Number of branches predicted as taken")
+        .prereq(numPredictedBranches);
+
+    numBranchMispred
+        .name(name() + ".BranchMispred")
+        .desc("Number of branch mispredictions")
+        .prereq(numBranchMispred);
 }
 
 void
@@ -327,6 +336,8 @@ BaseSimpleCPU::dbg_vtophys(Addr addr)
 void
 BaseSimpleCPU::wakeup()
 {
+    getAddrMonitor()->gotWakeup = true;
+
     if (thread->status() != ThreadContext::Suspended)
         return;
 
@@ -434,6 +445,19 @@ BaseSimpleCPU::preExecute()
                 curStaticInst->getName(), curStaticInst->machInst);
 #endif // TRACING_ON
     }
+
+    if (branchPred && curStaticInst && curStaticInst->isControl()) {
+        // Use a fake sequence number since we only have one
+        // instruction in flight at the same time.
+        const InstSeqNum cur_sn(0);
+        const ThreadID tid(0);
+        pred_pc = thread->pcState();
+        const bool predict_taken(
+            branchPred->predict(curStaticInst, cur_sn, pred_pc, tid));
+
+        if (predict_taken)
+            ++numPredictedBranches;
+    }
 }
 
 void
@@ -462,6 +486,10 @@ BaseSimpleCPU::postExecute()
 
     if (CPA::available()) {
         CPA::cpa()->swAutoBegin(tc, pc.nextInstAddr());
+    }
+
+    if (curStaticInst->isControl()) {
+        ++numBranches;
     }
 
     /* Power model statistics */
@@ -497,6 +525,8 @@ BaseSimpleCPU::postExecute()
     }
     /* End power model statistics */
 
+    statExecutedInstType[curStaticInst->opClass()]++;
+
     if (FullSystem)
         traceFunctions(instAddr);
 
@@ -505,12 +535,16 @@ BaseSimpleCPU::postExecute()
         delete traceData;
         traceData = NULL;
     }
+
+    // Call CPU instruction commit probes
+    probeInstCommit(curStaticInst);
 }
 
-
 void
-BaseSimpleCPU::advancePC(Fault fault)
+BaseSimpleCPU::advancePC(const Fault &fault)
 {
+    const bool branching(thread->pcState().branching());
+
     //Since we're moving to a new pc, zero out the offset
     fetchOffset = 0;
     if (fault != NoFault) {
@@ -524,6 +558,23 @@ BaseSimpleCPU::advancePC(Fault fault)
             TheISA::PCState pcState = thread->pcState();
             TheISA::advancePC(pcState, curStaticInst);
             thread->pcState(pcState);
+        }
+    }
+
+    if (branchPred && curStaticInst && curStaticInst->isControl()) {
+        // Use a fake sequence number since we only have one
+        // instruction in flight at the same time.
+        const InstSeqNum cur_sn(0);
+        const ThreadID tid(0);
+
+        if (pred_pc == thread->pcState()) {
+            // Correctly predicted branch
+            branchPred->update(cur_sn, tid);
+        } else {
+            // Mis-predicted branch
+            branchPred->squash(cur_sn, pcState(),
+                               branching, tid);
+            ++numBranchMispred;
         }
     }
 }

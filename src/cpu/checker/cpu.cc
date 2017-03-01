@@ -44,6 +44,7 @@
 #include <list>
 #include <string>
 
+#include "arch/generic/tlb.hh"
 #include "arch/kernel_stats.hh"
 #include "arch/vtophys.hh"
 #include "cpu/checker/cpu.hh"
@@ -53,7 +54,6 @@
 #include "cpu/thread_context.hh"
 #include "params/CheckerCPU.hh"
 #include "sim/full_system.hh"
-#include "sim/tlb.hh"
 
 using namespace std;
 using namespace TheISA;
@@ -78,7 +78,7 @@ CheckerCPU::CheckerCPU(Params *p)
     startNumLoad = 0;
     youngestSN = 0;
 
-    changedPC = willChangePC = changedNextPC = false;
+    changedPC = willChangePC = false;
 
     exitOnError = p->exitOnError;
     warnOnlyOnLoadError = p->warnOnlyOnLoadError;
@@ -154,8 +154,8 @@ CheckerCPU::readMem(Addr addr, uint8_t *data, unsigned size, unsigned flags)
 
     // Need to account for multiple accesses like the Atomic and TimingSimple
     while (1) {
-        memReq = new Request();
-        memReq->setVirt(0, addr, size, flags, masterId, thread->pcState().instAddr());
+        memReq = new Request(0, addr, size, flags, masterId,
+                             thread->pcState().instAddr(), tc->contextId(), 0);
 
         // translate to physical address
         fault = dtb->translateFunctional(memReq, tc, BaseTLB::Read);
@@ -170,10 +170,7 @@ CheckerCPU::readMem(Addr addr, uint8_t *data, unsigned size, unsigned flags)
         // Now do the access
         if (fault == NoFault &&
             !memReq->getFlags().isSet(Request::NO_ACCESS)) {
-            PacketPtr pkt = new Packet(memReq,
-                                       memReq->isLLSC() ?
-                                       MemCmd::LoadLockedReq :
-                                       MemCmd::ReadReq);
+            PacketPtr pkt = Packet::createRead(memReq);
 
             pkt->dataStatic(data);
 
@@ -234,6 +231,7 @@ CheckerCPU::writeMem(uint8_t *data, unsigned size,
     bool checked_flags = false;
     bool flags_match = true;
     Addr pAddr = 0x0;
+    static uint8_t zero_data[64] = {};
 
     int fullSize = size;
 
@@ -244,8 +242,8 @@ CheckerCPU::writeMem(uint8_t *data, unsigned size,
 
     // Need to account for a multiple access like Atomic and Timing CPUs
     while (1) {
-        memReq = new Request();
-        memReq->setVirt(0, addr, size, flags, masterId, thread->pcState().instAddr());
+        memReq = new Request(0, addr, size, flags, masterId,
+                             thread->pcState().instAddr(), tc->contextId(), 0);
 
         // translate to physical address
         fault = dtb->translateFunctional(memReq, tc, BaseTLB::Write);
@@ -301,16 +299,25 @@ CheckerCPU::writeMem(uint8_t *data, unsigned size,
    // Cannot check this is actually what went to memory because
    // there stores can be in ld/st queue or coherent operations
    // overwriting values.
-   bool extraData;
+   bool extraData = false;
    if (unverifiedReq) {
        extraData = unverifiedReq->extraDataValid() ?
-                        unverifiedReq->getExtraData() : 1;
+                        unverifiedReq->getExtraData() : true;
+   }
+
+   // If the request is to ZERO a cache block, there is no data to check
+   // against, but it's all zero. We need something to compare to, so use a
+   // const set of zeros.
+   if (flags & Request::CACHE_BLOCK_ZERO) {
+       assert(!data);
+       assert(sizeof(zero_data) <= fullSize);
+       data = zero_data;
    }
 
    if (unverifiedReq && unverifiedMemData &&
        memcmp(data, unverifiedMemData, fullSize) && extraData) {
-           warn("%lli: Store value does not match value sent to memory!\
-                  data: %#x inst_data: %#x", curTick(), data,
+           warn("%lli: Store value does not match value sent to memory! "
+                  "data: %#x inst_data: %#x", curTick(), data,
                   unverifiedMemData);
        handleError();
    }

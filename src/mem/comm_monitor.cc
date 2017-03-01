@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013 ARM Limited
+ * Copyright (c) 2012-2013, 2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -55,18 +55,37 @@ CommMonitor::CommMonitor(Params* params)
       readAddrMask(params->read_addr_mask),
       writeAddrMask(params->write_addr_mask),
       stats(params),
-      traceStream(NULL)
+      stackDistCalc(params->stack_dist_calc),
+      traceStream(NULL),
+      system(params->system)
 {
-    // If we are using a trace file, then open the file,
-    if (params->trace_file != "") {
-        // If the trace file is not specified as an absolute path,
-        // append the current simulation output directory
-        std::string filename = simout.resolve(params->trace_file);
+    // If we are using a trace file, then open the file
+    if (params->trace_enable) {
+        std::string filename;
+        if (params->trace_file != "") {
+            // If the trace file is not specified as an absolute path,
+            // append the current simulation output directory
+            filename = simout.resolve(params->trace_file);
+
+            std::string suffix = ".gz";
+            // If trace_compress has been set, check the suffix. Append
+            // accordingly.
+            if (params->trace_compress &&
+                filename.compare(filename.size() - suffix.size(), suffix.size(),
+                                 suffix) != 0)
+                    filename = filename + suffix;
+        } else {
+            // Generate a filename from the name of the SimObject. Append .trc
+            // and .gz if we want compression enabled.
+            filename = simout.resolve(name() + ".trc" +
+                                      (params->trace_compress ? ".gz" : ""));
+        }
+
         traceStream = new ProtoOutputStream(filename);
 
         // Create a protobuf message for the header and write it to
         // the stream
-        Message::PacketHeader header_msg;
+        ProtoMessage::PacketHeader header_msg;
         header_msg.set_obj_id(name());
         header_msg.set_tick_freq(SimClock::Frequency);
         traceStream->write(header_msg);
@@ -83,8 +102,14 @@ CommMonitor::CommMonitor(Params* params)
     samplePeriod.setTick(params->sample_period);
 
     DPRINTF(CommMonitor,
-            "Created monitor %s with sample period %d ticks (%f s)\n",
-            name(), samplePeriodTicks, samplePeriod);
+            "Created monitor %s with sample period %d ticks (%f ms)\n",
+            name(), samplePeriodTicks, samplePeriod.msec());
+}
+
+CommMonitor::~CommMonitor()
+{
+    // if not already done, close the stream
+    closeStreams();
 }
 
 void
@@ -106,6 +131,14 @@ CommMonitor::init()
     // make sure both sides of the monitor are connected
     if (!slavePort.isConnected() || !masterPort.isConnected())
         fatal("Communication monitor is not connected on both sides.\n");
+
+    if (traceStream != NULL) {
+        // Check the memory mode. We only record something when in
+        // timing mode. Warn accordingly.
+        if (!system->isTimingMode())
+            warn("%s: Not in timing mode. No trace will be recorded.", name());
+    }
+
 }
 
 BaseMasterPort&
@@ -143,6 +176,23 @@ CommMonitor::recvFunctionalSnoop(PacketPtr pkt)
 Tick
 CommMonitor::recvAtomic(PacketPtr pkt)
 {
+    // do stack distance calculations if enabled
+    if (stackDistCalc)
+        stackDistCalc->update(pkt->cmd, pkt->getAddr());
+
+   // if tracing enabled, store the packet information
+   // to the trace stream
+   if (traceStream != NULL) {
+        ProtoMessage::Packet pkt_msg;
+        pkt_msg.set_tick(curTick());
+        pkt_msg.set_cmd(pkt->cmdToIndex());
+        pkt_msg.set_flags(pkt->req->getFlags());
+        pkt_msg.set_addr(pkt->getAddr());
+        pkt_msg.set_size(pkt->getSize());
+
+        traceStream->write(pkt_msg);
+    }
+
     return masterPort.sendAtomic(pkt);
 }
 
@@ -162,7 +212,8 @@ CommMonitor::recvTimingReq(PacketPtr pkt)
     // or even deleted when sendTiming() is called.
     bool is_read = pkt->isRead();
     bool is_write = pkt->isWrite();
-    int cmd = pkt->cmdToIndex();
+    MemCmd cmd = pkt->cmd;
+    int cmd_idx = pkt->cmdToIndex();
     Request::FlagsType req_flags = pkt->req->getFlags();
     unsigned size = pkt->getSize();
     Addr addr = pkt->getAddr();
@@ -185,13 +236,18 @@ CommMonitor::recvTimingReq(PacketPtr pkt)
         delete pkt->popSenderState();
     }
 
+    // If successful and we are calculating stack distances, update
+    // the calculator
+    if (successful && stackDistCalc)
+        stackDistCalc->update(cmd, addr);
+
     if (successful && traceStream != NULL) {
         // Create a protobuf message representing the
         // packet. Currently we do not preserve the flags in the
         // trace.
-        Message::Packet pkt_msg;
+        ProtoMessage::Packet pkt_msg;
         pkt_msg.set_tick(curTick());
-        pkt_msg.set_cmd(cmd);
+        pkt_msg.set_cmd(cmd_idx);
         pkt_msg.set_flags(req_flags);
         pkt_msg.set_addr(addr);
         pkt_msg.set_size(size);
@@ -386,15 +442,15 @@ CommMonitor::getAddrRanges() const
 }
 
 void
-CommMonitor::recvRetryMaster()
+CommMonitor::recvReqRetry()
 {
-    slavePort.sendRetry();
+    slavePort.sendRetryReq();
 }
 
 void
-CommMonitor::recvRetrySlave()
+CommMonitor::recvRespRetry()
 {
-    masterPort.sendRetry();
+    masterPort.sendRetryResp();
 }
 
 void

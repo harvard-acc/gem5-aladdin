@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012,2015 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -63,7 +63,20 @@ PacketQueue::retry()
 {
     DPRINTF(PacketQueue, "Queue %s received retry\n", name());
     assert(waitingOnRetry);
+    waitingOnRetry = false;
     sendDeferredPacket();
+}
+
+bool
+PacketQueue::hasAddr(Addr addr) const
+{
+    // caller is responsible for ensuring that all packets have the
+    // same alignment
+    for (const auto& p : transmitList) {
+        if (p.pkt->getAddr() == addr)
+            return true;
+    }
+    return false;
 }
 
 bool
@@ -71,11 +84,10 @@ PacketQueue::checkFunctional(PacketPtr pkt)
 {
     pkt->pushLabel(label);
 
-    DeferredPacketIterator i = transmitList.begin();
-    DeferredPacketIterator end = transmitList.end();
+    auto i = transmitList.begin();
     bool found = false;
 
-    while (!found && i != end) {
+    while (!found && i != transmitList.end()) {
         // If the buffered packet contains data, and it overlaps the
         // current packet, then update data
         found = pkt->checkFunctional(i->pkt);
@@ -88,27 +100,12 @@ PacketQueue::checkFunctional(PacketPtr pkt)
 }
 
 void
-PacketQueue::schedSendEvent(Tick when)
+PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool force_order)
 {
-    // if we are waiting on a retry, do not schedule a send event, and
-    // instead rely on retry being called
-    if (waitingOnRetry) {
-        assert(!sendEvent.scheduled());
-        return;
-    }
+    DPRINTF(PacketQueue, "%s for %s address %x size %d when %lu ord: %i\n",
+            __func__, pkt->cmdString(), pkt->getAddr(), pkt->getSize(), when,
+            force_order);
 
-    if (!sendEvent.scheduled()) {
-        em.schedule(&sendEvent, when);
-    } else if (sendEvent.when() > when) {
-        em.reschedule(&sendEvent, when);
-    }
-}
-
-void
-PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool send_as_snoop)
-{
-    DPRINTF(PacketQueue, "%s for %s address %x size %d\n", __func__,
-            pkt->cmdString(), pkt->getAddr(), pkt->getSize());
     // we can still send a packet before the end of this tick
     assert(when >= curTick());
 
@@ -122,67 +119,85 @@ PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool send_as_snoop)
               name());
     }
 
+    // if requested, force the timing to be in-order by changing the when
+    // parameter
+    if (force_order && !transmitList.empty()) {
+        Tick back = transmitList.back().tick;
+
+        // fudge timing if required; relies on the code below to do the right
+        // thing (push_back) with the updated time-stamp
+        if (when < back) {
+            DPRINTF(PacketQueue, "%s force_order shifted packet %s address "\
+                    "%x from %lu to %lu\n", __func__, pkt->cmdString(),
+                    pkt->getAddr(), when, back);
+            when = back;
+        }
+    }
+
     // nothing on the list, or earlier than current front element,
     // schedule an event
     if (transmitList.empty() || when < transmitList.front().tick) {
+        // force_order-ed in here only when list is empty
+        assert(!force_order || transmitList.empty());
         // note that currently we ignore a potentially outstanding retry
         // and could in theory put a new packet at the head of the
         // transmit list before retrying the existing packet
-        transmitList.push_front(DeferredPacket(when, pkt, send_as_snoop));
+        transmitList.emplace_front(DeferredPacket(when, pkt));
         schedSendEvent(when);
         return;
     }
 
+    // we should either have an outstanding retry, or a send event
+    // scheduled, but there is an unfortunate corner case where the
+    // x86 page-table walker and timing CPU send out a new request as
+    // part of the receiving of a response (called by
+    // PacketQueue::sendDeferredPacket), in which we end up calling
+    // ourselves again before we had a chance to update waitingOnRetry
+    // assert(waitingOnRetry || sendEvent.scheduled());
+
     // list is non-empty and this belongs at the end
     if (when >= transmitList.back().tick) {
-        transmitList.push_back(DeferredPacket(when, pkt, send_as_snoop));
+        transmitList.emplace_back(DeferredPacket(when, pkt));
         return;
     }
 
+    // forced orders never need insertion in the middle
+    assert(!force_order);
+
     // this belongs in the middle somewhere, insertion sort
-    DeferredPacketIterator i = transmitList.begin();
+    auto i = transmitList.begin();
     ++i; // already checked for insertion at front
     while (i != transmitList.end() && when >= i->tick)
         ++i;
-    transmitList.insert(i, DeferredPacket(when, pkt, send_as_snoop));
-}
-
-void PacketQueue::trySendTiming()
-{
-    assert(deferredPacketReady());
-
-    // take the next packet off the list here, as we might return to
-    // ourselves through the sendTiming call below
-    DeferredPacket dp = transmitList.front();
-    transmitList.pop_front();
-
-    // use the appropriate implementation of sendTiming based on the
-    // type of port associated with the queue, and whether the packet
-    // is to be sent as a snoop or not
-    waitingOnRetry = !sendTiming(dp.pkt, dp.sendAsSnoop);
-
-    if (waitingOnRetry) {
-        // put the packet back at the front of the list (packet should
-        // not have changed since it wasn't accepted)
-        assert(!sendEvent.scheduled());
-        transmitList.push_front(dp);
-    }
+    transmitList.emplace(i, DeferredPacket(when, pkt));
 }
 
 void
-PacketQueue::scheduleSend(Tick time)
+PacketQueue::schedSendEvent(Tick when)
 {
-    // the next ready time is either determined by the next deferred packet,
-    // or in the cache through the MSHR ready time
-    Tick nextReady = std::min(deferredPacketReadyTime(), time);
+    // if we are waiting on a retry just hold off
+    if (waitingOnRetry) {
+        DPRINTF(PacketQueue, "Not scheduling send as waiting for retry\n");
+        assert(!sendEvent.scheduled());
+        return;
+    }
 
-    if (nextReady != MaxTick) {
-        // if the sendTiming caused someone else to call our
-        // recvTiming we could already have an event scheduled, check
-        if (!sendEvent.scheduled())
-            em.schedule(&sendEvent, std::max(nextReady, curTick() + 1));
+    if (when != MaxTick) {
+        // we cannot go back in time, and to be consistent we stick to
+        // one tick in the future
+        when = std::max(when, curTick() + 1);
+        // @todo Revisit the +1
+
+        if (!sendEvent.scheduled()) {
+            em.schedule(&sendEvent, when);
+        } else if (when < sendEvent.when()) {
+            // if the new time is earlier than when the event
+            // currently is scheduled, move it forward
+            em.reschedule(&sendEvent, when);
+        }
     } else {
-        // no more to send, so if we're draining, we may be done
+        // we get a MaxTick when there is no more to send, so if we're
+        // draining, we may be done at this point
         if (drainManager && transmitList.empty() && !sendEvent.scheduled()) {
             DPRINTF(Drain, "PacketQueue done draining,"
                     "processing drain event\n");
@@ -195,14 +210,30 @@ PacketQueue::scheduleSend(Tick time)
 void
 PacketQueue::sendDeferredPacket()
 {
-    // try to send what is on the list, this will set waitingOnRetry
-    // accordingly
-    trySendTiming();
+    // sanity checks
+    assert(!waitingOnRetry);
+    assert(deferredPacketReady());
+
+    DeferredPacket dp = transmitList.front();
+
+    // take the packet of the list before sending it, as sending of
+    // the packet in some cases causes a new packet to be enqueued
+    // (most notaly when responding to the timing CPU, leading to a
+    // new request hitting in the L1 icache, leading to a new
+    // response)
+    transmitList.pop_front();
+
+    // use the appropriate implementation of sendTiming based on the
+    // type of queue
+    waitingOnRetry = !sendTiming(dp.pkt);
 
     // if we succeeded and are not waiting for a retry, schedule the
     // next send
     if (!waitingOnRetry) {
-        scheduleSend();
+        schedSendEvent(deferredPacketReadyTime());
+    } else {
+        // put the packet back at the front of the list
+        transmitList.emplace_front(dp);
     }
 }
 
@@ -216,39 +247,46 @@ PacketQueue::processSendEvent()
 unsigned int
 PacketQueue::drain(DrainManager *dm)
 {
-    if (transmitList.empty() && !sendEvent.scheduled())
+    if (transmitList.empty())
         return 0;
     DPRINTF(Drain, "PacketQueue not drained\n");
     drainManager = dm;
     return 1;
 }
 
-MasterPacketQueue::MasterPacketQueue(EventManager& _em, MasterPort& _masterPort,
-                                     const std::string _label)
+ReqPacketQueue::ReqPacketQueue(EventManager& _em, MasterPort& _masterPort,
+                               const std::string _label)
     : PacketQueue(_em, _label), masterPort(_masterPort)
 {
 }
 
 bool
-MasterPacketQueue::sendTiming(PacketPtr pkt, bool send_as_snoop)
+ReqPacketQueue::sendTiming(PacketPtr pkt)
 {
-    // attempt to send the packet and return according to the outcome
-    if (!send_as_snoop)
-        return masterPort.sendTimingReq(pkt);
-    else
-        return masterPort.sendTimingSnoopResp(pkt);
+    return masterPort.sendTimingReq(pkt);
 }
 
-SlavePacketQueue::SlavePacketQueue(EventManager& _em, SlavePort& _slavePort,
-                                   const std::string _label)
+SnoopRespPacketQueue::SnoopRespPacketQueue(EventManager& _em,
+                                           MasterPort& _masterPort,
+                                           const std::string _label)
+    : PacketQueue(_em, _label), masterPort(_masterPort)
+{
+}
+
+bool
+SnoopRespPacketQueue::sendTiming(PacketPtr pkt)
+{
+    return masterPort.sendTimingSnoopResp(pkt);
+}
+
+RespPacketQueue::RespPacketQueue(EventManager& _em, SlavePort& _slavePort,
+                                 const std::string _label)
     : PacketQueue(_em, _label), slavePort(_slavePort)
 {
 }
 
 bool
-SlavePacketQueue::sendTiming(PacketPtr pkt, bool send_as_snoop)
+RespPacketQueue::sendTiming(PacketPtr pkt)
 {
-    // we should never have queued snoop requests
-    assert(!send_as_snoop);
     return slavePort.sendTimingResp(pkt);
 }

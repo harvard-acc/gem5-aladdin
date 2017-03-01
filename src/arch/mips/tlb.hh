@@ -37,6 +37,7 @@
 
 #include <map>
 
+#include "arch/generic/tlb.hh"
 #include "arch/mips/isa_traits.hh"
 #include "arch/mips/pagetable.hh"
 #include "arch/mips/utility.hh"
@@ -44,9 +45,7 @@
 #include "base/statistics.hh"
 #include "mem/request.hh"
 #include "params/MipsTLB.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/sim_object.hh"
-#include "sim/tlb.hh"
 
 class ThreadContext;
 
@@ -87,6 +86,9 @@ class TLB : public BaseTLB
     int probeEntry(Addr vpn,uint8_t) const;
     MipsISA::PTE *getEntry(unsigned) const;
     virtual ~TLB();
+
+    void takeOverFrom(BaseTLB *otlb) {}
+
     int smallPages;
     int getsize() const { return size; }
 

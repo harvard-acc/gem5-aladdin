@@ -96,14 +96,17 @@ class O3ThreadContext : public ThreadContext
     virtual BaseCPU *getCpuPtr() { return cpu; }
 
     /** Reads this CPU's ID. */
-    virtual int cpuId() { return cpu->cpuId(); }
+    virtual int cpuId() const { return cpu->cpuId(); }
 
-    virtual int contextId() { return thread->contextId(); }
+    /** Reads this CPU's Socket ID. */
+    virtual uint32_t socketId() const { return cpu->socketId(); }
+
+    virtual int contextId() const { return thread->contextId(); }
 
     virtual void setContextId(int id) { thread->setContextId(id); }
 
     /** Returns this thread's ID number. */
-    virtual int threadId() { return thread->threadId(); }
+    virtual int threadId() const { return thread->threadId(); }
     virtual void setThreadId(int id) { return thread->setThreadId(id); }
 
     /** Returns a pointer to the system. */
@@ -133,15 +136,14 @@ class O3ThreadContext : public ThreadContext
     virtual void setStatus(Status new_status)
     { thread->setStatus(new_status); }
 
-    /** Set the status to Active.  Optional delay indicates number of
-     * cycles to wait before beginning execution. */
-    virtual void activate(Cycles delay = Cycles(1));
+    /** Set the status to Active. */
+    virtual void activate();
 
     /** Set the status to Suspended. */
-    virtual void suspend(Cycles delay = Cycles(0));
+    virtual void suspend();
 
     /** Set the status to Halted. */
-    virtual void halt(Cycles delay = Cycles(0));
+    virtual void halt();
 
     /** Dumps the function profiling information.
      * @todo: Implement.
@@ -226,7 +228,7 @@ class O3ThreadContext : public ThreadContext
     { return cpu->microPC(thread->threadId()); }
 
     /** Reads a miscellaneous register. */
-    virtual MiscReg readMiscRegNoEffect(int misc_reg)
+    virtual MiscReg readMiscRegNoEffect(int misc_reg) const
     { return cpu->readMiscRegNoEffect(misc_reg, thread->threadId()); }
 
     /** Reads a misc. register, including any side-effects the
@@ -244,6 +246,7 @@ class O3ThreadContext : public ThreadContext
     virtual int flattenIntIndex(int reg);
     virtual int flattenFloatIndex(int reg);
     virtual int flattenCCIndex(int reg);
+    virtual int flattenMiscIndex(int reg);
 
     /** Returns the number of consecutive store conditional failures. */
     // @todo: Figure out where these store cond failures should go.
@@ -253,14 +256,6 @@ class O3ThreadContext : public ThreadContext
     /** Sets the number of consecutive store conditional failures. */
     virtual void setStCondFailures(unsigned sc_failures)
     { thread->storeCondFailures = sc_failures; }
-
-    // Only really makes sense for old CPU model.  Lots of code
-    // outside the CPU still checks this function, so it will
-    // always return false to keep everything working.
-    /** Checks if the thread is misspeculating.  Because it is
-     * very difficult to determine if the thread is
-     * misspeculating, this is set as false. */
-    virtual bool misspeculating() { return false; }
 
     /** Executes a syscall in SE mode. */
     virtual void syscall(int64_t callnum)

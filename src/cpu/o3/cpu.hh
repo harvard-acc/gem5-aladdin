@@ -150,7 +150,7 @@ class FullO3CPU : public BaseO3CPU
         virtual void recvTimingSnoopReq(PacketPtr pkt) { }
 
         /** Handles doing a retry of a failed fetch. */
-        virtual void recvRetry();
+        virtual void recvReqRetry();
     };
 
     /**
@@ -162,11 +162,13 @@ class FullO3CPU : public BaseO3CPU
 
         /** Pointer to LSQ. */
         LSQ<Impl> *lsq;
+        FullO3CPU<Impl> *cpu;
 
       public:
         /** Default constructor. */
         DcachePort(LSQ<Impl> *_lsq, FullO3CPU<Impl>* _cpu)
-            : MasterPort(_cpu->name() + ".dcache_port", _cpu), lsq(_lsq)
+            : MasterPort(_cpu->name() + ".dcache_port", _cpu), lsq(_lsq),
+              cpu(_cpu)
         { }
 
       protected:
@@ -183,7 +185,7 @@ class FullO3CPU : public BaseO3CPU
         }
 
         /** Handles doing a retry of the previous send. */
-        virtual void recvRetry();
+        virtual void recvReqRetry();
 
         /**
          * As this CPU requires snooping to maintain the load store queue
@@ -229,116 +231,6 @@ class FullO3CPU : public BaseO3CPU
             tickEvent.squash();
     }
 
-    class ActivateThreadEvent : public Event
-    {
-      private:
-        /** Number of Thread to Activate */
-        ThreadID tid;
-
-        /** Pointer to the CPU. */
-        FullO3CPU<Impl> *cpu;
-
-      public:
-        /** Constructs the event. */
-        ActivateThreadEvent();
-
-        /** Initialize Event */
-        void init(int thread_num, FullO3CPU<Impl> *thread_cpu);
-
-        /** Processes the event, calling activateThread() on the CPU. */
-        void process();
-
-        /** Returns the description of the event. */
-        const char *description() const;
-    };
-
-    /** Schedule thread to activate , regardless of its current state. */
-    void
-    scheduleActivateThreadEvent(ThreadID tid, Cycles delay)
-    {
-        // Schedule thread to activate, regardless of its current state.
-        if (activateThreadEvent[tid].squashed())
-            reschedule(activateThreadEvent[tid],
-                       clockEdge(delay));
-        else if (!activateThreadEvent[tid].scheduled()) {
-            Tick when = clockEdge(delay);
-
-            // Check if the deallocateEvent is also scheduled, and make
-            // sure they do not happen at same time causing a sleep that
-            // is never woken from.
-            if (deallocateContextEvent[tid].scheduled() &&
-                deallocateContextEvent[tid].when() == when) {
-                when++;
-            }
-
-            schedule(activateThreadEvent[tid], when);
-        }
-    }
-
-    /** Unschedule actiavte thread event, regardless of its current state. */
-    void
-    unscheduleActivateThreadEvent(ThreadID tid)
-    {
-        if (activateThreadEvent[tid].scheduled())
-            activateThreadEvent[tid].squash();
-    }
-
-    /** The tick event used for scheduling CPU ticks. */
-    ActivateThreadEvent activateThreadEvent[Impl::MaxThreads];
-
-    class DeallocateContextEvent : public Event
-    {
-      private:
-        /** Number of Thread to deactivate */
-        ThreadID tid;
-
-        /** Should the thread be removed from the CPU? */
-        bool remove;
-
-        /** Pointer to the CPU. */
-        FullO3CPU<Impl> *cpu;
-
-      public:
-        /** Constructs the event. */
-        DeallocateContextEvent();
-
-        /** Initialize Event */
-        void init(int thread_num, FullO3CPU<Impl> *thread_cpu);
-
-        /** Processes the event, calling activateThread() on the CPU. */
-        void process();
-
-        /** Sets whether the thread should also be removed from the CPU. */
-        void setRemove(bool _remove) { remove = _remove; }
-
-        /** Returns the description of the event. */
-        const char *description() const;
-    };
-
-    /** Schedule cpu to deallocate thread context.*/
-    void
-    scheduleDeallocateContextEvent(ThreadID tid, bool remove, Cycles delay)
-    {
-        // Schedule thread to activate, regardless of its current state.
-        if (deallocateContextEvent[tid].squashed())
-            reschedule(deallocateContextEvent[tid],
-                       clockEdge(delay));
-        else if (!deallocateContextEvent[tid].scheduled())
-            schedule(deallocateContextEvent[tid],
-                     clockEdge(delay));
-    }
-
-    /** Unschedule thread deallocation in CPU */
-    void
-    unscheduleDeallocateContextEvent(ThreadID tid)
-    {
-        if (deallocateContextEvent[tid].scheduled())
-            deallocateContextEvent[tid].squash();
-    }
-
-    /** The tick event used for scheduling CPU ticks. */
-    DeallocateContextEvent deallocateContextEvent[Impl::MaxThreads];
-
     /**
      * Check if the pipeline has drained and signal the DrainManager.
      *
@@ -374,6 +266,12 @@ class FullO3CPU : public BaseO3CPU
 
     /** Registers statistics. */
     void regStats();
+
+    ProbePointArg<PacketPtr> *ppInstAccessComplete;
+    ProbePointArg<std::pair<DynInstPtr, PacketPtr> > *ppDataAccessComplete;
+
+    /** Register probe points. */
+    void regProbePoints();
 
     void demapPage(Addr vaddr, uint64_t asn)
     {
@@ -424,27 +322,15 @@ class FullO3CPU : public BaseO3CPU
     virtual Counter totalOps() const;
 
     /** Add Thread to Active Threads List. */
-    void activateContext(ThreadID tid, Cycles delay);
+    void activateContext(ThreadID tid);
 
     /** Remove Thread from Active Threads List */
     void suspendContext(ThreadID tid);
 
     /** Remove Thread from Active Threads List &&
-     *  Possibly Remove Thread Context from CPU.
-     */
-    bool scheduleDeallocateContext(ThreadID tid, bool remove,
-                                   Cycles delay = Cycles(1));
-
-    /** Remove Thread from Active Threads List &&
      *  Remove Thread Context from CPU.
      */
     void haltContext(ThreadID tid);
-
-    /** Activate a Thread When CPU Resources are Available. */
-    void activateWhenReady(ThreadID tid);
-
-    /** Add or Remove a Thread Context in the CPU. */
-    void doContextSwitch();
 
     /** Update The Order In Which We Process Threads. */
     void updateThreadPriority();
@@ -492,7 +378,7 @@ class FullO3CPU : public BaseO3CPU
     { return globalSeqNum++; }
 
     /** Traps to handle given fault. */
-    void trap(Fault fault, ThreadID tid, StaticInstPtr inst);
+    void trap(const Fault &fault, ThreadID tid, const StaticInstPtr &inst);
 
     /** HW return from error interrupt. */
     Fault hwrei(ThreadID tid);
@@ -503,7 +389,7 @@ class FullO3CPU : public BaseO3CPU
     Fault getInterrupts();
 
     /** Processes any an interrupt fault. */
-    void processInterrupts(Fault interrupt);
+    void processInterrupts(const Fault &interrupt);
 
     /** Halts the CPU. */
     void halt() { panic("Halt not implemented!\n"); }
@@ -517,7 +403,7 @@ class FullO3CPU : public BaseO3CPU
     /** Register accessors.  Index refers to the physical register index. */
 
     /** Reads a miscellaneous register. */
-    TheISA::MiscReg readMiscRegNoEffect(int misc_reg, ThreadID tid);
+    TheISA::MiscReg readMiscRegNoEffect(int misc_reg, ThreadID tid) const;
 
     /** Reads a misc. register, including any side effects the read
      * might have as defined by the architecture.
@@ -786,9 +672,6 @@ class FullO3CPU : public BaseO3CPU
     /** Pointers to all of the threads in the CPU. */
     std::vector<Thread *> thread;
 
-    /** Is there a context switch pending? */
-    bool contextSwitch;
-
     /** Threads Scheduled to Enter CPU */
     std::list<int> cpuWaitList;
 
@@ -837,8 +720,6 @@ class FullO3CPU : public BaseO3CPU
     Stats::Vector committedInsts;
     /** Stat for the number of committed ops (including micro ops) per thread. */
     Stats::Vector committedOps;
-    /** Stat for the total number of committed instructions. */
-    Stats::Scalar totalCommittedInsts;
     /** Stat for the CPI per thread. */
     Stats::Formula cpi;
     /** Stat for the total CPI. */

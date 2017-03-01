@@ -37,7 +37,9 @@
 #          Andreas Hansson
 
 from m5.params import *
+from m5.proxy import *
 from MemObject import MemObject
+from System import System
 
 # The communication monitor will most typically be used in combination
 # with periodic dumping and resetting of stats using schedStatEvent
@@ -45,9 +47,18 @@ class CommMonitor(MemObject):
     type = 'CommMonitor'
     cxx_header = "mem/comm_monitor.hh"
 
+    system = Param.System(Parent.any, "System that the monitor belongs to.")
+
     # one port in each direction
     master = MasterPort("Master port")
     slave = SlavePort("Slave port")
+
+    # Boolean to enable or disable the trace. Writes to an a file named based on
+    # SimObject hierarchy.
+    trace_enable = Param.Bool(False, "Enable trace capture")
+
+    # Boolean to compress the trace or not.
+    trace_compress = Param.Bool(True, "Enable trace compression")
 
     # packet trace output file, disabled by default
     trace_file = Param.String("", "Packet trace output file")
@@ -99,3 +110,6 @@ class CommMonitor(MemObject):
     read_addr_mask = Param.Addr(MaxAddr, "Address mask for read address")
     write_addr_mask = Param.Addr(MaxAddr, "Address mask for write address")
     disable_addr_dists = Param.Bool(True, "Disable address distributions")
+
+    # optional stack distance calculator
+    stack_dist_calc = Param.StackDistCalc(NULL, "Stack distance calculator")

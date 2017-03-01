@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012-2013 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -53,6 +53,8 @@
  */
 
 #include "arch/arm/miscregs.hh"
+#include "arch/arm/isa_traits.hh"
+#include "debug/LLSC.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 
@@ -62,43 +64,68 @@ template <class XC>
 inline void
 handleLockedSnoop(XC *xc, PacketPtr pkt, Addr cacheBlockMask)
 {
+    DPRINTF(LLSC,"%s:  handleing snoop for address: %#x locked: %d\n",
+            xc->getCpuPtr()->name(),pkt->getAddr(),
+            xc->readMiscReg(MISCREG_LOCKFLAG));
     if (!xc->readMiscReg(MISCREG_LOCKFLAG))
         return;
 
     Addr locked_addr = xc->readMiscReg(MISCREG_LOCKADDR) & cacheBlockMask;
-    Addr snoop_addr = pkt->getAddr();
+    // If no caches are attached, the snoop address always needs to be masked
+    Addr snoop_addr = pkt->getAddr() & cacheBlockMask;
 
-    assert((cacheBlockMask & snoop_addr) == snoop_addr);
-
-    if (locked_addr == snoop_addr)
+    DPRINTF(LLSC,"%s:  handleing snoop for address: %#x locked addr: %#x\n",
+            xc->getCpuPtr()->name(),snoop_addr, locked_addr);
+    if (locked_addr == snoop_addr) {
+        DPRINTF(LLSC,"%s: address match, clearing lock and signaling sev\n",
+                xc->getCpuPtr()->name());
         xc->setMiscReg(MISCREG_LOCKFLAG, false);
+        // Implement ARMv8 WFE/SEV semantics
+        xc->setMiscReg(MISCREG_SEV_MAILBOX, true);
+        xc->getCpuPtr()->wakeup();
+    }
 }
 
 template <class XC>
 inline void
 handleLockedRead(XC *xc, Request *req)
 {
-    xc->setMiscReg(MISCREG_LOCKADDR, req->getPaddr() & ~0xf);
+    xc->setMiscReg(MISCREG_LOCKADDR, req->getPaddr());
     xc->setMiscReg(MISCREG_LOCKFLAG, true);
+    DPRINTF(LLSC,"%s: Placing address %#x in monitor\n", xc->getCpuPtr()->name(),
+                 req->getPaddr());
 }
 
+template <class XC>
+inline void
+handleLockedSnoopHit(XC *xc)
+{
+    DPRINTF(LLSC,"%s:  handling snoop lock hit address: %#x\n",
+            xc->getCpuPtr()->name(), xc->readMiscReg(MISCREG_LOCKADDR));
+        xc->setMiscReg(MISCREG_LOCKFLAG, false);
+        xc->setMiscReg(MISCREG_SEV_MAILBOX, true);
+}
 
 template <class XC>
 inline bool
-handleLockedWrite(XC *xc, Request *req)
+handleLockedWrite(XC *xc, Request *req, Addr cacheBlockMask)
 {
     if (req->isSwap())
         return true;
 
+    DPRINTF(LLSC,"%s: handling locked write for  address %#x in monitor\n",
+            xc->getCpuPtr()->name(), req->getPaddr());
     // Verify that the lock flag is still set and the address
     // is correct
     bool lock_flag = xc->readMiscReg(MISCREG_LOCKFLAG);
-    Addr lock_addr = xc->readMiscReg(MISCREG_LOCKADDR);
-    if (!lock_flag || (req->getPaddr() & ~0xf) != lock_addr) {
+    Addr lock_addr = xc->readMiscReg(MISCREG_LOCKADDR) & cacheBlockMask;
+    if (!lock_flag || (req->getPaddr() & cacheBlockMask) != lock_addr) {
         // Lock flag not set or addr mismatch in CPU;
         // don't even bother sending to memory system
         req->setExtraData(0);
         xc->setMiscReg(MISCREG_LOCKFLAG, false);
+        DPRINTF(LLSC,"%s: clearing lock flag in handle locked write\n",
+                xc->getCpuPtr()->name());
         // the rest of this code is not architectural;
         // it's just a debugging aid to help detect
         // livelock by warning on long sequences of failed

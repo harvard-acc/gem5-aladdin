@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012-2014 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -70,7 +70,9 @@ enum CacheBlkStatusBits {
     /** block was referenced */
     BlkReferenced =     0x10,
     /** block was a hardware prefetch yet unaccessed*/
-    BlkHWPrefetched =   0x20
+    BlkHWPrefetched =   0x20,
+    /** block holds data from the secure memory space */
+    BlkSecure =         0x40,
 };
 
 /**
@@ -80,6 +82,9 @@ enum CacheBlkStatusBits {
 class CacheBlk
 {
   public:
+    /** Task Id associated with this block */
+    uint32_t task_id;
+
     /** The address space ID of this block. */
     int asid;
     /** Data block tag value. */
@@ -118,6 +123,8 @@ class CacheBlk
 
     /** holds the source requestor ID for this block. */
     int srcMasterId;
+
+    Tick tickInserted;
 
   protected:
     /**
@@ -162,9 +169,11 @@ class CacheBlk
   public:
 
     CacheBlk()
-        : asid(-1), tag(0), data(0) ,size(0), status(0), whenReady(0),
+        : task_id(ContextSwitchTaskId::Unknown),
+          asid(-1), tag(0), data(0) ,size(0), status(0), whenReady(0),
           set(-1), isTouched(false), refCount(0),
-          srcMasterId(Request::invldMasterId)
+          srcMasterId(Request::invldMasterId),
+          tickInserted(0)
     {}
 
     /**
@@ -182,6 +191,7 @@ class CacheBlk
         whenReady = rhs.whenReady;
         set = rhs.set;
         refCount = rhs.refCount;
+        task_id = rhs.task_id;
         return *this;
     }
 
@@ -255,6 +265,15 @@ class CacheBlk
     }
 
     /**
+     * Check if this block holds data from the secure memory space.
+     * @return True if the block holds data from the secure memory space.
+     */
+    bool isSecure() const
+    {
+        return (status & BlkSecure) != 0;
+    }
+
+    /**
      * Track the fact that a local locked was issued to the block.  If
      * multiple LLs get issued from the same context we could have
      * redundant records on the list, but that's OK, as they'll all
@@ -320,8 +339,8 @@ class CacheBlk
           default:    s = 'T'; break; // @TODO add other types
         }
         return csprintf("state: %x (%c) valid: %d writable: %d readable: %d "
-                        "dirty: %d tag: %x data: %x", status, s, isValid(),
-                        isWritable(), isReadable(), isDirty(), tag, *data);
+                        "dirty: %d tag: %x", status, s, isValid(),
+                        isWritable(), isReadable(), isDirty(), tag);
     }
 
     /**
@@ -378,63 +397,19 @@ class CacheBlkPrintWrapper : public Printable
 };
 
 /**
- * Wrap a method and present it as a cache block visitor.
- *
- * For example the forEachBlk method in the tag arrays expects a
- * callable object/function as their parameter. This class wraps a
- * method in an object and presents  callable object that adheres to
- * the cache block visitor protocol.
+ * Base class for cache block visitor, operating on the cache block
+ * base class (later subclassed for the various tag classes). This
+ * visitor class is used as part of the forEachBlk interface in the
+ * tag classes.
  */
-template <typename T, typename BlkType>
-class CacheBlkVisitorWrapper
+class CacheBlkVisitor
 {
   public:
-    typedef bool (T::*visitorPtr)(BlkType &blk);
 
-    CacheBlkVisitorWrapper(T &_obj, visitorPtr _visitor)
-        : obj(_obj), visitor(_visitor) {}
+    CacheBlkVisitor() {}
+    virtual ~CacheBlkVisitor() {}
 
-    bool operator()(BlkType &blk) {
-        return (obj.*visitor)(blk);
-    }
-
-  private:
-    T &obj;
-    visitorPtr visitor;
-};
-
-/**
- * Cache block visitor that determines if there are dirty blocks in a
- * cache.
- *
- * Use with the forEachBlk method in the tag array to determine if the
- * array contains dirty blocks.
- */
-template <typename BlkType>
-class CacheBlkIsDirtyVisitor
-{
-  public:
-    CacheBlkIsDirtyVisitor()
-        : _isDirty(false) {}
-
-    bool operator()(BlkType &blk) {
-        if (blk.isDirty()) {
-            _isDirty = true;
-            return false;
-        } else {
-            return true;
-        }
-    }
-
-    /**
-     * Does the array contain a dirty line?
-     *
-     * \return true if yes, false otherwise.
-     */
-    bool isDirty() const { return _isDirty; };
-
-  private:
-    bool _isDirty;
+    virtual bool operator()(CacheBlk &blk) = 0;
 };
 
 #endif //__CACHE_BLK_HH__

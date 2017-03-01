@@ -82,7 +82,7 @@ class IntDevice
         Tick recvMessage(PacketPtr pkt)
         {
             // @todo someone should pay for this
-            pkt->busFirstWordDelay = pkt->busLastWordDelay = 0;
+            pkt->headerDelay = pkt->payloadDelay = 0;
             return device->recvMessage(pkt);
         }
     };

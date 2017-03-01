@@ -44,8 +44,10 @@
 #include "base/statistics.hh"
 #include "base/time.hh"
 #include "mem/mem_object.hh"
+#include "mem/stack_dist_calc.hh"
 #include "params/CommMonitor.hh"
 #include "proto/protoio.hh"
+#include "sim/system.hh"
 
 /**
  * The communication monitor is a MemObject which can monitor statistics of
@@ -76,7 +78,7 @@ class CommMonitor : public MemObject
     CommMonitor(Params* params);
 
     /** Destructor */
-    ~CommMonitor() {}
+    ~CommMonitor();
 
     /**
      * Callback to flush and close all open output streams on exit. If
@@ -171,9 +173,9 @@ class CommMonitor : public MemObject
             return mon.isSnooping();
         }
 
-        void recvRetry()
+        void recvReqRetry()
         {
-            mon.recvRetryMaster();
+            mon.recvReqRetry();
         }
 
       private:
@@ -227,9 +229,9 @@ class CommMonitor : public MemObject
             return mon.getAddrRanges();
         }
 
-        void recvRetry()
+        void recvRespRetry()
         {
-            mon.recvRetrySlave();
+            mon.recvRespRetry();
         }
 
       private:
@@ -261,13 +263,11 @@ class CommMonitor : public MemObject
 
     bool isSnooping() const;
 
-    void recvRetryMaster();
+    void recvReqRetry();
 
-    void recvRetrySlave();
+    void recvRespRetry();
 
     void recvRangeChange();
-
-    void periodicTraceDump();
 
     /** Stats declarations, all in a struct for convenience. */
     struct MonitorStats
@@ -416,8 +416,14 @@ class CommMonitor : public MemObject
     /** Instantiate stats */
     MonitorStats stats;
 
+    /** Optional stack distance calculator */
+    StackDistCalc* stackDistCalc;
+
     /** Output stream for a potential trace. */
     ProtoOutputStream* traceStream;
+
+    /** The system in which the monitor lives */
+    System *system;
 };
 
 #endif //__MEM_COMM_MONITOR_HH__

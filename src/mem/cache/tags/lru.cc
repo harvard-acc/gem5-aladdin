@@ -11,7 +11,7 @@
  * unmodified and in its entirety in all distributions of the software,
  * modified or unmodified, in source code or in binary form.
  *
- * Copyright (c) 2003-2005 The Regents of The University of Michigan
+ * Copyright (c) 2003-2005,2014 The Regents of The University of Michigan
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,231 +42,70 @@
 
 /**
  * @file
- * Definitions of LRU tag store.
+ * Definitions of a LRU tag store.
  */
 
-#include <string>
-
-#include "base/intmath.hh"
-#include "debug/Cache.hh"
 #include "debug/CacheRepl.hh"
 #include "mem/cache/tags/lru.hh"
 #include "mem/cache/base.hh"
-#include "sim/core.hh"
-
-using namespace std;
 
 LRU::LRU(const Params *p)
-    :BaseTags(p), assoc(p->assoc),
-     numSets(p->size / (p->block_size * p->assoc))
+    : BaseSetAssoc(p)
 {
-    // Check parameters
-    if (blkSize < 4 || !isPowerOf2(blkSize)) {
-        fatal("Block size must be at least 4 and a power of 2");
-    }
-    if (numSets <= 0 || !isPowerOf2(numSets)) {
-        fatal("# of sets must be non-zero and a power of 2");
-    }
-    if (assoc <= 0) {
-        fatal("associativity must be greater than zero");
-    }
-    if (hitLatency <= 0) {
-        fatal("access latency must be greater than zero");
-    }
-
-    blkMask = blkSize - 1;
-    setShift = floorLog2(blkSize);
-    setMask = numSets - 1;
-    tagShift = setShift + floorLog2(numSets);
-    warmedUp = false;
-    /** @todo Make warmup percentage a parameter. */
-    warmupBound = numSets * assoc;
-
-    sets = new SetType[numSets];
-    blks = new BlkType[numSets * assoc];
-    // allocate data storage in one big chunk
-    numBlocks = numSets * assoc;
-    dataBlks = new uint8_t[numBlocks * blkSize];
-
-    unsigned blkIndex = 0;       // index into blks array
-    for (unsigned i = 0; i < numSets; ++i) {
-        sets[i].assoc = assoc;
-
-        sets[i].blks = new BlkType*[assoc];
-
-        // link in the data blocks
-        for (unsigned j = 0; j < assoc; ++j) {
-            // locate next cache block
-            BlkType *blk = &blks[blkIndex];
-            blk->data = &dataBlks[blkSize*blkIndex];
-            ++blkIndex;
-
-            // invalidate new cache block
-            blk->invalidate();
-
-            //EGH Fix Me : do we need to initialize blk?
-
-            // Setting the tag to j is just to prevent long chains in the hash
-            // table; won't matter because the block is invalid
-            blk->tag = j;
-            blk->whenReady = 0;
-            blk->isTouched = false;
-            blk->size = blkSize;
-            sets[i].blks[j]=blk;
-            blk->set = i;
-        }
-    }
 }
 
-LRU::~LRU()
+CacheBlk*
+LRU::accessBlock(Addr addr, bool is_secure, Cycles &lat, int master_id)
 {
-    delete [] dataBlks;
-    delete [] blks;
-    delete [] sets;
-}
+    CacheBlk *blk = BaseSetAssoc::accessBlock(addr, is_secure, lat, master_id);
 
-LRU::BlkType*
-LRU::accessBlock(Addr addr, Cycles &lat, int master_id)
-{
-    Addr tag = extractTag(addr);
-    unsigned set = extractSet(addr);
-    BlkType *blk = sets[set].findBlk(tag);
-    lat = hitLatency;
     if (blk != NULL) {
         // move this block to head of the MRU list
-        sets[set].moveToHead(blk);
-        DPRINTF(CacheRepl, "set %x: moving blk %x to MRU\n",
-                set, regenerateBlkAddr(tag, set));
-        if (blk->whenReady > curTick()
-            && cache->ticksToCycles(blk->whenReady - curTick()) > hitLatency) {
-            lat = cache->ticksToCycles(blk->whenReady - curTick());
-        }
-        blk->refCount += 1;
+        sets[blk->set].moveToHead(blk);
+        DPRINTF(CacheRepl, "set %x: moving blk %x (%s) to MRU\n",
+                blk->set, regenerateBlkAddr(blk->tag, blk->set),
+                is_secure ? "s" : "ns");
     }
 
     return blk;
 }
 
-
-LRU::BlkType*
-LRU::findBlock(Addr addr) const
+CacheBlk*
+LRU::findVictim(Addr addr)
 {
-    Addr tag = extractTag(addr);
-    unsigned set = extractSet(addr);
-    BlkType *blk = sets[set].findBlk(tag);
-    return blk;
-}
-
-LRU::BlkType*
-LRU::findVictim(Addr addr, PacketList &writebacks)
-{
-    unsigned set = extractSet(addr);
+    int set = extractSet(addr);
     // grab a replacement candidate
-    BlkType *blk = sets[set].blks[assoc-1];
+    BlkType *blk = sets[set].blks[assoc - 1];
 
     if (blk->isValid()) {
         DPRINTF(CacheRepl, "set %x: selecting blk %x for replacement\n",
                 set, regenerateBlkAddr(blk->tag, set));
     }
+
     return blk;
 }
 
 void
 LRU::insertBlock(PacketPtr pkt, BlkType *blk)
 {
-    Addr addr = pkt->getAddr();
-    MasterID master_id = pkt->req->masterId();
-    if (!blk->isTouched) {
-        tagsInUse++;
-        blk->isTouched = true;
-        if (!warmedUp && tagsInUse.value() >= warmupBound) {
-            warmedUp = true;
-            warmupCycle = curTick();
-        }
-    }
+    BaseSetAssoc::insertBlock(pkt, blk);
 
-    // If we're replacing a block that was previously valid update
-    // stats for it. This can't be done in findBlock() because a
-    // found block might not actually be replaced there if the
-    // coherence protocol says it can't be.
-    if (blk->isValid()) {
-        replacements[0]++;
-        totalRefs += blk->refCount;
-        ++sampledRefs;
-        blk->refCount = 0;
-
-        // deal with evicted block
-        assert(blk->srcMasterId < cache->system->maxMasters());
-        occupancies[blk->srcMasterId]--;
-
-        blk->invalidate();
-    }
-
-    blk->isTouched = true;
-    // Set tag for new block.  Caller is responsible for setting status.
-    blk->tag = extractTag(addr);
-
-    // deal with what we are bringing in
-    assert(master_id < cache->system->maxMasters());
-    occupancies[master_id]++;
-    blk->srcMasterId = master_id;
-
-    unsigned set = extractSet(addr);
+    int set = extractSet(pkt->getAddr());
     sets[set].moveToHead(blk);
 }
 
 void
-LRU::invalidate(BlkType *blk)
+LRU::invalidate(CacheBlk *blk)
 {
-    assert(blk);
-    assert(blk->isValid());
-    tagsInUse--;
-    assert(blk->srcMasterId < cache->system->maxMasters());
-    occupancies[blk->srcMasterId]--;
-    blk->srcMasterId = Request::invldMasterId;
+    BaseSetAssoc::invalidate(blk);
 
     // should be evicted before valid blocks
-    unsigned set = blk->set;
+    int set = blk->set;
     sets[set].moveToTail(blk);
 }
 
-void
-LRU::clearLocks()
-{
-    for (int i = 0; i < numBlocks; i++){
-        blks[i].clearLoadLocks();
-    }
-}
-
-LRU *
+LRU*
 LRUParams::create()
 {
     return new LRU(this);
-}
-std::string
-LRU::print() const {
-    std::string cache_state;
-    for (unsigned i = 0; i < numSets; ++i) {
-        // link in the data blocks
-        for (unsigned j = 0; j < assoc; ++j) {
-            BlkType *blk = sets[i].blks[j];
-            if (blk->isValid())
-                cache_state += csprintf("\tset: %d block: %d %s\n", i, j,
-                        blk->print());
-        }
-    }
-    if (cache_state.empty())
-        cache_state = "no valid tags\n";
-    return cache_state;
-}
-
-void
-LRU::cleanupRefs()
-{
-    for (unsigned i = 0; i < numSets*assoc; ++i) {
-        if (blks[i].isValid()) {
-            totalRefs += blks[i].refCount;
-            ++sampledRefs;
-        }
-    }
 }

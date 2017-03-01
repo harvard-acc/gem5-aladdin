@@ -50,6 +50,7 @@
 #include "config/the_isa.hh"
 #include "cpu/base.hh"
 #include "cpu/checker/cpu.hh"
+#include "cpu/exec_context.hh"
 #include "cpu/pc_event.hh"
 #include "cpu/simple_thread.hh"
 #include "cpu/static_inst.hh"
@@ -77,15 +78,17 @@ namespace Trace {
 }
 
 struct BaseSimpleCPUParams;
+class BPredUnit;
 
-
-class BaseSimpleCPU : public BaseCPU
+class BaseSimpleCPU : public BaseCPU, public ExecContext
 {
   protected:
     typedef TheISA::MiscReg MiscReg;
     typedef TheISA::FloatReg FloatReg;
     typedef TheISA::FloatRegBits FloatRegBits;
     typedef TheISA::CCReg CCReg;
+
+    BPredUnit *branchPred;
 
   protected:
     Trace::InstRecord *traceData;
@@ -165,9 +168,8 @@ class BaseSimpleCPU : public BaseCPU
     void setupFetchRequest(Request *req);
     void preExecute();
     void postExecute();
-    void advancePC(Fault fault);
+    void advancePC(const Fault &fault);
 
-    virtual void deallocateContext(ThreadID thread_num);
     virtual void haltContext(ThreadID thread_num);
 
     // statistics
@@ -260,17 +262,21 @@ class BaseSimpleCPU : public BaseCPU
     Stats::Scalar icacheStallCycles;
     Counter lastIcacheStall;
 
-    // number of cycles stalled for I-cache retries
-    Stats::Scalar icacheRetryCycles;
-    Counter lastIcacheRetry;
-
     // number of cycles stalled for D-cache responses
     Stats::Scalar dcacheStallCycles;
     Counter lastDcacheStall;
 
-    // number of cycles stalled for D-cache retries
-    Stats::Scalar dcacheRetryCycles;
-    Counter lastDcacheRetry;
+    /// @{
+    /// Total number of branches fetched
+    Stats::Scalar numBranches;
+    /// Number of branches predicted as taken
+    Stats::Scalar numPredictedBranches;
+    /// Number of misprediced branches
+    Stats::Scalar numBranchMispred;
+    /// @}
+
+    // instruction mix histogram by OpClass
+    Stats::Vector statExecutedInstType;
 
     void serializeThread(std::ostream &os, ThreadID tid);
     void unserializeThread(Checkpoint *cp, const std::string &section,
@@ -279,8 +285,7 @@ class BaseSimpleCPU : public BaseCPU
     // These functions are only used in CPU models that split
     // effective address computation from the actual memory access.
     void setEA(Addr EA) { panic("BaseSimpleCPU::setEA() not implemented\n"); }
-    Addr getEA()        { panic("BaseSimpleCPU::getEA() not implemented\n");
-        M5_DUMMY_RETURN}
+    Addr getEA() const  { panic("BaseSimpleCPU::getEA() not implemented\n"); }
 
     // The register accessor methods provide the index of the
     // instruction's operand (e.g., 0 or 1), not the architectural
@@ -293,7 +298,7 @@ class BaseSimpleCPU : public BaseCPU
     // storage (which is pretty hard to imagine they would have reason
     // to do).
 
-    uint64_t readIntRegOperand(const StaticInst *si, int idx)
+    IntReg readIntRegOperand(const StaticInst *si, int idx)
     {
         numIntRegReads++;
         return thread->readIntReg(si->srcRegIdx(idx));
@@ -320,7 +325,7 @@ class BaseSimpleCPU : public BaseCPU
         return thread->readCCReg(reg_idx);
     }
 
-    void setIntRegOperand(const StaticInst *si, int idx, uint64_t val)
+    void setIntRegOperand(const StaticInst *si, int idx, IntReg val)
     {
         numIntRegWrites++;
         thread->setIntReg(si->destRegIdx(idx), val);
@@ -356,13 +361,13 @@ class BaseSimpleCPU : public BaseCPU
             traceData->setPredicate(val);
         }
     }
-    TheISA::PCState pcState() { return thread->pcState(); }
+    TheISA::PCState pcState() const { return thread->pcState(); }
     void pcState(const TheISA::PCState &val) { thread->pcState(val); }
     Addr instAddr() { return thread->instAddr(); }
     Addr nextInstAddr() { return thread->nextInstAddr(); }
     MicroPC microPC() { return thread->microPC(); }
 
-    MiscReg readMiscRegNoEffect(int misc_reg)
+    MiscReg readMiscRegNoEffect(int misc_reg) const
     {
         return thread->readMiscRegNoEffect(misc_reg);
     }
@@ -409,26 +414,26 @@ class BaseSimpleCPU : public BaseCPU
         thread->demapDataPage(vaddr, asn);
     }
 
-    unsigned readStCondFailures() {
+    unsigned int readStCondFailures() const {
         return thread->readStCondFailures();
     }
 
-    void setStCondFailures(unsigned sc_failures) {
+    void setStCondFailures(unsigned int sc_failures) {
         thread->setStCondFailures(sc_failures);
     }
 
-     MiscReg readRegOtherThread(int regIdx, ThreadID tid = InvalidThreadID)
-     {
+    MiscReg readRegOtherThread(int regIdx, ThreadID tid = InvalidThreadID)
+    {
         panic("Simple CPU models do not support multithreaded "
               "register access.\n");
-     }
+    }
 
-     void setRegOtherThread(int regIdx, const MiscReg &val,
-                            ThreadID tid = InvalidThreadID)
-     {
+    void setRegOtherThread(int regIdx, MiscReg val,
+                           ThreadID tid = InvalidThreadID)
+    {
         panic("Simple CPU models do not support multithreaded "
               "register access.\n");
-     }
+    }
 
     //Fault CacheOp(uint8_t Op, Addr EA);
 
@@ -444,8 +449,18 @@ class BaseSimpleCPU : public BaseCPU
         thread->syscall(callnum);
     }
 
-    bool misspeculating() { return thread->misspeculating(); }
     ThreadContext *tcBase() { return tc; }
+
+  private:
+    TheISA::PCState pred_pc;
+
+  public:
+    // monitor/mwait funtions
+    void armMonitor(Addr address) { BaseCPU::armMonitor(address); }
+    bool mwait(PacketPtr pkt) { return BaseCPU::mwait(pkt); }
+    void mwaitAtomic(ThreadContext *tc)
+    { return BaseCPU::mwaitAtomic(tc, thread->dtb); }
+    AddressMonitor *getAddrMonitor() { return BaseCPU::getCpuAddrMonitor(); }
 };
 
 #endif // __CPU_SIMPLE_BASE_HH__

@@ -38,7 +38,6 @@
 #include "base/misc.hh"
 #include "cpu/static_inst.hh"
 #include "cpu/thread_context.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/full_system.hh"
 
 namespace SparcISA
@@ -77,7 +76,7 @@ startupCPU(ThreadContext *tc, int cpuId)
 {
     // Other CPUs will get activated by IPIs
     if (cpuId == 0 || !FullSystem)
-        tc->activate(Cycles(0));
+        tc->activate();
 }
 
 void copyRegs(ThreadContext *src, ThreadContext *dest);
@@ -87,7 +86,7 @@ void copyMiscRegs(ThreadContext *src, ThreadContext *dest);
 void skipFunction(ThreadContext *tc);
 
 inline void
-advancePC(PCState &pc, const StaticInstPtr inst)
+advancePC(PCState &pc, const StaticInstPtr &inst)
 {
     inst->advancePC(pc);
 }

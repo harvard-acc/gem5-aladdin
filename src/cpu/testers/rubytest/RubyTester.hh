@@ -75,7 +75,7 @@ class RubyTester : public MemObject
 
       protected:
         virtual bool recvTimingResp(PacketPtr pkt);
-        virtual void recvRetry()
+        virtual void recvReqRetry()
         { panic("%s does not expect a retry\n", name()); }
     };
 
@@ -141,7 +141,7 @@ class RubyTester : public MemObject
     RubyTester& operator=(const RubyTester& obj);
 
     CheckTable* m_checkTable_ptr;
-    std::vector<Time> m_last_progress_vector;
+    std::vector<Cycles> m_last_progress_vector;
 
     int m_num_cpus;
     uint64 m_checks_completed;

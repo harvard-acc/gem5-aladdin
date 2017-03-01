@@ -38,7 +38,6 @@
 #include "arch/mips/registers.hh"
 #include "arch/mips/types.hh"
 #include "sim/eventq.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/sim_object.hh"
 
 class BaseCPU;
@@ -77,7 +76,7 @@ namespace MipsISA
 
         void configCP();
 
-        unsigned getVPENum(ThreadID tid);
+        unsigned getVPENum(ThreadID tid) const;
 
         //////////////////////////////////////////////////////////
         //
@@ -88,7 +87,7 @@ namespace MipsISA
         //@TODO: MIPS MT's register view automatically connects
         //       Status to TCStatus depending on current thread
         void updateCP0ReadView(int misc_reg, ThreadID tid) { }
-        MiscReg readMiscRegNoEffect(int misc_reg, ThreadID tid = 0);
+        MiscReg readMiscRegNoEffect(int misc_reg, ThreadID tid = 0) const;
 
         //template <class TC>
         MiscReg readMiscReg(int misc_reg,
@@ -167,23 +166,30 @@ namespace MipsISA
         ISA(Params *p);
 
         int
-        flattenIntIndex(int reg)
+        flattenIntIndex(int reg) const
         {
             return reg;
         }
 
         int
-        flattenFloatIndex(int reg)
+        flattenFloatIndex(int reg) const
         {
             return reg;
         }
 
         // dummy
         int
-        flattenCCIndex(int reg)
+        flattenCCIndex(int reg) const
         {
             return reg;
         }
+
+        int
+        flattenMiscIndex(int reg) const
+        {
+            return reg;
+        }
+
     };
 }
 

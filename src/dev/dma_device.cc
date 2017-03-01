@@ -117,8 +117,9 @@ DmaPort::handleResp(PacketPtr pkt, Tick delay)
 bool
 DmaPort::recvTimingResp(PacketPtr pkt)
 {
-    // We shouldn't ever get a block in ownership state
-    assert(!(pkt->memInhibitAsserted() && !pkt->sharedAsserted()));
+    // We shouldn't ever get a cacheable block in ownership state
+    assert(pkt->req->isUncacheable() ||
+           !(pkt->memInhibitAsserted() && !pkt->sharedAsserted()));
 
     handleResp(pkt);
 
@@ -159,13 +160,13 @@ DmaPort::drain(DrainManager *dm)
 }
 
 void
-DmaPort::recvRetry()
+DmaPort::recvReqRetry()
 {
     assert(transmitList.size());
     trySendTimingReq();
 }
 
-void
+RequestPtr
 DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                    uint8_t *data, Tick delay, Request::Flags flag)
 {
@@ -173,6 +174,12 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // split into many requests and packets based on the block size,
     // i.e. cache line size
     DmaReqState *reqState = new DmaReqState(event, size, addr, delay);
+
+    // (functionality added for Table Walker statistics)
+    // We're only interested in this when there will only be one request.
+    // For simplicity, we return the last request, which would also be
+    // the only request in that case.
+    RequestPtr req = NULL;
 
     DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n", addr, size,
             event ? event->scheduled() : -1);
@@ -189,7 +196,8 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     unsigned channel_idx = transmitList.size() - 1;
     for (ChunkGenerator gen(addr, size, ChunkSize);
          !gen.done(); gen.next()) {
-        Request *req = new Request(gen.addr(), gen.size(), flag, masterId);
+        req = new Request(gen.addr(), gen.size(), flag, masterId);
+        req->taskId(ContextSwitchTaskId::DMA);
         PacketPtr pkt = new Packet(req, cmd);
 
         // Increment the data pointer on a write
@@ -207,6 +215,8 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // just created, for atomic this involves actually completing all
     // the requests
     sendDma();
+
+    return req;
 }
 
 void

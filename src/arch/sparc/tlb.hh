@@ -31,13 +31,12 @@
 #ifndef __ARCH_SPARC_TLB_HH__
 #define __ARCH_SPARC_TLB_HH__
 
+#include "arch/generic/tlb.hh"
 #include "arch/sparc/asi.hh"
 #include "arch/sparc/tlb_map.hh"
 #include "base/misc.hh"
 #include "mem/request.hh"
 #include "params/SparcTLB.hh"
-#include "sim/fault_fwd.hh"
-#include "sim/tlb.hh"
 
 class ThreadContext;
 class Packet;
@@ -153,6 +152,8 @@ class TLB : public BaseTLB
   public:
     typedef SparcTLBParams Params;
     TLB(const Params *p);
+
+    void takeOverFrom(BaseTLB *otlb) {}
 
     void
     demapPage(Addr vaddr, uint64_t asn)

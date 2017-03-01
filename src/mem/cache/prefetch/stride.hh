@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2012-2013, 2015 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -33,49 +45,75 @@
  * Describes a strided prefetcher.
  */
 
-#ifndef __MEM_CACHE_PREFETCH_STRIDE_PREFETCHER_HH__
-#define __MEM_CACHE_PREFETCH_STRIDE_PREFETCHER_HH__
+#ifndef __MEM_CACHE_PREFETCH_STRIDE_HH__
+#define __MEM_CACHE_PREFETCH_STRIDE_HH__
 
-#include <climits>
-
-#include "mem/cache/prefetch/base.hh"
+#include "base/hashmap.hh"
+#include "mem/cache/prefetch/queued.hh"
 #include "params/StridePrefetcher.hh"
 
-class StridePrefetcher : public BasePrefetcher
+class StridePrefetcher : public QueuedPrefetcher
 {
   protected:
+    const int maxConf;
+    const int threshConf;
+    const int minConf;
+    const int startConf;
 
-    static const int Max_Contexts = 64;
+    const int pcTableAssoc;
+    const int pcTableSets;
 
-    // These constants need to be changed with the type of the
-    // 'confidence' field below.
-    static const int Max_Conf = INT_MAX;
-    static const int Min_Conf = INT_MIN;
+    const bool useMasterId;
 
-    class StrideEntry
+    const int degree;
+
+    struct StrideEntry
     {
-      public:
+        StrideEntry() : instAddr(0), lastAddr(0), isSecure(false), stride(0),
+                        confidence(0)
+        { }
+
         Addr instAddr;
-        Addr missAddr;
+        Addr lastAddr;
+        bool isSecure;
         int stride;
         int confidence;
     };
 
-    Addr *lastMissAddr[Max_Contexts];
+    class PCTable
+    {
+      public:
+        PCTable(int assoc, int sets, const std::string name) :
+            pcTableAssoc(assoc), pcTableSets(sets), _name(name) {}
+        StrideEntry** operator[] (int context) {
+            auto it = entries.find(context);
+            if (it != entries.end())
+                return it->second;
 
-    std::list<StrideEntry*> table[Max_Contexts];
+            return allocateNewContext(context);
+        }
 
+        ~PCTable();
+      private:
+        const std::string name() {return _name; }
+        const int pcTableAssoc;
+        const int pcTableSets;
+        const std::string _name;
+        m5::hash_map<int, StrideEntry**> entries;
+
+        StrideEntry** allocateNewContext(int context);
+    };
+    PCTable pcTable;
+
+    bool pcTableHit(Addr pc, bool is_secure, int master_id, StrideEntry* &entry);
+    StrideEntry* pcTableVictim(Addr pc, int master_id);
+
+    Addr pcHash(Addr pc) const;
   public:
 
-    StridePrefetcher(const Params *p)
-        : BasePrefetcher(p)
-    {
-    }
+    StridePrefetcher(const StridePrefetcherParams *p);
 
-    ~StridePrefetcher() {}
-
-    void calculatePrefetch(PacketPtr &pkt, std::list<Addr> &addresses,
-                           std::list<Cycles> &delays);
+    void calculatePrefetch(const PacketPtr &pkt, std::vector<Addr> &addresses);
 };
 
-#endif // __MEM_CACHE_PREFETCH_STRIDE_PREFETCHER_HH__
+#endif // __MEM_CACHE_PREFETCH_STRIDE_HH__

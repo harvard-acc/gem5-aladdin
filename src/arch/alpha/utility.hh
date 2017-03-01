@@ -68,7 +68,7 @@ void zeroRegisters(TC *tc);
 // Alpha IPR register accessors
 inline bool PcPAL(Addr addr) { return addr & 0x3; }
 inline void startupCPU(ThreadContext *tc, int cpuId)
-{ tc->activate(Cycles(0)); }
+{ tc->activate(); }
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -105,7 +105,7 @@ void copyMiscRegs(ThreadContext *src, ThreadContext *dest);
 void skipFunction(ThreadContext *tc);
 
 inline void
-advancePC(PCState &pc, const StaticInstPtr inst)
+advancePC(PCState &pc, const StaticInstPtr &inst)
 {
     pc.advance();
 }

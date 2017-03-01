@@ -106,6 +106,11 @@ TapListener::listen()
 void
 TapListener::accept()
 {
+    // As a consequence of being called from the PollQueue, we might
+    // have been called from a different thread. Migrate to "our"
+    // thread.
+    EventQueue::ScopedMigration migrate(tap->eventQueue());
+
     if (!listener.islistening())
         panic("TapListener(accept): cannot accept if we're not listening!");
 
@@ -230,7 +235,7 @@ EtherTap::process(int revent)
 
     while (data_len != 0 && buffer_offset >= data_len + sizeof(uint32_t)) {
         EthPacketPtr packet;
-        packet = new EthPacketData(data_len);
+        packet = make_shared<EthPacketData>(data_len);
         packet->length = data_len;
         memcpy(packet->data, data, data_len);
 

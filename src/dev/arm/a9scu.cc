@@ -55,14 +55,22 @@ A9SCU::read(PacketPtr pkt)
     assert(pkt->getAddr() >= pioAddr && pkt->getAddr() < pioAddr + pioSize);
     assert(pkt->getSize() == 4);
     Addr daddr = pkt->getAddr() - pioAddr;
-    pkt->allocate();
 
     switch(daddr) {
       case Control:
         pkt->set(1); // SCU already enabled
         break;
       case Config:
-        assert(sys->numContexts() <= 4);
+        /* Without making a completely new SCU, we can use the core count field
+         * as 4 bits and inform the OS of up to 16 CPUs.  Although the core
+         * count is technically bits [1:0] only, bits [3:2] are SBZ for future
+         * expansion like this.
+         */
+        if (sys->numContexts() > 4) {
+            warn_once("A9SCU with >4 CPUs is unsupported\n");
+            if (sys->numContexts() > 15)
+                fatal("Too many CPUs (%d) for A9SCU!\n", sys->numContexts());
+        }
         int smp_bits, core_cnt;
         smp_bits = power(2,sys->numContexts()) - 1;
         core_cnt = sys->numContexts() - 1;

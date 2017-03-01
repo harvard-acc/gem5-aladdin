@@ -51,17 +51,24 @@ class StateMachine(Symbol):
     def __init__(self, symtab, ident, location, pairs, config_parameters):
         super(StateMachine, self).__init__(symtab, ident, location, pairs)
         self.table = None
+
+        # Data members in the State Machine that have been declared before
+        # the opening brace '{'  of the machine.  Note that these along with
+        # the members in self.objects form the entire set of data members.
         self.config_parameters = config_parameters
+
         self.prefetchers = []
 
         for param in config_parameters:
             if param.pointer:
-                var = Var(symtab, param.name, location, param.type_ast.type,
-                          "(*m_%s_ptr)" % param.name, {}, self)
+                var = Var(symtab, param.ident, location, param.type_ast.type,
+                          "(*m_%s_ptr)" % param.ident, {}, self)
             else:
-                var = Var(symtab, param.name, location, param.type_ast.type,
-                          "m_%s" % param.name, {}, self)
-            self.symtab.registerSym(param.name, var)
+                var = Var(symtab, param.ident, location, param.type_ast.type,
+                          "m_%s" % param.ident, {}, self)
+
+            self.symtab.registerSym(param.ident, var)
+
             if str(param.type_ast.type) == "Prefetcher":
                 self.prefetchers.append(var)
 
@@ -72,6 +79,10 @@ class StateMachine(Symbol):
         self.transitions = []
         self.in_ports = []
         self.functions = []
+
+        # Data members in the State Machine that have been declared inside
+        # the {} machine.  Note that these along with the config params
+        # form the entire set of data members of the machine.
         self.objects = []
         self.TBEType   = None
         self.EntryType = None
@@ -120,6 +131,7 @@ class StateMachine(Symbol):
         self.functions.append(func)
 
     def addObject(self, obj):
+        self.symtab.registerSym(str(obj), obj)
         self.objects.append(obj)
 
     def addType(self, type):
@@ -177,8 +189,10 @@ class StateMachine(Symbol):
     def printControllerPython(self, path):
         code = self.symtab.codeFormatter()
         ident = self.ident
+
         py_ident = "%s_Controller" % ident
         c_ident = "%s_Controller" % self.ident
+
         code('''
 from m5.params import *
 from m5.SimObject import SimObject
@@ -191,11 +205,20 @@ class $py_ident(RubyController):
         code.indent()
         for param in self.config_parameters:
             dflt_str = ''
-            if param.default is not None:
-                dflt_str = str(param.default) + ', '
-            if python_class_map.has_key(param.type_ast.type.c_ident):
+
+            if param.rvalue is not None:
+                dflt_str = str(param.rvalue.inline()) + ', '
+
+            if param.type_ast.type.c_ident == "MessageBuffer":
+                if param["network"] == "To":
+                    code('${{param.ident}} = MasterPort(${dflt_str}"")')
+                else:
+                    code('${{param.ident}} = SlavePort(${dflt_str}"")')
+
+            elif python_class_map.has_key(param.type_ast.type.c_ident):
                 python_type = python_class_map[param.type_ast.type.c_ident]
-                code('${{param.name}} = Param.${{python_type}}(${dflt_str}"")')
+                code('${{param.ident}} = Param.${{python_type}}(${dflt_str}"")')
+
             else:
                 self.error("Unknown c++ to python class conversion for c++ " \
                            "type: '%s'. Please update the python_class_map " \
@@ -233,13 +256,10 @@ class $py_ident(RubyController):
 ''')
 
         seen_types = set()
-        has_peer = False
         for var in self.objects:
             if var.type.ident not in seen_types and not var.type.isPrimitive:
                 code('#include "mem/protocol/${{var.type.c_ident}}.hh"')
-            if "network" in var and "physical_network" in var:
-                has_peer = True
-            seen_types.add(var.type.ident)
+                seen_types.add(var.type.ident)
 
         # for adding information to the protocol debug trace
         code('''
@@ -252,20 +272,20 @@ class $c_ident : public AbstractController
     $c_ident(const Params *p);
     static int getNumControllers();
     void init();
+
     MessageBuffer* getMandatoryQueue() const;
-    const std::string toString() const;
+    void setNetQueue(const std::string& name, MessageBuffer *b);
 
     void print(std::ostream& out) const;
     void wakeup();
-    void clearStats();
+    void resetStats();
     void regStats();
     void collateStats();
 
     void recordCacheTrace(int cntrl, CacheRecorder* tr);
     Sequencer* getSequencer() const;
 
-    bool functionalReadBuffers(PacketPtr&);
-    uint32_t functionalWriteBuffers(PacketPtr&);
+    int functionalWriteBuffers(PacketPtr&);
 
     void countTransition(${ident}_State state, ${ident}_Event event);
     void possibleTransition(${ident}_State state, ${ident}_Event event);
@@ -298,7 +318,7 @@ TransitionResult doTransition(${ident}_Event event,
 ''')
 
         code('''
-                              const Address& addr);
+                              const Address addr);
 
 TransitionResult doTransitionWorker(${ident}_Event event,
                                     ${ident}_State state,
@@ -333,8 +353,6 @@ static int m_num_controllers;
             if proto:
                 code('$proto')
 
-        if has_peer:
-            code('void getQueuesFromPeer(AbstractController *);')
         if self.EntryType != None:
             code('''
 
@@ -351,6 +369,7 @@ void set_tbe(${{self.TBEType.c_ident}}*& m_tbe_ptr, ${ident}_TBE* m_new_tbe);
 void unset_tbe(${{self.TBEType.c_ident}}*& m_tbe_ptr);
 ''')
 
+        # Prototype the actions that the controller can take
         code('''
 
 // Actions
@@ -358,15 +377,19 @@ void unset_tbe(${{self.TBEType.c_ident}}*& m_tbe_ptr);
         if self.TBEType != None and self.EntryType != None:
             for action in self.actions.itervalues():
                 code('/** \\brief ${{action.desc}} */')
-                code('void ${{action.ident}}(${{self.TBEType.c_ident}}*& m_tbe_ptr, ${{self.EntryType.c_ident}}*& m_cache_entry_ptr, const Address& addr);')
+                code('void ${{action.ident}}(${{self.TBEType.c_ident}}*& '
+                     'm_tbe_ptr, ${{self.EntryType.c_ident}}*& '
+                     'm_cache_entry_ptr, const Address& addr);')
         elif self.TBEType != None:
             for action in self.actions.itervalues():
                 code('/** \\brief ${{action.desc}} */')
-                code('void ${{action.ident}}(${{self.TBEType.c_ident}}*& m_tbe_ptr, const Address& addr);')
+                code('void ${{action.ident}}(${{self.TBEType.c_ident}}*& '
+                     'm_tbe_ptr, const Address& addr);')
         elif self.EntryType != None:
             for action in self.actions.itervalues():
                 code('/** \\brief ${{action.desc}} */')
-                code('void ${{action.ident}}(${{self.EntryType.c_ident}}*& m_cache_entry_ptr, const Address& addr);')
+                code('void ${{action.ident}}(${{self.EntryType.c_ident}}*& '
+                     'm_cache_entry_ptr, const Address& addr);')
         else:
             for action in self.actions.itervalues():
                 code('/** \\brief ${{action.desc}} */')
@@ -379,7 +402,7 @@ void unset_tbe(${{self.TBEType.c_ident}}*& m_tbe_ptr);
 ''')
         for var in self.objects:
             th = var.get("template", "")
-            code('${{var.type.c_ident}}$th* m_${{var.c_ident}}_ptr;')
+            code('${{var.type.c_ident}}$th* m_${{var.ident}}_ptr;')
 
         code.dedent()
         code('};')
@@ -392,7 +415,6 @@ void unset_tbe(${{self.TBEType.c_ident}}*& m_tbe_ptr);
         code = self.symtab.codeFormatter()
         ident = self.ident
         c_ident = "%s_Controller" % self.ident
-        has_peer = False
 
         code('''
 /** \\file $c_ident.cc
@@ -434,6 +456,8 @@ using namespace std;
                 code('#include "mem/protocol/${{var.type.c_ident}}.hh"')
             seen_types.add(var.type.ident)
 
+        num_in_ports = len(self.in_ports)
+
         code('''
 $c_ident *
 ${c_ident}Params::create()
@@ -458,72 +482,42 @@ stringstream ${ident}_transitionComment;
 $c_ident::$c_ident(const Params *p)
     : AbstractController(p)
 {
-    m_name = "${ident}";
+    m_machineID.type = MachineType_${ident};
+    m_machineID.num = m_version;
+    m_num_controllers++;
+
+    m_in_ports = $num_in_ports;
 ''')
-        num_in_ports = len(self.in_ports)
-        code('    m_in_ports = $num_in_ports;')
         code.indent()
 
         #
         # After initializing the universal machine parameters, initialize the
-        # this machines config parameters.  Also detemine if these configuration
-        # params include a sequencer.  This information will be used later for
-        # contecting the sequencer back to the L1 cache controller.
+        # this machines config parameters.  Also if these configuration params
+        # include a sequencer, connect the it to the controller.
         #
-        contains_dma_sequencer = False
-        sequencers = []
         for param in self.config_parameters:
-            if param.name == "dma_sequencer":
-                contains_dma_sequencer = True
-            elif re.compile("sequencer").search(param.name):
-                sequencers.append(param.name)
+
+            # Do not initialize messgage buffers since they are initialized
+            # when the port based connections are made.
+            if param.type_ast.type.c_ident == "MessageBuffer":
+                continue
+
             if param.pointer:
-                code('m_${{param.name}}_ptr = p->${{param.name}};')
+                code('m_${{param.ident}}_ptr = p->${{param.ident}};')
             else:
-                code('m_${{param.name}} = p->${{param.name}};')
+                code('m_${{param.ident}} = p->${{param.ident}};')
 
-        #
-        # For the l1 cache controller, add the special atomic support which 
-        # includes passing the sequencer a pointer to the controller.
-        #
-        for seq in sequencers:
-            code('''
-m_${{seq}}_ptr->setController(this);
-    ''')
-
-        #
-        # For the DMA controller, pass the sequencer a pointer to the
-        # controller.
-        #
-        if self.ident == "DMA":
-            if not contains_dma_sequencer:
-                self.error("The DMA controller must include the sequencer " \
-                           "configuration parameter")
-
-            code('''
-m_dma_sequencer_ptr->setController(this);
-''')
+            if re.compile("sequencer").search(param.ident):
+                code('m_${{param.ident}}_ptr->setController(this);')
             
-        code('m_num_controllers++;')
         for var in self.objects:
             if var.ident.find("mandatoryQueue") >= 0:
                 code('''
-m_${{var.c_ident}}_ptr = new ${{var.type.c_ident}}();
-m_${{var.c_ident}}_ptr->setReceiver(this);
-''')
-            else:
-                if "network" in var and "physical_network" in var and \
-                   var["network"] == "To":
-                    has_peer = True
-                    code('''
-m_${{var.c_ident}}_ptr = new ${{var.type.c_ident}}();
-peerQueueMap[${{var["physical_network"]}}] = m_${{var.c_ident}}_ptr;
-m_${{var.c_ident}}_ptr->setSender(this);
+m_${{var.ident}}_ptr = new ${{var.type.c_ident}}();
+m_${{var.ident}}_ptr->setReceiver(this);
 ''')
 
         code('''
-if (p->peer != NULL)
-    connectWithPeer(p->peer);
 
 for (int state = 0; state < ${ident}_State_NUM; state++) {
     for (int event = 0; event < ${ident}_Event_NUM; event++) {
@@ -540,22 +534,95 @@ for (int event = 0; event < ${ident}_Event_NUM; event++) {
 }
 
 void
+$c_ident::setNetQueue(const std::string& name, MessageBuffer *b)
+{
+    MachineType machine_type = string_to_MachineType("${{self.ident}}");
+    int base M5_VAR_USED = MachineType_base_number(machine_type);
+
+''')
+        code.indent()
+
+        # set for maintaining the vnet, direction pairs already seen for this
+        # machine.  This map helps in implementing the check for avoiding
+        # multiple message buffers being mapped to the same vnet.
+        vnet_dir_set = set()
+
+        for var in self.config_parameters:
+            if "network" in var:
+                vtype = var.type_ast.type
+                vid = "m_%s_ptr" % var.ident
+
+                code('''
+if ("${{var.ident}}" == name) {
+    $vid = b;
+    assert($vid != NULL);
+''')
+                code.indent()
+                # Network port object
+                network = var["network"]
+                ordered =  var["ordered"]
+
+                if "virtual_network" in var:
+                    vnet = var["virtual_network"]
+                    vnet_type = var["vnet_type"]
+
+                    assert (vnet, network) not in vnet_dir_set
+                    vnet_dir_set.add((vnet,network))
+
+                    code('''
+m_net_ptr->set${network}NetQueue(m_version + base, $ordered, $vnet,
+                                 "$vnet_type", b);
+''')
+                # Set the end
+                if network == "To":
+                    code('$vid->setSender(this);')
+                else:
+                    code('$vid->setReceiver(this);')
+
+                # Set ordering
+                code('$vid->setOrdering(${{var["ordered"]}});')
+
+                # Set randomization
+                if "random" in var:
+                    # A buffer
+                    code('$vid->setRandomization(${{var["random"]}});')
+
+                # Set Priority
+                if "rank" in var:
+                    code('$vid->setPriority(${{var["rank"]}})')
+
+                # Set buffer size
+                code('$vid->resize(m_buffer_size);')
+
+                if "recycle_latency" in var:
+                    code('$vid->setRecycleLatency( ' \
+                         'Cycles(${{var["recycle_latency"]}}));')
+                else:
+                    code('$vid->setRecycleLatency(m_recycle_latency);')
+
+                # set description (may be overriden later by port def)
+                code('''
+$vid->setDescription("[Version " + to_string(m_version) + ", ${ident}, name=${{var.ident}}]");
+''')
+                code.dedent()
+                code('}\n')
+
+        code.dedent()
+        code('''
+}
+
+void
 $c_ident::init()
 {
-    MachineType machine_type = string_to_MachineType("${{var.machine.ident}}");
-    int base = MachineType_base_number(machine_type);
-
-    m_machineID.type = MachineType_${ident};
-    m_machineID.num = m_version;
-
     // initialize objects
 
 ''')
 
         code.indent()
+
         for var in self.objects:
             vtype = var.type
-            vid = "m_%s_ptr" % var.c_ident
+            vid = "m_%s_ptr" % var.ident
             if "network" not in var:
                 # Not a network port object
                 if "primitive" in vtype:
@@ -604,55 +671,6 @@ $c_ident::init()
                         code('$vid->setSender(this);')
                         code('$vid->setReceiver(this);')
 
-            else:
-                # Network port object
-                network = var["network"]
-                ordered =  var["ordered"]
-
-                if "virtual_network" in var:
-                    vnet = var["virtual_network"]
-                    vnet_type = var["vnet_type"]
-
-                    assert var.machine is not None
-                    code('''
-$vid = m_net_ptr->get${network}NetQueue(m_version + base, $ordered, $vnet, "$vnet_type");
-assert($vid != NULL);
-''')
-
-                    # Set the end
-                    if network == "To":
-                        code('$vid->setSender(this);')
-                    else:
-                        code('$vid->setReceiver(this);')
-
-                # Set ordering
-                if "ordered" in var:
-                    # A buffer
-                    code('$vid->setOrdering(${{var["ordered"]}});')
-
-                # Set randomization
-                if "random" in var:
-                    # A buffer
-                    code('$vid->setRandomization(${{var["random"]}});')
-
-                # Set Priority
-                if "rank" in var:
-                    code('$vid->setPriority(${{var["rank"]}})')
-
-                # Set buffer size
-                if vtype.isBuffer:
-                    code('''
-if (m_buffer_size > 0) {
-    $vid->resize(m_buffer_size);
-}
-''')
-
-                # set description (may be overriden later by port def)
-                code('''
-$vid->setDescription("[Version " + to_string(m_version) + ", ${ident}, name=${{var.c_ident}}]");
-
-''')
-
             if vtype.isBuffer:
                 if "recycle_latency" in var:
                     code('$vid->setRecycleLatency( ' \
@@ -690,37 +708,35 @@ $vid->setDescription("[Version " + to_string(m_version) + ", ${ident}, name=${{v
         code.dedent()
         code('''
     AbstractController::init();
-    clearStats();
+    resetStats();
 }
 ''')
 
-        has_mandatory_q = False
+        mq_ident = "NULL"
         for port in self.in_ports:
             if port.code.find("mandatoryQueue_ptr") >= 0:
-                has_mandatory_q = True
-
-        if has_mandatory_q:
-            mq_ident = "m_%s_mandatoryQueue_ptr" % self.ident
-        else:
-            mq_ident = "NULL"
+                mq_ident = "m_mandatoryQueue_ptr"
 
         seq_ident = "NULL"
         for param in self.config_parameters:
-            if param.name == "sequencer":
+            if param.ident == "sequencer":
                 assert(param.pointer)
-                seq_ident = "m_%s_ptr" % param.name
+                seq_ident = "m_%s_ptr" % param.ident
 
         code('''
 
 void
 $c_ident::regStats()
 {
+    AbstractController::regStats();
+
     if (m_version == 0) {
         for (${ident}_Event event = ${ident}_Event_FIRST;
              event < ${ident}_Event_NUM; ++event) {
             Stats::Vector *t = new Stats::Vector();
             t->init(m_num_controllers);
-            t->name(name() + "." + ${ident}_Event_to_string(event));
+            t->name(g_system_ptr->name() + ".${c_ident}." +
+                ${ident}_Event_to_string(event));
             t->flags(Stats::pdf | Stats::total | Stats::oneline |
                      Stats::nozero);
 
@@ -737,7 +753,8 @@ $c_ident::regStats()
 
                 Stats::Vector *t = new Stats::Vector();
                 t->init(m_num_controllers);
-                t->name(name() + "." + ${ident}_State_to_string(state) +
+                t->name(g_system_ptr->name() + ".${c_ident}." +
+                        ${ident}_State_to_string(state) +
                         "." + ${ident}_Event_to_string(event));
 
                 t->flags(Stats::pdf | Stats::total | Stats::oneline |
@@ -830,19 +847,13 @@ $c_ident::getSequencer() const
     return $seq_ident;
 }
 
-const string
-$c_ident::toString() const
-{
-    return "$c_ident";
-}
-
 void
 $c_ident::print(ostream& out) const
 {
     out << "[$c_ident " << m_version << "]";
 }
 
-void $c_ident::clearStats()
+void $c_ident::resetStats()
 {
     for (int state = 0; state < ${ident}_State_NUM; state++) {
         for (int event = 0; event < ${ident}_Event_NUM; event++) {
@@ -854,7 +865,7 @@ void $c_ident::clearStats()
         m_event_counters[event] = 0;
     }
 
-    AbstractController::clearStats();
+    AbstractController::resetStats();
 }
 ''')
 
@@ -976,58 +987,29 @@ $c_ident::${{action.ident}}(const Address& addr)
         for func in self.functions:
             code(func.generateCode())
 
-        # Function for functional reads from messages buffered in the controller
-        code('''
-bool
-$c_ident::functionalReadBuffers(PacketPtr& pkt)
-{
-''')
-        for var in self.objects:
-            vtype = var.type
-            if vtype.isBuffer:
-                vid = "m_%s_ptr" % var.c_ident
-                code('if ($vid->functionalRead(pkt)) { return true; }')
-        code('''
-                return false;
-}
-''')
-
         # Function for functional writes to messages buffered in the controller
         code('''
-uint32_t
+int
 $c_ident::functionalWriteBuffers(PacketPtr& pkt)
 {
-    uint32_t num_functional_writes = 0;
+    int num_functional_writes = 0;
 ''')
         for var in self.objects:
             vtype = var.type
             if vtype.isBuffer:
-                vid = "m_%s_ptr" % var.c_ident
+                vid = "m_%s_ptr" % var.ident
                 code('num_functional_writes += $vid->functionalWrite(pkt);')
+
+        for var in self.config_parameters:
+            vtype = var.type_ast.type
+            if vtype.isBuffer:
+                vid = "m_%s_ptr" % var.ident
+                code('num_functional_writes += $vid->functionalWrite(pkt);')
+
         code('''
     return num_functional_writes;
 }
 ''')
-
-        # Check if this controller has a peer, if yes then write the
-        # function for connecting to the peer.
-        if has_peer:
-            code('''
-
-void
-$c_ident::getQueuesFromPeer(AbstractController *peer)
-{
-''')
-            for var in self.objects:
-                if "network" in var and "physical_network" in var and \
-                   var["network"] == "From":
-                    code('''
-m_${{var.c_ident}}_ptr = peer->getPeerQueue(${{var["physical_network"]}});
-assert(m_${{var.c_ident}}_ptr != NULL);
-m_${{var.c_ident}}_ptr->setReceiver(this);
-
-''')
-            code('}')
 
         code.write(path, "%s.cc" % c_ident)
 
@@ -1158,9 +1140,11 @@ ${ident}_Controller::doTransition(${ident}_Event event,
                                   ${{self.TBEType.c_ident}}* m_tbe_ptr,
 ''')
         code('''
-                                  const Address &addr)
+                                  const Address addr)
 {
 ''')
+        code.indent()
+
         if self.TBEType != None and self.EntryType != None:
             code('${ident}_State state = getState(m_tbe_ptr, m_cache_entry_ptr, addr);')
         elif self.TBEType != None:
@@ -1171,13 +1155,13 @@ ${ident}_Controller::doTransition(${ident}_Event event,
             code('${ident}_State state = getState(addr);')
 
         code('''
-    ${ident}_State next_state = state;
+${ident}_State next_state = state;
 
-    DPRINTF(RubyGenerated, "%s, Time: %lld, state: %s, event: %s, addr: %s\\n",
-            *this, curCycle(), ${ident}_State_to_string(state),
-            ${ident}_Event_to_string(event), addr);
+DPRINTF(RubyGenerated, "%s, Time: %lld, state: %s, event: %s, addr: %s\\n",
+        *this, curCycle(), ${ident}_State_to_string(state),
+        ${ident}_Event_to_string(event), addr);
 
-    TransitionResult result =
+TransitionResult result =
 ''')
         if self.TBEType != None and self.EntryType != None:
             code('doTransitionWorker(event, state, next_state, m_tbe_ptr, m_cache_entry_ptr, addr);')
@@ -1189,18 +1173,20 @@ ${ident}_Controller::doTransition(${ident}_Event event,
             code('doTransitionWorker(event, state, next_state, addr);')
 
         code('''
-    if (result == TransitionResult_Valid) {
-        DPRINTF(RubyGenerated, "next_state: %s\\n",
-                ${ident}_State_to_string(next_state));
-        countTransition(state, event);
-        DPRINTFR(ProtocolTrace, "%15d %3s %10s%20s %6s>%-6s %s %s\\n",
-                 curTick(), m_version, "${ident}",
-                 ${ident}_Event_to_string(event),
-                 ${ident}_State_to_string(state),
-                 ${ident}_State_to_string(next_state),
-                 addr, GET_TRANSITION_COMMENT());
 
-        CLEAR_TRANSITION_COMMENT();
+if (result == TransitionResult_Valid) {
+    DPRINTF(RubyGenerated, "next_state: %s\\n",
+            ${ident}_State_to_string(next_state));
+    countTransition(state, event);
+
+    DPRINTFR(ProtocolTrace, "%15d %3s %10s%20s %6s>%-6s %s %s\\n",
+             curTick(), m_version, "${ident}",
+             ${ident}_Event_to_string(event),
+             ${ident}_State_to_string(state),
+             ${ident}_State_to_string(next_state),
+             addr, GET_TRANSITION_COMMENT());
+
+    CLEAR_TRANSITION_COMMENT();
 ''')
         if self.TBEType != None and self.EntryType != None:
             code('setState(m_tbe_ptr, m_cache_entry_ptr, addr, next_state);')
@@ -1216,24 +1202,27 @@ ${ident}_Controller::doTransition(${ident}_Event event,
             code('setAccessPermission(addr, next_state);')
 
         code('''
-    } else if (result == TransitionResult_ResourceStall) {
-        DPRINTFR(ProtocolTrace, "%15s %3s %10s%20s %6s>%-6s %s %s\\n",
-                 curTick(), m_version, "${ident}",
-                 ${ident}_Event_to_string(event),
-                 ${ident}_State_to_string(state),
-                 ${ident}_State_to_string(next_state),
-                 addr, "Resource Stall");
-    } else if (result == TransitionResult_ProtocolStall) {
-        DPRINTF(RubyGenerated, "stalling\\n");
-        DPRINTFR(ProtocolTrace, "%15s %3s %10s%20s %6s>%-6s %s %s\\n",
-                 curTick(), m_version, "${ident}",
-                 ${ident}_Event_to_string(event),
-                 ${ident}_State_to_string(state),
-                 ${ident}_State_to_string(next_state),
-                 addr, "Protocol Stall");
-    }
+} else if (result == TransitionResult_ResourceStall) {
+    DPRINTFR(ProtocolTrace, "%15s %3s %10s%20s %6s>%-6s %s %s\\n",
+             curTick(), m_version, "${ident}",
+             ${ident}_Event_to_string(event),
+             ${ident}_State_to_string(state),
+             ${ident}_State_to_string(next_state),
+             addr, "Resource Stall");
+} else if (result == TransitionResult_ProtocolStall) {
+    DPRINTF(RubyGenerated, "stalling\\n");
+    DPRINTFR(ProtocolTrace, "%15s %3s %10s%20s %6s>%-6s %s %s\\n",
+             curTick(), m_version, "${ident}",
+             ${ident}_Event_to_string(event),
+             ${ident}_State_to_string(state),
+             ${ident}_State_to_string(next_state),
+             addr, "Protocol Stall");
+}
 
-    return result;
+return result;
+''')
+        code.dedent()
+        code('''
 }
 
 TransitionResult
@@ -1276,8 +1265,7 @@ ${ident}_Controller::doTransitionWorker(${ident}_Event event,
             case_sorter = []
             res = trans.resources
             for key,val in res.iteritems():
-                if key.type.ident != "DNUCAStopTable":
-                    val = '''
+                val = '''
 if (!%s.areNSlotsAvailable(%s))
     return TransitionResult_ResourceStall;
 ''' % (key.code, val)
@@ -1341,7 +1329,7 @@ if (!checkResourceAvailable(%s_RequestType_%s, addr)) {
             # the same code
             for trans in transitions:
                 code('  case HASH_FUN($trans):')
-            code('    $case')
+            code('    $case\n')
 
         code('''
       default:
@@ -1349,6 +1337,7 @@ if (!checkResourceAvailable(%s_RequestType_%s, addr)) {
               "%s time: %d addr: %s event: %s state: %s\\n",
               name(), curCycle(), addr, event, state);
     }
+
     return TransitionResult_Valid;
 }
 ''')

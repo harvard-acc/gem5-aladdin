@@ -32,8 +32,7 @@
 
 #include "base/cast.hh"
 #include "base/stl_helpers.hh"
-#include "mem/protocol/MachineType.hh"
-#include "mem/ruby/buffers/MessageBuffer.hh"
+#include "mem/ruby/common/Global.hh"
 #include "mem/ruby/common/NetDest.hh"
 #include "mem/ruby/network/BasicLink.hh"
 #include "mem/ruby/network/garnet/flexible-pipeline/GarnetLink.hh"
@@ -41,7 +40,6 @@
 #include "mem/ruby/network/garnet/flexible-pipeline/NetworkInterface.hh"
 #include "mem/ruby/network/garnet/flexible-pipeline/NetworkLink.hh"
 #include "mem/ruby/network/garnet/flexible-pipeline/Router.hh"
-#include "mem/ruby/network/Topology.hh"
 
 using namespace std;
 using m5::stl_helpers::deletePointers;
@@ -57,6 +55,11 @@ GarnetNetwork::GarnetNetwork(const Params *p)
          i != p->routers.end(); ++i) {
         Router* router = safe_cast<Router*>(*i);
         m_routers.push_back(router);
+    }
+
+    for (int i=0; i < m_nodes; i++) {
+        NetworkInterface *ni = safe_cast<NetworkInterface *>(p->netifs[i]);
+        m_nis.push_back(ni);
     }
 }
 
@@ -76,10 +79,8 @@ GarnetNetwork::init()
     }
 
     for (int i=0; i < m_nodes; i++) {
-        NetworkInterface *ni = new NetworkInterface(i, m_virtual_networks,
-                                                    this);
-        ni->addNode(m_toNetQueues[i], m_fromNetQueues[i]);
-        m_nis.push_back(ni);
+        m_nis[i]->init_net_ptr(this);
+        m_nis[i]->addNode(m_toNetQueues[i], m_fromNetQueues[i]);
     }
 
     m_topology_ptr->createLinks(this);
@@ -87,14 +88,9 @@ GarnetNetwork::init()
 
 GarnetNetwork::~GarnetNetwork()
 {
-    for (int i = 0; i < m_nodes; i++) {
-        deletePointers(m_toNetQueues[i]);
-        deletePointers(m_fromNetQueues[i]);
-    }
     deletePointers(m_routers);
     deletePointers(m_nis);
     deletePointers(m_links);
-    delete m_topology_ptr;
 }
 
 void
@@ -145,7 +141,6 @@ GarnetNetwork::makeInternalLink(SwitchID src, SwitchID dest, BasicLink* link,
     m_routers[dest]->addInPort(net_link);
     m_routers[src]->addOutPort(net_link, routing_table_entry,
                                          link->m_weight);
-
 }
 
 void

@@ -46,7 +46,6 @@
  * Definitions of BaseTags.
  */
 
-#include "config/the_isa.hh"
 #include "cpu/smt.hh" //maxThreadsPerCPU
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/base.hh"
@@ -56,13 +55,15 @@ using namespace std;
 
 BaseTags::BaseTags(const Params *p)
     : ClockedObject(p), blkSize(p->block_size), size(p->size),
-      hitLatency(p->hit_latency)
+      accessLatency(p->hit_latency), cache(nullptr), warmupBound(0),
+      warmedUp(false), numBlocks(0)
 {
 }
 
 void
 BaseTags::setCache(BaseCache *_cache)
 {
+    assert(!cache);
     cache = _cache;
 }
 
@@ -125,5 +126,38 @@ BaseTags::regStats()
 
     avgOccs = occupancies / Stats::constant(numBlocks);
 
+    occupanciesTaskId
+        .init(ContextSwitchTaskId::NumTaskId)
+        .name(name() + ".occ_task_id_blocks")
+        .desc("Occupied blocks per task id")
+        .flags(nozero | nonan)
+        ;
+
+    ageTaskId
+        .init(ContextSwitchTaskId::NumTaskId, 5)
+        .name(name() + ".age_task_id_blocks")
+        .desc("Occupied blocks per task id")
+        .flags(nozero | nonan)
+        ;
+
+    percentOccsTaskId
+        .name(name() + ".occ_task_id_percent")
+        .desc("Percentage of cache occupancy per task id")
+        .flags(nozero)
+        ;
+
+    percentOccsTaskId = occupanciesTaskId / Stats::constant(numBlocks);
+
+    tagAccesses
+        .name(name() + ".tag_accesses")
+        .desc("Number of tag accesses")
+        ;
+
+    dataAccesses
+        .name(name() + ".data_accesses")
+        .desc("Number of data accesses")
+        ;
+
+    registerDumpCallback(new BaseTagsDumpCallback(this));
     registerExitCallback(new BaseTagsCallback(this));
 }

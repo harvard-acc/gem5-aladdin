@@ -53,7 +53,6 @@ from m5.util import addToPath, fatal
 
 addToPath('../common')
 addToPath('../ruby')
-addToPath('../topologies')
 
 import Options
 import Ruby
@@ -62,6 +61,13 @@ import CacheConfig
 import MemConfig
 from Caches import *
 from cpu2000 import *
+
+# Check if KVM support has been enabled, we might need to do VM
+# configuration if that's the case.
+have_kvm_support = 'BaseKvmCPU' in globals()
+def is_kvm_cpu(cpu_class):
+    return have_kvm_support and cpu_class != None and \
+        issubclass(cpu_class, BaseKvmCPU)
 
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""
@@ -88,6 +94,10 @@ def get_processes(options):
         process.executable = wrkld
         process.cwd = os.getcwd()
 
+        if options.env:
+            with open(options.env, 'r') as f:
+                process.env = [line.rstrip() for line in f]
+
         if len(pargs) > idx:
             process.cmd = [wrkld] + pargs[idx].split()
         else:
@@ -104,7 +114,7 @@ def get_processes(options):
         idx += 1
 
     if options.smt:
-        assert(options.cpu_type == "detailed" or options.cpu_type == "inorder")
+        assert(options.cpu_type == "detailed")
         return multiprocesses, idx
     else:
         return multiprocesses, 1
@@ -135,12 +145,18 @@ if options.bench:
     for app in apps:
         try:
             if buildEnv['TARGET_ISA'] == 'alpha':
-                exec("workload = %s('alpha', 'tru64', 'ref')" % app)
+                exec("workload = %s('alpha', 'tru64', '%s')" % (
+                        app, options.spec_input))
+            elif buildEnv['TARGET_ISA'] == 'arm':
+                exec("workload = %s('arm_%s', 'linux', '%s')" % (
+                        app, options.arm_iset, options.spec_input))
             else:
-                exec("workload = %s(buildEnv['TARGET_ISA'], 'linux', 'ref')" % app)
+                exec("workload = %s(buildEnv['TARGET_ISA', 'linux', '%s')" % (
+                        app, options.spec_input))
             multiprocesses.append(workload.makeLiveProcess())
         except:
-            print >>sys.stderr, "Unable to find workload for %s: %s" % (buildEnv['TARGET_ISA'], app)
+            print >>sys.stderr, "Unable to find workload for %s: %s" % (
+                    buildEnv['TARGET_ISA'], app)
             sys.exit(1)
 elif options.cmd:
     multiprocesses, numThreads = get_processes(options)
@@ -151,8 +167,6 @@ else:
 
 (CPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(options)
 CPUClass.numThreads = numThreads
-
-MemClass = Simulation.setMemClass(options)
 
 # Check -- do not allow SMT with multiple CPUs
 if options.smt and options.num_cpus > 1:
@@ -184,6 +198,15 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
 for cpu in system.cpu:
     cpu.clk_domain = system.cpu_clk_domain
 
+if is_kvm_cpu(CPUClass) or is_kvm_cpu(FutureClass):
+    if buildEnv['TARGET_ISA'] == 'x86':
+        system.vm = KvmVM()
+        for process in multiprocesses:
+            process.useArchPT = True
+            process.kvmInSE = True
+    else:
+        fatal("KvmCPU can only be used in SE mode with x86")
+
 # Sanity check
 if options.fastmem:
     if CPUClass != AtomicSimpleCPU:
@@ -210,8 +233,7 @@ for i in xrange(np):
         system.cpu[i].fastmem = True
 
     if options.simpoint_profile:
-        system.cpu[i].simpoint_profile = True
-        system.cpu[i].simpoint_interval = options.simpoint_interval
+        system.cpu[i].addSimPointProbe(options.simpoint_interval)
 
     if options.checker:
         system.cpu[i].addCheckerCpu()
@@ -223,16 +245,13 @@ if options.ruby:
         print >> sys.stderr, "Ruby requires TimingSimpleCPU or O3CPU!!"
         sys.exit(1)
 
-    # Set the option for physmem so that it is not allocated any space
-    system.physmem = MemClass(range=AddrRange(options.mem_size),
-                              null = True)
+    Ruby.create_system(options, False, system)
+    assert(options.num_cpus == len(system.ruby._cpu_ports))
 
-    options.use_map = True
-    Ruby.create_system(options, system)
-    assert(options.num_cpus == len(system.ruby._cpu_ruby_ports))
-
+    system.ruby.clk_domain = SrcClockDomain(clock = options.ruby_clock,
+                                        voltage_domain = system.voltage_domain)
     for i in xrange(np):
-        ruby_port = system.ruby._cpu_ruby_ports[i]
+        ruby_port = system.ruby._cpu_ports[i]
 
         # Create the interrupt controller and connect its ports to Ruby
         # Note that the interrupt controller is always present but only
@@ -249,7 +268,8 @@ if options.ruby:
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
 else:
-    system.membus = CoherentBus()
+    MemClass = Simulation.setMemClass(options)
+    system.membus = SystemXBar()
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)
     MemConfig.config_mem(options, system)

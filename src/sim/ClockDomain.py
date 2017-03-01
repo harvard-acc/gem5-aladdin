@@ -1,4 +1,4 @@
-# Copyright (c) 2013 ARM Limited
+# Copyright (c) 2013-2014 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -35,6 +35,7 @@
 #
 # Authors: Vasileios Spiliopoulos
 #          Akash Bagdia
+#          Stephan Diestelhorst
 
 from m5.params import *
 from m5.SimObject import SimObject
@@ -46,14 +47,30 @@ class ClockDomain(SimObject):
     cxx_header = "sim/clock_domain.hh"
     abstract = True
 
-# Source clock domain with an actual clock
+# Source clock domain with an actual clock, and a list of voltage and frequency
+# op points
 class SrcClockDomain(ClockDomain):
     type = 'SrcClockDomain'
     cxx_header = "sim/clock_domain.hh"
-    clock = Param.Clock("Clock period")
+
+    # Single clock frequency value, or list of frequencies for DVFS
+    # Frequencies must be ordered in descending order
+    # Note: Matching voltages should be defined in the voltage domain
+    clock = VectorParam.Clock("Clock period")
 
     # A source clock must be associated with a voltage domain
     voltage_domain = Param.VoltageDomain("Voltage domain")
+
+    # Domain ID is an identifier for the DVFS domain as understood by the
+    # necessary control logic (either software or hardware). For example, in
+    # case of software control via cpufreq framework the IDs should correspond
+    # to the neccessary identifier in the device tree blob which is interpretted
+    # by the device driver to communicate to the domain controller in hardware.
+    domain_id = Param.Int32(-1, "domain id")
+
+    # Initial performance level from the list of available operation points
+    # Defaults to maximum performance
+    init_perf_level = Param.UInt32(0, "Initial performance level")
 
 # Derived clock domain with a parent clock domain and a frequency
 # divider

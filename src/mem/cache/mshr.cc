@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012-2013, 2015 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -62,10 +62,11 @@
 using namespace std;
 
 MSHR::MSHR() : readyTime(0), _isUncacheable(false), downstreamPending(false),
-               pendingDirty(false), postInvalidate(false),
-               postDowngrade(false), queue(NULL), order(0), addr(0), size(0),
-               inService(false), isForward(false), threadNum(InvalidThreadID),
-               data(NULL)
+               pendingDirty(false),
+               postInvalidate(false), postDowngrade(false),
+               queue(NULL), order(0), blkAddr(0),
+               blkSize(0), isSecure(false), inService(false),
+               isForward(false), threadNum(InvalidThreadID), data(NULL)
 {
 }
 
@@ -103,7 +104,7 @@ MSHR::TargetList::add(PacketPtr pkt, Tick readyTime,
         }
     }
 
-    push_back(Target(pkt, readyTime, order, source, markPending));
+    emplace_back(Target(pkt, readyTime, order, source, markPending));
 }
 
 
@@ -129,9 +130,8 @@ MSHR::TargetList::replaceUpgrades()
     if (!hasUpgrade)
         return;
 
-    Iterator end_i = end();
-    for (Iterator i = begin(); i != end_i; ++i) {
-        replaceUpgrade(i->pkt);
+    for (auto& t : *this) {
+        replaceUpgrade(t.pkt);
     }
 
     hasUpgrade = false;
@@ -141,16 +141,15 @@ MSHR::TargetList::replaceUpgrades()
 void
 MSHR::TargetList::clearDownstreamPending()
 {
-    Iterator end_i = end();
-    for (Iterator i = begin(); i != end_i; ++i) {
-        if (i->markedPending) {
+    for (auto& t : *this) {
+        if (t.markedPending) {
             // Iterate over the SenderState stack and see if we find
             // an MSHR entry. If we find one, clear the
             // downstreamPending flag by calling
             // clearDownstreamPending(). This recursively clears the
             // downstreamPending flag in all caches this packet has
             // passed through.
-            MSHR *mshr = i->pkt->findNextSenderState<MSHR>();
+            MSHR *mshr = t.pkt->findNextSenderState<MSHR>();
             if (mshr != NULL) {
                 mshr->clearDownstreamPending();
             }
@@ -162,9 +161,8 @@ MSHR::TargetList::clearDownstreamPending()
 bool
 MSHR::TargetList::checkFunctional(PacketPtr pkt)
 {
-    Iterator end_i = end();
-    for (Iterator i = begin(); i != end_i; ++i) {
-        if (pkt->checkFunctional(i->pkt)) {
+    for (auto& t : *this) {
+        if (pkt->checkFunctional(t.pkt)) {
             return true;
         }
     }
@@ -174,13 +172,12 @@ MSHR::TargetList::checkFunctional(PacketPtr pkt)
 
 
 void
-MSHR::TargetList::
-print(std::ostream &os, int verbosity, const std::string &prefix) const
+MSHR::TargetList::print(std::ostream &os, int verbosity,
+                        const std::string &prefix) const
 {
-    ConstIterator end_i = end();
-    for (ConstIterator i = begin(); i != end_i; ++i) {
+    for (auto& t : *this) {
         const char *s;
-        switch (i->source) {
+        switch (t.source) {
           case Target::FromCPU:
             s = "FromCPU";
             break;
@@ -195,18 +192,19 @@ print(std::ostream &os, int verbosity, const std::string &prefix) const
             break;
         }
         ccprintf(os, "%s%s: ", prefix, s);
-        i->pkt->print(os, verbosity, "");
+        t.pkt->print(os, verbosity, "");
     }
 }
 
 
 void
-MSHR::allocate(Addr _addr, int _size, PacketPtr target,
-               Tick whenReady, Counter _order)
+MSHR::allocate(Addr blk_addr, unsigned blk_size, PacketPtr target,
+               Tick when_ready, Counter _order)
 {
-    addr = _addr;
-    size = _size;
-    readyTime = whenReady;
+    blkAddr = blk_addr;
+    blkSize = blk_size;
+    isSecure = target->isSecure();
+    readyTime = when_ready;
     order = _order;
     assert(target);
     isForward = false;
@@ -219,7 +217,7 @@ MSHR::allocate(Addr _addr, int _size, PacketPtr target,
     // snoop (mem-side request), so set source according to request here
     Target::Source source = (target->cmd == MemCmd::HardPFReq) ?
         Target::FromPrefetcher : Target::FromCPU;
-    targets.add(target, whenReady, _order, source, true);
+    targets.add(target, when_ready, _order, source, true);
     assert(deferredTargets.isReset());
     data = NULL;
 }
@@ -236,7 +234,7 @@ MSHR::clearDownstreamPending()
 }
 
 bool
-MSHR::markInService(PacketPtr pkt)
+MSHR::markInService(bool pending_dirty_resp)
 {
     assert(!inService);
     if (isForwardNoResponse()) {
@@ -246,9 +244,9 @@ MSHR::markInService(PacketPtr pkt)
         popTarget();
         return true;
     }
+
     inService = true;
-    pendingDirty = (targets.needsExclusive ||
-                    (!pkt->sharedAsserted() && pkt->memInhibitAsserted()));
+    pendingDirty = targets.needsExclusive || pending_dirty_resp;
     postInvalidate = postDowngrade = false;
 
     if (!downstreamPending) {
@@ -275,6 +273,15 @@ MSHR::deallocate()
 void
 MSHR::allocateTarget(PacketPtr pkt, Tick whenReady, Counter _order)
 {
+    // assume we'd never issue a prefetch when we've got an
+    // outstanding miss
+    assert(pkt->cmd != MemCmd::HardPFReq);
+
+    // uncacheable accesses always allocate a new MSHR, and cacheable
+    // accesses ignore any uncacheable MSHRs, thus we should never
+    // have targets addded if originally allocated uncacheable
+    assert(!_isUncacheable);
+
     // if there's a request already in service for this MSHR, we will
     // have to defer the new target until after the response if any of
     // the following are true:
@@ -285,11 +292,6 @@ MSHR::allocateTarget(PacketPtr pkt, Tick whenReady, Counter _order)
     //   getting an exclusive block back or we have already snooped
     //   another read request that will downgrade our exclusive block
     //   to shared
-
-    // assume we'd never issue a prefetch when we've got an
-    // outstanding miss
-    assert(pkt->cmd != MemCmd::HardPFReq);
-
     if (inService &&
         (!deferredTargets.empty() || hasPostInvalidate() ||
          (pkt->needsExclusive() &&
@@ -310,7 +312,7 @@ MSHR::allocateTarget(PacketPtr pkt, Tick whenReady, Counter _order)
 bool
 MSHR::handleSnoop(PacketPtr pkt, Counter _order)
 {
-    DPRINTF(Cache, "%s for %s address %x size %d\n", __func__,
+    DPRINTF(Cache, "%s for %s addr %#llx size %d\n", __func__,
             pkt->cmdString(), pkt->getAddr(), pkt->getSize());
     if (!inService || (pkt->isExpressSnoop() && downstreamPending)) {
         // Request has not been issued yet, or it's been issued
@@ -359,14 +361,32 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
         
         // Actual target device (typ. a memory) will delete the
         // packet on reception, so we need to save a copy here.
-        PacketPtr cp_pkt = new Packet(pkt, true);
-        targets.add(cp_pkt, curTick(), _order, Target::FromSnoop,
-                     downstreamPending && targets.needsExclusive);
+
+        // Clear flags and also allocate new data as the original
+        // packet data storage may have been deleted by the time we
+        // get to send this packet.
+        PacketPtr cp_pkt = nullptr;
 
         if (isPendingDirty()) {
+            // Case 1: The new packet will need to get the response from the
+            // MSHR already queued up here
+            cp_pkt = new Packet(pkt, true, true);
             pkt->assertMemInhibit();
+            // in the case of an uncacheable request there is no need
+            // to set the exclusive flag, but since the recipient does
+            // not care there is no harm in doing so
             pkt->setSupplyExclusive();
+        } else {
+            // Case 2: We only need to buffer the packet for information
+            // purposes; the original request can proceed without waiting
+            // => Create a copy of the request, as that may get deallocated as
+            // well
+            cp_pkt = new Packet(new Request(*pkt->req), pkt->cmd);
+            DPRINTF(Cache, "Copying packet %p -> %p and request %p -> %p\n",
+                    pkt, cp_pkt, pkt->req, cp_pkt->req);
         }
+        targets.add(cp_pkt, curTick(), _order, Target::FromSnoop,
+                    downstreamPending && targets.needsExclusive);
 
         if (pkt->needsExclusive()) {
             // This transaction will take away our pending copy
@@ -374,7 +394,7 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
         }
     }
 
-    if (!pkt->needsExclusive()) {
+    if (!pkt->needsExclusive() && !pkt->req->isUncacheable()) {
         // This transaction will get a read-shared copy, downgrading
         // our copy if we had an exclusive one
         postDowngrade = true;
@@ -407,7 +427,7 @@ MSHR::promoteDeferredTargets()
 
 
 void
-MSHR::handleFill(Packet *pkt, CacheBlk *blk)
+MSHR::handleFill(PacketPtr pkt, CacheBlk *blk)
 {
     if (!pkt->sharedAsserted()
         && !(hasPostInvalidate() || hasPostDowngrade())
@@ -440,7 +460,7 @@ MSHR::checkFunctional(PacketPtr pkt)
     // For other requests, we iterate over the individual targets
     // since that's where the actual data lies.
     if (pkt->isPrint()) {
-        pkt->checkFunctional(this, addr, size, NULL);
+        pkt->checkFunctional(this, blkAddr, isSecure, blkSize, NULL);
         return false;
     } else {
         return (targets.checkFunctional(pkt) ||
@@ -452,8 +472,9 @@ MSHR::checkFunctional(PacketPtr pkt)
 void
 MSHR::print(std::ostream &os, int verbosity, const std::string &prefix) const
 {
-    ccprintf(os, "%s[%x:%x] %s %s %s state: %s %s %s %s %s\n",
-             prefix, addr, addr+size-1,
+    ccprintf(os, "%s[%#llx:%#llx](%s) %s %s %s state: %s %s %s %s %s\n",
+             prefix, blkAddr, blkAddr + blkSize - 1,
+             isSecure ? "s" : "ns",
              isForward ? "Forward" : "",
              isForwardNoResponse() ? "ForwNoResp" : "",
              needsExclusive() ? "Excl" : "",

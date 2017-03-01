@@ -27,7 +27,6 @@
  */
 
 #include "base/misc.hh"
-#include "mem/protocol/MachineType.hh"
 #include "mem/ruby/network/BasicLink.hh"
 #include "mem/ruby/network/Network.hh"
 #include "mem/ruby/system/System.hh"
@@ -50,6 +49,22 @@ Network::Network(const Params *p)
 
     m_topology_ptr = new Topology(p->routers.size(), p->ext_links,
                                   p->int_links);
+
+    // Allocate to and from queues
+    // Queues that are getting messages from protocol
+    m_toNetQueues.resize(m_nodes);
+
+    // Queues that are feeding the protocol
+    m_fromNetQueues.resize(m_nodes);
+
+    m_in_use.resize(m_virtual_networks);
+    m_ordered.resize(m_virtual_networks);
+
+    for (int i = 0; i < m_virtual_networks; i++) {
+        m_in_use[i] = false;
+        m_ordered[i] = false;
+    }
+
     p->ruby_system->registerNetwork(this);
 
     // Initialize the controller's network pointers
@@ -62,6 +77,23 @@ Network::Network(const Params *p)
 
     // Register a callback function for combining the statistics
     Stats::registerDumpCallback(new StatsCallback(this));
+}
+
+Network::~Network()
+{
+    for (int node = 0; node < m_nodes; node++) {
+
+        // Delete the Message Buffers
+        for (auto& it : m_toNetQueues[node]) {
+            delete it;
+        }
+
+        for (auto& it : m_fromNetQueues[node]) {
+            delete it;
+        }
+    }
+
+    delete m_topology_ptr;
 }
 
 void
@@ -97,10 +129,4 @@ Network::MessageSizeType_to_int(MessageSizeType size_type)
         panic("Invalid range for type MessageSizeType");
         break;
     }
-}
-
-const std::vector<Throttle*>*
-Network::getThrottles(NodeID id) const
-{
-    return NULL;
 }

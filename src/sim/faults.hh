@@ -32,10 +32,8 @@
 #ifndef __FAULTS_HH__
 #define __FAULTS_HH__
 
-#include "base/refcnt.hh"
 #include "base/types.hh"
 #include "cpu/static_inst.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/stats.hh"
 
 class ThreadContext;
@@ -50,12 +48,12 @@ typedef Stats::Scalar FaultStat;
 // all faults returned using the Fault type) will use the
 // generic FaultBase name.
 
-class FaultBase : public RefCounted
+class FaultBase
 {
   public:
     virtual FaultName name() const = 0;
-    virtual void invoke(ThreadContext * tc,
-            StaticInstPtr inst = StaticInst::nullStaticInstPtr);
+    virtual void invoke(ThreadContext * tc, const StaticInstPtr &inst =
+                        StaticInst::nullStaticInstPtr);
 };
 
 class UnimpFault : public FaultBase
@@ -68,8 +66,8 @@ class UnimpFault : public FaultBase
     { }
 
     FaultName name() const {return "Unimplemented simulator feature";}
-    void invoke(ThreadContext * tc,
-            StaticInstPtr inst = StaticInst::nullStaticInstPtr);
+    void invoke(ThreadContext * tc, const StaticInstPtr &inst =
+                StaticInst::nullStaticInstPtr);
 };
 
 class ReExec : public FaultBase
@@ -77,8 +75,8 @@ class ReExec : public FaultBase
   public:
     virtual FaultName name() const { return "Re-execution fault";}
     ReExec() {}
-    void invoke(ThreadContext *tc,
-            StaticInstPtr inst = StaticInst::nullStaticInstPtr);
+    void invoke(ThreadContext *tc, const StaticInstPtr &inst =
+                StaticInst::nullStaticInstPtr);
 };
 
 class GenericPageTableFault : public FaultBase
@@ -88,8 +86,8 @@ class GenericPageTableFault : public FaultBase
   public:
     FaultName name() const {return "Generic page table fault";}
     GenericPageTableFault(Addr va) : vaddr(va) {}
-    void invoke(ThreadContext * tc,
-            StaticInstPtr inst = StaticInst::nullStaticInstPtr);
+    void invoke(ThreadContext * tc, const StaticInstPtr &inst =
+                StaticInst::nullStaticInstPtr);
 };
 
 class GenericAlignmentFault : public FaultBase
@@ -99,8 +97,8 @@ class GenericAlignmentFault : public FaultBase
   public:
     FaultName name() const {return "Generic alignment fault";}
     GenericAlignmentFault(Addr va) : vaddr(va) {}
-    void invoke(ThreadContext * tc,
-            StaticInstPtr inst = StaticInst::nullStaticInstPtr);
+    void invoke(ThreadContext * tc, const StaticInstPtr &inst =
+                StaticInst::nullStaticInstPtr);
 };
 
 #endif // __FAULTS_HH__

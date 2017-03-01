@@ -38,7 +38,6 @@ using namespace std;
 namespace PowerISA {
 
 ProcessInfo::ProcessInfo(ThreadContext *_tc)
-    : tc(_tc)
 {
     panic("ProcessInfo constructor not implemented.\n");
 }
@@ -70,7 +69,7 @@ StackTrace::StackTrace()
     panic("StackTrace constructor not implemented.\n");
 }
 
-StackTrace::StackTrace(ThreadContext *_tc, StaticInstPtr inst)
+StackTrace::StackTrace(ThreadContext *_tc, const StaticInstPtr &inst)
     : tc(0), stack(64)
 {
     panic("StackTrace constructor not implemented.\n");

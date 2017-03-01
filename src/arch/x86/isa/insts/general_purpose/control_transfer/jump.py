@@ -115,7 +115,7 @@ def rom
     # t1 has the offset and t2 has the new selector.
     # This is intended to run in protected mode.
     andi t0, t2, 0xFC, flags=(EZF,), dataSize=2
-    fault "new GeneralProtection(0)", flags=(CEZF,)
+    fault "std::make_shared<GeneralProtection>(0)", flags=(CEZF,)
     andi t3, t2, 0xF8, dataSize=8
     andi t0, t2, 0x4, flags=(EZF,), dataSize=2
     br rom_local_label("farJmpGlobalDescriptor"), flags=(CEZF,)
@@ -145,7 +145,7 @@ def macroop JMP_FAR_REAL_M
     zexti t3, t1, 15, dataSize=8
     slli t3, t3, 4, dataSize=8
     wrsel cs, t1, dataSize=2
-    wrbase cs, t3
+    wrbase cs, t3, dataSize=8
     wrip t0, t2, dataSize=asz
 };
 
@@ -162,13 +162,13 @@ def macroop JMP_FAR_REAL_I
     limm t3, dsz, dataSize=8
     slli t3, t3, 3, dataSize=8
     # Get the selector into t1.
-    sll t1, t2, t3, dataSize=8
+    srl t1, t2, t3, dataSize=8
     mov t1, t0, t1, dataSize=2
     # And get the offset into t2
     mov t2, t0, t2
-    slli t3, t3, 4, dataSize=8
+    slli t3, t1, 4, dataSize=8
     wrsel cs, t1, dataSize=2
-    wrbase cs, t3
+    wrbase cs, t3, dataSize=8
     wrip t0, t2, dataSize=asz
 };
 '''

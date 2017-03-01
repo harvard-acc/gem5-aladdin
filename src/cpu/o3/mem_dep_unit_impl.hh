@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012, 2014 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -128,6 +128,19 @@ MemDepUnit<MemDepPred, Impl>::regStats()
 }
 
 template <class MemDepPred, class Impl>
+bool
+MemDepUnit<MemDepPred, Impl>::isDrained() const
+{
+    bool drained = instsToReplay.empty()
+                 && memDepHash.empty()
+                 && instsToReplay.empty();
+    for (int i = 0; i < Impl::MaxThreads; ++i)
+        drained = drained && instList[i].empty();
+
+    return drained;
+}
+
+template <class MemDepPred, class Impl>
 void
 MemDepUnit<MemDepPred, Impl>::drainSanityCheck() const
 {
@@ -162,7 +175,7 @@ MemDepUnit<MemDepPred, Impl>::insert(DynInstPtr &inst)
 {
     ThreadID tid = inst->threadNumber;
 
-    MemDepEntryPtr inst_entry = new MemDepEntry(inst);
+    MemDepEntryPtr inst_entry = std::make_shared<MemDepEntry>(inst);
 
     // Add the MemDepEntry to the hash.
     memDepHash.insert(
@@ -259,7 +272,7 @@ MemDepUnit<MemDepPred, Impl>::insertNonSpec(DynInstPtr &inst)
 {
     ThreadID tid = inst->threadNumber;
 
-    MemDepEntryPtr inst_entry = new MemDepEntry(inst);
+    MemDepEntryPtr inst_entry = std::make_shared<MemDepEntry>(inst);
 
     // Insert the MemDepEntry into the hash.
     memDepHash.insert(
@@ -310,7 +323,7 @@ MemDepUnit<MemDepPred, Impl>::insertBarrier(DynInstPtr &barr_inst)
 
     ThreadID tid = barr_inst->threadNumber;
 
-    MemDepEntryPtr inst_entry = new MemDepEntry(barr_inst);
+    MemDepEntryPtr inst_entry = std::make_shared<MemDepEntry>(barr_inst);
 
     // Add the MemDepEntry to the hash.
     memDepHash.insert(
@@ -370,7 +383,7 @@ MemDepUnit<MemDepPred, Impl>::reschedule(DynInstPtr &inst)
 
 template <class MemDepPred, class Impl>
 void
-MemDepUnit<MemDepPred, Impl>::replay(DynInstPtr &inst)
+MemDepUnit<MemDepPred, Impl>::replay()
 {
     DynInstPtr temp_inst;
 

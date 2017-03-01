@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2010 ARM Limited
+ * Copyright 2014 Google Inc.
+ * Copyright (c) 2010, 2013 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -138,8 +139,10 @@
 #include "arch/arm/pagetable.hh"
 #include "arch/arm/registers.hh"
 #include "arch/arm/remote_gdb.hh"
+#include "arch/arm/system.hh"
 #include "arch/arm/utility.hh"
 #include "arch/arm/vtophys.hh"
+#include "base/chunk_generator.hh"
 #include "base/intmath.hh"
 #include "base/remote_gdb.hh"
 #include "base/socket.hh"
@@ -159,7 +162,7 @@ using namespace std;
 using namespace ArmISA;
 
 RemoteGDB::RemoteGDB(System *_system, ThreadContext *tc)
-    : BaseRemoteGDB(_system, tc, NUMREGS)
+    : BaseRemoteGDB(_system, tc, GDB_REG_BYTES)
 {
 }
 
@@ -170,16 +173,12 @@ bool
 RemoteGDB::acc(Addr va, size_t len)
 {
     if (FullSystem) {
-        Addr last_va;
-        va       = truncPage(va);
-        last_va  = roundPage(va + len);
-
-        do  {
-            if (virtvalid(context, va)) {
-                return true;
+        for (ChunkGenerator gen(va, len, PageBytes); !gen.done(); gen.next()) {
+            if (!virtvalid(context, gen.addr())) {
+                DPRINTF(GDBAcc, "acc:   %#x mapping is invalid\n", va);
+                return false;
             }
-            va += PageBytes;
-        } while (va < last_va);
+        }
 
         DPRINTF(GDBAcc, "acc:   %#x mapping is valid\n", va);
         return true;
@@ -204,45 +203,54 @@ RemoteGDB::getregs()
 
     memset(gdbregs.regs, 0, gdbregs.bytes());
 
-    // R0-R15 supervisor mode
-    // arm registers are 32 bits wide, gdb registers are 64 bits wide
-    // two arm registers are packed into one gdb register (little endian)
-    gdbregs.regs[REG_R0 + 0] = context->readIntReg(INTREG_R1) << 32 |
-                                       context->readIntReg(INTREG_R0);
-    gdbregs.regs[REG_R0 + 1] = context->readIntReg(INTREG_R3) << 32 |
-                                       context->readIntReg(INTREG_R2);
-    gdbregs.regs[REG_R0 + 2] = context->readIntReg(INTREG_R5) << 32 |
-                                       context->readIntReg(INTREG_R4);
-    gdbregs.regs[REG_R0 + 3] = context->readIntReg(INTREG_R7) << 32 |
-                                       context->readIntReg(INTREG_R6);
-    gdbregs.regs[REG_R0 + 4] = context->readIntReg(INTREG_R9) << 32 |
-                                       context->readIntReg(INTREG_R8);
-    gdbregs.regs[REG_R0 + 5] = context->readIntReg(INTREG_R11) << 32|
-                                       context->readIntReg(INTREG_R10);
-    gdbregs.regs[REG_R0 + 6] = context->readIntReg(INTREG_SP) << 32 |
-                                       context->readIntReg(INTREG_R12);
-    gdbregs.regs[REG_R0 + 7] = context->pcState().pc() << 32        |
-                                       context->readIntReg(INTREG_LR);
+    if (inAArch64(context)) {  // AArch64
+        // x0-x30
+        for (int i = 0; i < 31; ++i)
+            gdbregs.regs64[GDB64_X0 + i] = context->readIntReg(INTREG_X0 + i);
+        gdbregs.regs64[GDB64_SPX] = context->readIntReg(INTREG_SPX);
+        // pc
+        gdbregs.regs64[GDB64_PC] = context->pcState().pc();
+        // cpsr
+        gdbregs.regs64[GDB64_CPSR] =
+            context->readMiscRegNoEffect(MISCREG_CPSR);
+        // v0-v31
+        for (int i = 0; i < 128; i += 4) {
+            int gdboff = GDB64_V0_32 + i;
+            gdbregs.regs32[gdboff + 0] = context->readFloatRegBits(i + 2);
+            gdbregs.regs32[gdboff + 1] = context->readFloatRegBits(i + 3);
+            gdbregs.regs32[gdboff + 2] = context->readFloatRegBits(i + 0);
+            gdbregs.regs32[gdboff + 3] = context->readFloatRegBits(i + 1);
+        }
+    } else {  // AArch32
+        // R0-R15 supervisor mode
+        gdbregs.regs32[GDB32_R0 + 0] = context->readIntReg(INTREG_R0);
+        gdbregs.regs32[GDB32_R0 + 1] = context->readIntReg(INTREG_R1);
+        gdbregs.regs32[GDB32_R0 + 2] = context->readIntReg(INTREG_R2);
+        gdbregs.regs32[GDB32_R0 + 3] = context->readIntReg(INTREG_R3);
+        gdbregs.regs32[GDB32_R0 + 4] = context->readIntReg(INTREG_R4);
+        gdbregs.regs32[GDB32_R0 + 5] = context->readIntReg(INTREG_R5);
+        gdbregs.regs32[GDB32_R0 + 6] = context->readIntReg(INTREG_R6);
+        gdbregs.regs32[GDB32_R0 + 7] = context->readIntReg(INTREG_R7);
+        gdbregs.regs32[GDB32_R0 + 8] = context->readIntReg(INTREG_R8);
+        gdbregs.regs32[GDB32_R0 + 9] = context->readIntReg(INTREG_R9);
+        gdbregs.regs32[GDB32_R0 + 10] = context->readIntReg(INTREG_R10);
+        gdbregs.regs32[GDB32_R0 + 11] = context->readIntReg(INTREG_R11);
+        gdbregs.regs32[GDB32_R0 + 12] = context->readIntReg(INTREG_R12);
+        gdbregs.regs32[GDB32_R0 + 13] = context->readIntReg(INTREG_SP);
+        gdbregs.regs32[GDB32_R0 + 14] = context->readIntReg(INTREG_LR);
+        gdbregs.regs32[GDB32_R0 + 15] = context->pcState().pc();
 
-    // CPSR
-    gdbregs.regs[REG_CPSR]  = context->readMiscRegNoEffect(MISCREG_CPSR);
+        // CPSR
+        gdbregs.regs32[GDB32_CPSR] = context->readMiscRegNoEffect(MISCREG_CPSR);
 
-    // vfpv3/neon floating point registers (32 double or 64 float)
+        // vfpv3/neon floating point registers (32 double or 64 float)
+        for (int i = 0; i < NumFloatV7ArchRegs; ++i)
+            gdbregs.regs32[GDB32_F0 + i] = context->readFloatRegBits(i);
 
-    gdbregs.regs[REG_F0] =
-        static_cast<uint64_t>(context->readFloatRegBits(0)) << 32 |
-        gdbregs.regs[REG_CPSR];
-
-    for (int i = 1; i < (NumFloatArchRegs>>1); ++i) {
-      gdbregs.regs[i + REG_F0] =
-          static_cast<uint64_t>(context->readFloatRegBits(2*i)) << 32 |
-          context->readFloatRegBits(2*i-1);
+        // FPSCR
+        gdbregs.regs32[GDB32_FPSCR] =
+            context->readMiscRegNoEffect(MISCREG_FPSCR);
     }
-
-  // FPSCR
-    gdbregs.regs[REG_FPSCR] =
-        static_cast<uint64_t>(context->readMiscRegNoEffect(MISCREG_FPSCR)) << 32 |
-        context->readFloatRegBits(NumFloatArchRegs - 1);
 }
 
 /*
@@ -254,86 +262,57 @@ RemoteGDB::setregs()
 {
 
     DPRINTF(GDBAcc, "setregs in remotegdb \n");
+    if (inAArch64(context)) {  // AArch64
+        // x0-x30
+        for (int i = 0; i < 31; ++i)
+            context->setIntReg(INTREG_X0 + i, gdbregs.regs64[GDB64_X0 + i]);
+        // pc
+        context->pcState(gdbregs.regs64[GDB64_PC]);
+        // cpsr
+        context->setMiscRegNoEffect(MISCREG_CPSR, gdbregs.regs64[GDB64_CPSR]);
+        // Update the stack pointer. This should be done after
+        // updating CPSR/PSTATE since that might affect how SPX gets
+        // mapped.
+        context->setIntReg(INTREG_SPX, gdbregs.regs64[GDB64_SPX]);
+        // v0-v31
+        for (int i = 0; i < 128; i += 4) {
+            int gdboff = GDB64_V0_32 + i;
+            context->setFloatRegBits(i + 2, gdbregs.regs32[gdboff + 0]);
+            context->setFloatRegBits(i + 3, gdbregs.regs32[gdboff + 1]);
+            context->setFloatRegBits(i + 0, gdbregs.regs32[gdboff + 2]);
+            context->setFloatRegBits(i + 1, gdbregs.regs32[gdboff + 3]);
+        }
+    } else {  // AArch32
+        // R0-R15 supervisor mode
+        // arm registers are 32 bits wide, gdb registers are 64 bits wide
+        // two arm registers are packed into one gdb register (little endian)
+        context->setIntReg(INTREG_R0, gdbregs.regs32[GDB32_R0 + 0]);
+        context->setIntReg(INTREG_R1, gdbregs.regs32[GDB32_R0 + 1]);
+        context->setIntReg(INTREG_R2, gdbregs.regs32[GDB32_R0 + 2]);
+        context->setIntReg(INTREG_R3, gdbregs.regs32[GDB32_R0 + 3]);
+        context->setIntReg(INTREG_R4, gdbregs.regs32[GDB32_R0 + 4]);
+        context->setIntReg(INTREG_R5, gdbregs.regs32[GDB32_R0 + 5]);
+        context->setIntReg(INTREG_R6, gdbregs.regs32[GDB32_R0 + 6]);
+        context->setIntReg(INTREG_R7, gdbregs.regs32[GDB32_R0 + 7]);
+        context->setIntReg(INTREG_R8, gdbregs.regs32[GDB32_R0 + 8]);
+        context->setIntReg(INTREG_R9, gdbregs.regs32[GDB32_R0 + 9]);
+        context->setIntReg(INTREG_R10, gdbregs.regs32[GDB32_R0 + 10]);
+        context->setIntReg(INTREG_R11, gdbregs.regs32[GDB32_R0 + 11]);
+        context->setIntReg(INTREG_R12, gdbregs.regs32[GDB32_R0 + 12]);
+        context->setIntReg(INTREG_SP, gdbregs.regs32[GDB32_R0 + 13]);
+        context->setIntReg(INTREG_LR, gdbregs.regs32[GDB32_R0 + 14]);
+        context->pcState(gdbregs.regs32[GDB32_R0 + 7]);
 
-    // R0-R15 supervisor mode
-    // arm registers are 32 bits wide, gdb registers are 64 bits wide
-    // two arm registers are packed into one gdb register (little endian)
-    context->setIntReg(INTREG_R0 , bits(gdbregs.regs[REG_R0 + 0], 31, 0));
-    context->setIntReg(INTREG_R1 , bits(gdbregs.regs[REG_R0 + 0], 63, 32));
-    context->setIntReg(INTREG_R2 , bits(gdbregs.regs[REG_R0 + 1], 31, 0));
-    context->setIntReg(INTREG_R3 , bits(gdbregs.regs[REG_R0 + 1], 63, 32));
-    context->setIntReg(INTREG_R4 , bits(gdbregs.regs[REG_R0 + 2], 31, 0));
-    context->setIntReg(INTREG_R5 , bits(gdbregs.regs[REG_R0 + 2], 63, 32));
-    context->setIntReg(INTREG_R6 , bits(gdbregs.regs[REG_R0 + 3], 31, 0));
-    context->setIntReg(INTREG_R7 , bits(gdbregs.regs[REG_R0 + 3], 63, 32));
-    context->setIntReg(INTREG_R8 , bits(gdbregs.regs[REG_R0 + 4], 31, 0));
-    context->setIntReg(INTREG_R9 , bits(gdbregs.regs[REG_R0 + 4], 63, 32));
-    context->setIntReg(INTREG_R10, bits(gdbregs.regs[REG_R0 + 5], 31, 0));
-    context->setIntReg(INTREG_R11, bits(gdbregs.regs[REG_R0 + 5], 63, 32));
-    context->setIntReg(INTREG_R12, bits(gdbregs.regs[REG_R0 + 6], 31, 0));
-    context->setIntReg(INTREG_SP , bits(gdbregs.regs[REG_R0 + 6], 63, 32));
-    context->setIntReg(INTREG_LR , bits(gdbregs.regs[REG_R0 + 7], 31, 0));
-    context->pcState(bits(gdbregs.regs[REG_R0 + 7], 63, 32));
+        //CPSR
+        context->setMiscRegNoEffect(MISCREG_CPSR, gdbregs.regs32[GDB32_CPSR]);
 
-    //CPSR
-    context->setMiscRegNoEffect(MISCREG_CPSR, gdbregs.regs[REG_CPSR]);
+        //vfpv3/neon floating point registers (32 double or 64 float)
+        for (int i = 0; i < NumFloatV7ArchRegs; ++i)
+            context->setFloatRegBits(i, gdbregs.regs32[GDB32_F0 + i]);
 
-    //vfpv3/neon floating point registers (32 double or 64 float)
-    context->setFloatRegBits(0, gdbregs.regs[REG_F0]>>32);
-
-    for (int i = 1; i < NumFloatArchRegs; ++i) {
-      if(i%2){
-        int j = (i+1)/2;
-        context->setFloatRegBits(i, bits(gdbregs.regs[j + REG_F0], 31, 0));
-      }
-      else{
-        int j = i/2;
-        context->setFloatRegBits(i, gdbregs.regs[j + REG_F0]>>32);
-      }
+        //FPSCR
+        context->setMiscReg(MISCREG_FPSCR, gdbregs.regs32[GDB32_FPSCR]);
     }
-
-    //FPSCR
-    context->setMiscReg(MISCREG_FPSCR, gdbregs.regs[REG_FPSCR]>>32);
-}
-
-void
-RemoteGDB::clearSingleStep()
-{
-    DPRINTF(GDBMisc, "clearSingleStep bt_addr=%#x nt_addr=%#x\n",
-            takenBkpt, notTakenBkpt);
-
-    if (takenBkpt != 0)
-        clearTempBreakpoint(takenBkpt);
-
-    if (notTakenBkpt != 0)
-        clearTempBreakpoint(notTakenBkpt);
-}
-
-void
-RemoteGDB::setSingleStep()
-{
-    PCState pc = context->pcState();
-    PCState bpc;
-    bool set_bt = false;
-
-    // User was stopped at pc, e.g. the instruction at pc was not
-    // executed.
-    MachInst inst = read<MachInst>(pc.pc());
-    StaticInstPtr si = context->getDecoderPtr()->decode(inst, pc.pc());
-    if (si->hasBranchTarget(pc, context, bpc)) {
-        // Don't bother setting a breakpoint on the taken branch if it
-        // is the same as the next pc
-        if (bpc.pc() != pc.npc())
-            set_bt = true;
-    }
-
-    DPRINTF(GDBMisc, "setSingleStep bt_addr=%#x nt_addr=%#x\n",
-            takenBkpt, notTakenBkpt);
-
-    setTempBreakpoint(notTakenBkpt = pc.npc());
-
-    if (set_bt)
-        setTempBreakpoint(takenBkpt = bpc.pc());
 }
 
 // Write bytes to kernel address space for debugger.

@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <unistd.h>
 
 #include <cassert>
 #include <cerrno>
@@ -255,6 +256,8 @@ OutputDirectory::remove(const string &name, bool recursive)
 
                 de = readdir(subdir);
             }
+
+            closedir(subdir);
         }
 
         // try to force recognition that we deleted the files in the directory

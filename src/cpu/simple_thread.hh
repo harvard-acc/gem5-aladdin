@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 ARM Limited
+ * Copyright (c) 2011-2012 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -211,17 +211,14 @@ class SimpleThread : public ThreadState
 
     void setStatus(Status newStatus) { _status = newStatus; }
 
-    /// Set the status to Active.  Optional delay indicates number of
-    /// cycles to wait before beginning execution.
-    void activate(Cycles delay = Cycles(1));
+    /// Set the status to Active.
+    void activate();
 
     /// Set the status to Suspended.
     void suspend();
 
     /// Set the status to Halted.
     void halt();
-
-    virtual bool misspeculating();
 
     void copyArchRegs(ThreadContext *tc);
 
@@ -273,6 +270,7 @@ class SimpleThread : public ThreadState
     {
 #ifdef ISA_HAS_CC_REGS
         int flatIndex = isa->flattenCCIndex(reg_idx);
+        assert(0 <= flatIndex);
         assert(flatIndex < TheISA::NumCCRegs);
         uint64_t regVal(readCCRegFlat(flatIndex));
         DPRINTF(CCRegs, "Reading CC reg %d (%d) as %#x.\n",
@@ -374,7 +372,7 @@ class SimpleThread : public ThreadState
     }
 
     MiscReg
-    readMiscRegNoEffect(int misc_reg, ThreadID tid = 0)
+    readMiscRegNoEffect(int misc_reg, ThreadID tid = 0) const
     {
         return isa->readMiscRegNoEffect(misc_reg);
     }
@@ -415,6 +413,12 @@ class SimpleThread : public ThreadState
         return isa->flattenCCIndex(reg);
     }
 
+    int
+    flattenMiscIndex(int reg)
+    {
+        return isa->flattenMiscIndex(reg);
+    }
+
     unsigned readStCondFailures() { return storeCondFailures; }
 
     void setStCondFailures(unsigned sc_failures)
@@ -448,12 +452,5 @@ class SimpleThread : public ThreadState
 #endif
 };
 
-
-// for non-speculative execution context, spec_mode is always false
-inline bool
-SimpleThread::misspeculating()
-{
-    return false;
-}
 
 #endif // __CPU_CPU_EXEC_CONTEXT_HH__

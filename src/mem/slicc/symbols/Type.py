@@ -43,11 +43,6 @@ class Enumeration(PairContainer):
         super(Enumeration, self).__init__(pairs)
         self.ident = ident
 
-class Method(object):
-    def __init__(self, return_type, param_types):
-        self.return_type = return_type
-        self.param_types = param_types
-
 class Type(Symbol):
     def __init__(self, table, ident, location, pairs, machine=None):
         super(Type, self).__init__(table, ident, location, pairs)
@@ -72,17 +67,11 @@ class Type(Symbol):
                 self["networkmessage"] = "yes"
 
         # FIXME - all of the following id comparisons are fragile hacks
-        if self.ident in ("CacheMemory", "NewCacheMemory",
-                          "TLCCacheMemory", "DNUCACacheMemory",
-                          "DNUCABankCacheMemory", "L2BankCacheMemory",
-                          "CompressedCacheMemory", "PrefetchCacheMemory"):
+        if self.ident in ("CacheMemory"):
             self["cache"] = "yes"
 
-        if self.ident in ("TBETable", "DNUCATBETable", "DNUCAStopTable"):
+        if self.ident in ("TBETable"):
             self["tbe"] = "yes"
-
-        if self.ident == "NewTBETable":
-            self["newtbe"] = "yes"
 
         if self.ident == "TimerTable":
             self["timer"] = "yes"
@@ -96,21 +85,13 @@ class Type(Symbol):
         if self.ident == "Prefetcher":
             self["prefetcher"] = "yes"
 
-        if self.ident == "DNUCA_Movement":
-            self["mover"] = "yes"
-
         self.isMachineType = (ident == "MachineType")
 
         self.isStateDecl = ("state_decl" in self)
         self.statePermPairs = []
 
         self.data_members = orderdict()
-
-        # Methods
         self.methods = {}
-        self.functions = {}
-
-        # Enums
         self.enums = orderdict()
 
     @property
@@ -169,23 +150,12 @@ class Type(Symbol):
     def statePermPairAdd(self, state_name, perm_name):
         self.statePermPairs.append([state_name, perm_name])
 
-    def addMethod(self, name, return_type, param_type_vec):
-        ident = self.methodId(name, param_type_vec)
+    def addFunc(self, func):
+        ident = self.methodId(func.ident, func.param_types)
         if ident in self.methods:
             return False
 
-        self.methods[ident] = Method(return_type, param_type_vec)
-        return True
-
-    # Ideally either this function or the one above should exist. But
-    # methods and functions have different structures right now.
-    # Hence, these are different, at least for the time being.
-    def addFunc(self, func):
-        ident = self.methodId(func.ident, func.param_types)
-        if ident in self.functions:
-            return False
-
-        self.functions[ident] = func
+        self.methods[ident] = func
         return True
 
     def addEnum(self, ident, pairs):
@@ -313,7 +283,16 @@ $klass ${{self.c_ident}}$parent
             code('}')
 
         # create a clone member
-        code('''
+        if self.isMessage:
+            code('''
+MsgPtr
+clone() const
+{
+     return std::shared_ptr<Message>(new ${{self.c_ident}}(*this));
+}
+''')
+        else:
+            code('''
 ${{self.c_ident}}*
 clone() const
 {
@@ -388,9 +367,9 @@ set${{dm.ident}}(const ${{dm.type.c_ident}}& local_${{dm.ident}})
 
                 code('$const${{dm.type.c_ident}} m_${{dm.ident}}$init;')
 
-        # Prototypes for functions defined for the Type
-        for item in self.functions:
-            proto = self.functions[item].prototype
+        # Prototypes for methods defined for the Type
+        for item in self.methods:
+            proto = self.methods[item].prototype
             if proto:
                 code('$proto')
 
@@ -421,6 +400,7 @@ operator<<(std::ostream& out, const ${{self.c_ident}}& obj)
  */
 
 #include <iostream>
+#include <memory>
 
 #include "mem/protocol/${{self.c_ident}}.hh"
 #include "mem/ruby/common/Global.hh"
@@ -451,9 +431,9 @@ ${{self.c_ident}}::print(ostream& out) const
     out << "]";
 }''')
 
-        # print the code for the functions in the type
-        for item in self.functions:
-            code(self.functions[item].generateCode())
+        # print the code for the methods in the type
+        for item in self.methods:
+            code(self.methods[item].generateCode())
 
         code.write(path, "%s.cc" % self.c_ident)
 
@@ -594,7 +574,7 @@ AccessPermission ${{self.c_ident}}_to_permission(const ${{self.c_ident}}& obj)
             for enum in self.enums.itervalues():
                 if enum.get("Primary"):
                     code('#include "mem/protocol/${{enum.ident}}_Controller.hh"')
-            code('#include "mem/ruby/system/MachineID.hh"')
+            code('#include "mem/ruby/common/MachineID.hh"')
 
         code('''
 // Code for output operator

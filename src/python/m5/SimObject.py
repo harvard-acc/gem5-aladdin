@@ -114,6 +114,279 @@ def public_value(key, value):
                isinstance(value, (FunctionType, MethodType, ModuleType,
                                   classmethod, type))
 
+def createCxxConfigDirectoryEntryFile(code, name, simobj, is_header):
+    entry_class = 'CxxConfigDirectoryEntry_%s' % name
+    param_class = '%sCxxConfigParams' % name
+
+    code('#include "params/%s.hh"' % name)
+
+    if not is_header:
+        for param in simobj._params.values():
+            if isSimObjectClass(param.ptype):
+                code('#include "%s"' % param.ptype._value_dict['cxx_header'])
+                code('#include "params/%s.hh"' % param.ptype.__name__)
+            else:
+                param.ptype.cxx_ini_predecls(code)
+
+    if is_header:
+        member_prefix = ''
+        end_of_decl = ';'
+        code('#include "sim/cxx_config.hh"')
+        code()
+        code('class ${param_class} : public CxxConfigParams,'
+            ' public ${name}Params')
+        code('{')
+        code('  private:')
+        code.indent()
+        code('class DirectoryEntry : public CxxConfigDirectoryEntry')
+        code('{')
+        code('  public:')
+        code.indent()
+        code('DirectoryEntry();');
+        code()
+        code('CxxConfigParams *makeParamsObject() const')
+        code('{ return new ${param_class}; }')
+        code.dedent()
+        code('};')
+        code()
+        code.dedent()
+        code('  public:')
+        code.indent()
+    else:
+        member_prefix = '%s::' % param_class
+        end_of_decl = ''
+        code('#include "%s"' % simobj._value_dict['cxx_header'])
+        code('#include "base/str.hh"')
+        code('#include "cxx_config/${name}.hh"')
+
+        if simobj._ports.values() != []:
+            code('#include "mem/mem_object.hh"')
+            code('#include "mem/port.hh"')
+
+        code()
+        code('${member_prefix}DirectoryEntry::DirectoryEntry()');
+        code('{')
+
+        def cxx_bool(b):
+            return 'true' if b else 'false'
+
+        code.indent()
+        for param in simobj._params.values():
+            is_vector = isinstance(param, m5.params.VectorParamDesc)
+            is_simobj = issubclass(param.ptype, m5.SimObject.SimObject)
+
+            code('parameters["%s"] = new ParamDesc("%s", %s, %s);' %
+                (param.name, param.name, cxx_bool(is_vector),
+                cxx_bool(is_simobj)));
+
+        for port in simobj._ports.values():
+            is_vector = isinstance(port, m5.params.VectorPort)
+            is_master = port.role == 'MASTER'
+
+            code('ports["%s"] = new PortDesc("%s", %s, %s);' %
+                (port.name, port.name, cxx_bool(is_vector),
+                cxx_bool(is_master)))
+
+        code.dedent()
+        code('}')
+        code()
+
+    code('bool ${member_prefix}setSimObject(const std::string &name,')
+    code('    SimObject *simObject)${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('bool ret = true;')
+        code()
+        code('if (false) {')
+        for param in simobj._params.values():
+            is_vector = isinstance(param, m5.params.VectorParamDesc)
+            is_simobj = issubclass(param.ptype, m5.SimObject.SimObject)
+
+            if is_simobj and not is_vector:
+                code('} else if (name == "${{param.name}}") {')
+                code.indent()
+                code('this->${{param.name}} = '
+                    'dynamic_cast<${{param.ptype.cxx_type}}>(simObject);')
+                code('if (simObject && !this->${{param.name}})')
+                code('   ret = false;')
+                code.dedent()
+        code('} else {')
+        code('    ret = false;')
+        code('}')
+        code()
+        code('return ret;')
+        code.dedent()
+        code('}')
+
+    code()
+    code('bool ${member_prefix}setSimObjectVector('
+        'const std::string &name,')
+    code('    const std::vector<SimObject *> &simObjects)${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('bool ret = true;')
+        code()
+        code('if (false) {')
+        for param in simobj._params.values():
+            is_vector = isinstance(param, m5.params.VectorParamDesc)
+            is_simobj = issubclass(param.ptype, m5.SimObject.SimObject)
+
+            if is_simobj and is_vector:
+                code('} else if (name == "${{param.name}}") {')
+                code.indent()
+                code('this->${{param.name}}.clear();')
+                code('for (auto i = simObjects.begin(); '
+                    'ret && i != simObjects.end(); i ++)')
+                code('{')
+                code.indent()
+                code('${{param.ptype.cxx_type}} object = '
+                    'dynamic_cast<${{param.ptype.cxx_type}}>(*i);')
+                code('if (*i && !object)')
+                code('    ret = false;')
+                code('else')
+                code('    this->${{param.name}}.push_back(object);')
+                code.dedent()
+                code('}')
+                code.dedent()
+        code('} else {')
+        code('    ret = false;')
+        code('}')
+        code()
+        code('return ret;')
+        code.dedent()
+        code('}')
+
+    code()
+    code('void ${member_prefix}setName(const std::string &name_)'
+        '${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('this->name = name_;')
+        code('this->pyobj = NULL;')
+        code.dedent()
+        code('}')
+
+    if is_header:
+        code('const std::string &${member_prefix}getName()')
+        code('{ return this->name; }')
+
+    code()
+    code('bool ${member_prefix}setParam(const std::string &name,')
+    code('    const std::string &value, const Flags flags)${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('bool ret = true;')
+        code()
+        code('if (false) {')
+        for param in simobj._params.values():
+            is_vector = isinstance(param, m5.params.VectorParamDesc)
+            is_simobj = issubclass(param.ptype, m5.SimObject.SimObject)
+
+            if not is_simobj and not is_vector:
+                code('} else if (name == "${{param.name}}") {')
+                code.indent()
+                param.ptype.cxx_ini_parse(code,
+                    'value', 'this->%s' % param.name, 'ret =')
+                code.dedent()
+        code('} else {')
+        code('    ret = false;')
+        code('}')
+        code()
+        code('return ret;')
+        code.dedent()
+        code('}')
+
+    code()
+    code('bool ${member_prefix}setParamVector('
+        'const std::string &name,')
+    code('    const std::vector<std::string> &values,')
+    code('    const Flags flags)${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('bool ret = true;')
+        code()
+        code('if (false) {')
+        for param in simobj._params.values():
+            is_vector = isinstance(param, m5.params.VectorParamDesc)
+            is_simobj = issubclass(param.ptype, m5.SimObject.SimObject)
+
+            if not is_simobj and is_vector:
+                code('} else if (name == "${{param.name}}") {')
+                code.indent()
+                code('${{param.name}}.clear();')
+                code('for (auto i = values.begin(); '
+                    'ret && i != values.end(); i ++)')
+                code('{')
+                code.indent()
+                code('${{param.ptype.cxx_type}} elem;')
+                param.ptype.cxx_ini_parse(code,
+                    '*i', 'elem', 'ret =')
+                code('if (ret)')
+                code('    this->${{param.name}}.push_back(elem);')
+                code.dedent()
+                code('}')
+                code.dedent()
+        code('} else {')
+        code('    ret = false;')
+        code('}')
+        code()
+        code('return ret;')
+        code.dedent()
+        code('}')
+
+    code()
+    code('bool ${member_prefix}setPortConnectionCount('
+        'const std::string &name,')
+    code('    unsigned int count)${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        code.indent()
+        code('bool ret = true;')
+        code()
+        code('if (false)')
+        code('    ;')
+        for port in simobj._ports.values():
+            code('else if (name == "${{port.name}}")')
+            code('    this->port_${{port.name}}_connection_count = count;')
+        code('else')
+        code('    ret = false;')
+        code()
+        code('return ret;')
+        code.dedent()
+        code('}')
+
+    code()
+    code('SimObject *${member_prefix}simObjectCreate()${end_of_decl}')
+
+    if not is_header:
+        code('{')
+        if hasattr(simobj, 'abstract') and simobj.abstract:
+            code('    return NULL;')
+        else:
+            code('    return this->create();')
+        code('}')
+
+    if is_header:
+        code()
+        code('static CxxConfigDirectoryEntry'
+            ' *${member_prefix}makeDirectoryEntry()')
+        code('{ return new DirectoryEntry; }')
+
+    if is_header:
+        code.dedent()
+        code('};')
+
 # The metaclass for SimObject.  This class controls how new classes
 # that derive from SimObject are instantiated, and provides inherited
 # class behavior (just like a class controls how instances of that
@@ -172,6 +445,7 @@ class MetaSimObject(type):
 
         # class or instance attributes
         cls._values = multidict()   # param values
+        cls._hr_values = multidict() # human readable param values
         cls._children = multidict() # SimObject children
         cls._port_refs = multidict() # port ref objects
         cls._instantiated = False # really instantiated, cloned, or subclassed
@@ -197,6 +471,7 @@ class MetaSimObject(type):
             cls._params.parent = base._params
             cls._ports.parent = base._ports
             cls._values.parent = base._values
+            cls._hr_values.parent = base._hr_values
             cls._children.parent = base._children
             cls._port_refs.parent = base._port_refs
             # mark base as having been subclassed
@@ -273,6 +548,7 @@ class MetaSimObject(type):
     def _set_param(cls, name, value, param):
         assert(param.name == name)
         try:
+            hr_value = value
             value = param.convert(value)
         except Exception, e:
             msg = "%s\nError setting param %s.%s to %s\n" % \
@@ -284,6 +560,11 @@ class MetaSimObject(type):
         # it gets cloned properly when the class is instantiated
         if isSimObjectOrVector(value) and not value.has_parent():
             cls._add_cls_child(name, value)
+        # update human-readable values of the param if it has a literal
+        # value and is not an object or proxy.
+        if not (isSimObjectOrVector(value) or\
+                isinstance(value, m5.proxy.BaseProxy)):
+            cls._hr_values[name] = hr_value
 
     def _add_cls_child(cls, name, child):
         # It's a little funky to have a class as a parent, but these
@@ -410,8 +691,8 @@ class MetaSimObject(type):
         # The 'local' attribute restricts us to the params declared in
         # the object itself, not including inherited params (which
         # will also be inherited from the base class's param struct
-        # here).
-        params = cls._params.local.values()
+        # here). Sort the params based on their key
+        params = map(lambda (k, v): v, sorted(cls._params.local.items()))
         ports = cls._ports.local
 
         code('%module(package="m5.internal") param_$cls')
@@ -491,8 +772,8 @@ using std::ptrdiff_t;
         # The 'local' attribute restricts us to the params declared in
         # the object itself, not including inherited params (which
         # will also be inherited from the base class's param struct
-        # here).
-        params = cls._params.local.values()
+        # here). Sort the params based on their key
+        params = map(lambda (k, v): v, sorted(cls._params.local.items()))
         ports = cls._ports.local
         try:
             ptypes = [p.ptype for p in params]
@@ -575,6 +856,11 @@ struct PyObject;
         code('#endif // __PARAMS__${cls}__')
         return code
 
+    # Generate the C++ declaration/definition files for this SimObject's
+    # param struct to allow C++ initialisation
+    def cxx_config_param_file(cls, code, is_header):
+        createCxxConfigDirectoryEntryFile(code, cls.__name__, cls, is_header)
+        return code
 
 # This *temporary* definition is required to support calls from the
 # SimObject class definition to the MetaSimObject methods (in
@@ -584,6 +870,28 @@ struct PyObject;
 # SimObject be defined) lower in this file.
 def isSimObjectOrVector(value):
     return False
+
+# This class holds information about each simobject parameter
+# that should be displayed on the command line for use in the
+# configuration system.
+class ParamInfo(object):
+  def __init__(self, type, desc, type_str, example, default_val, access_str):
+    self.type = type
+    self.desc = desc
+    self.type_str = type_str
+    self.example_str = example
+    self.default_val = default_val
+    # The string representation used to access this param through python.
+    # The method to access this parameter presented on the command line may
+    # be different, so this needs to be stored for later use.
+    self.access_str = access_str
+    self.created = True
+
+  # Make it so we can only set attributes at initialization time
+  # and effectively make this a const object.
+  def __setattr__(self, name, value):
+    if not "created" in self.__dict__:
+      self.__dict__[name] = value
 
 # The SimObject class is the root of the special hierarchy.  Most of
 # the code in this class deals with the configuration hierarchy itself
@@ -616,8 +924,68 @@ class SimObject(object):
     void initState();
     void regStats();
     void resetStats();
+    void regProbePoints();
+    void regProbeListeners();
     void startup();
 ''')
+
+    # Returns a dict of all the option strings that can be
+    # generated as command line options for this simobject instance
+    # by tracing all reachable params in the top level instance and
+    # any children it contains.
+    def enumerateParams(self, flags_dict = {},
+                        cmd_line_str = "", access_str = ""):
+        if hasattr(self, "_paramEnumed"):
+            print "Cycle detected enumerating params"
+        else:
+            self._paramEnumed = True
+            # Scan the children first to pick up all the objects in this SimObj
+            for keys in self._children:
+                child = self._children[keys]
+                next_cmdline_str = cmd_line_str + keys
+                next_access_str = access_str + keys
+                if not isSimObjectVector(child):
+                    next_cmdline_str = next_cmdline_str + "."
+                    next_access_str = next_access_str + "."
+                flags_dict = child.enumerateParams(flags_dict,
+                                                   next_cmdline_str,
+                                                   next_access_str)
+
+            # Go through the simple params in the simobject in this level
+            # of the simobject hierarchy and save information about the
+            # parameter to be used for generating and processing command line
+            # options to the simulator to set these parameters.
+            for keys,values in self._params.items():
+                if values.isCmdLineSettable():
+                    type_str = ''
+                    ex_str = values.example_str()
+                    ptype = None
+                    if isinstance(values, VectorParamDesc):
+                        type_str = 'Vector_%s' % values.ptype_str
+                        ptype = values
+                    else:
+                        type_str = '%s' % values.ptype_str
+                        ptype = values.ptype
+
+                    if keys in self._hr_values\
+                       and keys in self._values\
+                       and not isinstance(self._values[keys], m5.proxy.BaseProxy):
+                        cmd_str = cmd_line_str + keys
+                        acc_str = access_str + keys
+                        flags_dict[cmd_str] = ParamInfo(ptype,
+                                    self._params[keys].desc, type_str, ex_str,
+                                    values.pretty_print(self._hr_values[keys]),
+                                    acc_str)
+                    elif not keys in self._hr_values\
+                         and not keys in self._values:
+                        # Empty param
+                        cmd_str = cmd_line_str + keys
+                        acc_str = access_str + keys
+                        flags_dict[cmd_str] = ParamInfo(ptype,
+                                    self._params[keys].desc,
+                                    type_str, ex_str, '', acc_str)
+
+        return flags_dict
 
     # Initialize new instance.  For objects with SimObject-valued
     # children, we need to recursively clone the classes represented
@@ -659,6 +1027,7 @@ class SimObject(object):
         # individual value settings can be overridden but we still
         # inherit late changes to non-overridden class values.
         self._values = multidict(ancestor._values)
+        self._hr_values = multidict(ancestor._hr_values)
         # clone SimObject-valued parameters
         for key,val in ancestor._values.iteritems():
             val = tryAsSimObjectOrVector(val)
@@ -749,6 +1118,7 @@ class SimObject(object):
         param = self._params.get(attr)
         if param:
             try:
+                hr_value = value
                 value = param.convert(value)
             except Exception, e:
                 msg = "%s\nError setting param %s.%s to %s\n" % \
@@ -759,6 +1129,13 @@ class SimObject(object):
             # implicitly parent unparented objects assigned as params
             if isSimObjectOrVector(value) and not value.has_parent():
                 self.add_child(attr, value)
+            # set the human-readable value dict if this is a param
+            # with a literal value and is not being set as an object
+            # or proxy.
+            if not (isSimObjectOrVector(value) or\
+                    isinstance(value, m5.proxy.BaseProxy)):
+                self._hr_values[attr] = hr_value
+
             return
 
         # if RHS is a SimObject, it's an implicit child assignment
@@ -776,7 +1153,13 @@ class SimObject(object):
     def __getitem__(self, key):
         if key == 0:
             return self
-        raise TypeError, "Non-zero index '%s' to SimObject" % key
+        raise IndexError, "Non-zero index '%s' to SimObject" % key
+
+    # this hack allows us to iterate over a SimObject that may
+    # not be a vector, so we can call a loop over it and get just one
+    # element.
+    def __len__(self):
+        return 1
 
     # Also implemented by SimObjectVector
     def clear_parent(self, old_parent):
@@ -850,6 +1233,9 @@ class SimObject(object):
     def __str__(self):
         return self.path()
 
+    def config_value(self):
+        return self.path()
+
     def ini_str(self):
         return self.path()
 
@@ -859,7 +1245,11 @@ class SimObject(object):
 
         found_obj = None
         for child in self._children.itervalues():
-            if isinstance(child, ptype):
+            visited = False
+            if hasattr(child, '_visited'):
+              visited = getattr(child, '_visited')
+
+            if isinstance(child, ptype) and not visited:
                 if found_obj != None and child != found_obj:
                     raise AttributeError, \
                           'parent.any matched more than one: %s %s' % \
@@ -899,7 +1289,9 @@ class SimObject(object):
                 match_obj = self._values[pname]
                 if not isproxy(match_obj) and not isNullPointer(match_obj):
                     all[match_obj] = True
-        return all.keys(), True
+        # Also make sure to sort the keys based on the objects' path to
+        # ensure that the order is the same on all hosts
+        return sorted(all.keys(), key = lambda o: o.path()), True
 
     def unproxy(self, base):
         return self
@@ -968,18 +1360,7 @@ class SimObject(object):
         for param in sorted(self._params.keys()):
             value = self._values.get(param)
             if value != None:
-                try:
-                    # Use native type for those supported by JSON and
-                    # strings for everything else. skipkeys=True seems
-                    # to not work as well as one would hope
-                    if type(self._values[param].value) in \
-                            [str, unicode, int, long, float, bool, None]:
-                        d[param] = self._values[param].value
-                    else:
-                        d[param] = str(self._values[param])
-
-                except AttributeError:
-                    pass
+                d[param] = value.config_value()
 
         for n in sorted(self._children.keys()):
             child = self._children[n]
@@ -1048,8 +1429,9 @@ class SimObject(object):
             # Cycles in the configuration hierarchy are not supported. This
             # will catch the resulting recursion and stop.
             self._ccObject = -1
-            params = self.getCCParams()
-            self._ccObject = params.create()
+            if not self.abstract:
+                params = self.getCCParams()
+                self._ccObject = params.create()
         elif self._ccObject == -1:
             raise RuntimeError, "%s: Cycle found in configuration hierarchy." \
                   % self.path()
@@ -1057,7 +1439,10 @@ class SimObject(object):
 
     def descendants(self):
         yield self
-        for child in self._children.itervalues():
+        # The order of the dict is implementation dependent, so sort
+        # it based on the key (name) to ensure the order is the same
+        # on all hosts
+        for (name, child) in sorted(self._children.iteritems()):
             for obj in child.descendants():
                 yield obj
 
@@ -1072,7 +1457,9 @@ class SimObject(object):
     # Create C++ port connections corresponding to the connections in
     # _port_refs
     def connectPorts(self):
-        for portRef in self._port_refs.itervalues():
+        # Sort the ports based on their attribute name to ensure the
+        # order is the same on all hosts
+        for (attr, portRef) in sorted(self._port_refs.iteritems()):
             portRef.ccConnect()
 
 # Function to provide to C++ so it can look up instances based on paths

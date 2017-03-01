@@ -43,6 +43,7 @@
 #ifndef __CPU_O3_FU_POOL_HH__
 #define __CPU_O3_FU_POOL_HH__
 
+#include <array>
 #include <bitset>
 #include <list>
 #include <string>
@@ -71,9 +72,9 @@ class FUPool : public SimObject
 {
   private:
     /** Maximum op execution latencies, per op class. */
-    Cycles maxOpLatencies[Num_OpClasses];
-    /** Maximum issue latencies, per op class. */
-    Cycles maxIssueLatencies[Num_OpClasses];
+    std::array<Cycles, Num_OpClasses> maxOpLatencies;
+    /** Whether op is pipelined or not. */
+    std::array<bool, Num_OpClasses> pipelined;
 
     /** Bitvector listing capabilities of this FU pool. */
     std::bitset<Num_OpClasses> capabilityList;
@@ -133,11 +134,6 @@ class FUPool : public SimObject
     FUPool(const Params *p);
     ~FUPool();
 
-    /** Annotates units that provide memory operations. Included only because
-     *  old FU pool provided this function.
-     */
-    void annotateMemoryUnits(Cycles hit_latency);
-
     /**
      * Gets a FU providing the requested capability. Will mark the unit as busy,
      * but leaves the freeing of the unit up to the IEW stage.
@@ -165,8 +161,8 @@ class FUPool : public SimObject
     }
 
     /** Returns the issue latency of the given capability. */
-    Cycles getIssueLatency(OpClass capability) {
-        return maxIssueLatencies[capability];
+    bool isPipelined(OpClass capability) {
+        return pipelined[capability];
     }
 
     /** Have all the FUs drained? */

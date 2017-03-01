@@ -1,4 +1,4 @@
-# Copyright (c) 2012 ARM Limited
+# Copyright (c) 2012-2013, 2015 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -47,9 +47,9 @@ from m5.defines import buildEnv
 from m5.params import *
 from m5.proxy import *
 
-from Bus import CoherentBus
+from XBar import L2XBar
 from InstTracer import InstTracer
-from ExeTracer import ExeTracer
+from CPUTracers import ExeTracer
 from MemObject import MemObject
 from ClockDomain import *
 
@@ -76,7 +76,7 @@ elif buildEnv['TARGET_ISA'] == 'mips':
     from MipsISA import MipsISA
     isa_class = MipsISA
 elif buildEnv['TARGET_ISA'] == 'arm':
-    from ArmTLB import ArmTLB
+    from ArmTLB import ArmTLB, ArmStage2IMMU, ArmStage2DMMU
     from ArmInterrupts import ArmInterrupts
     from ArmISA import ArmISA
     isa_class = ArmISA
@@ -128,6 +128,7 @@ class BaseCPU(MemObject):
 
     system = Param.System(Parent.any, "system object")
     cpu_id = Param.Int(-1, "CPU identifier")
+    socket_id = Param.Unsigned(0, "Physical Socket identifier")
     numThreads = Param.Unsigned(1, "number of HW thread contexts")
 
     function_trace = Param.Bool(False, "Enable function trace")
@@ -171,6 +172,8 @@ class BaseCPU(MemObject):
     elif buildEnv['TARGET_ISA'] == 'arm':
         dtb = Param.ArmTLB(ArmTLB(), "Data TLB")
         itb = Param.ArmTLB(ArmTLB(), "Instruction TLB")
+        istage2_mmu = Param.ArmStage2MMU(ArmStage2IMMU(), "Stage 2 trans")
+        dstage2_mmu = Param.ArmStage2MMU(ArmStage2DMMU(), "Stage 2 trans")
         interrupts = Param.ArmInterrupts(
                 NULL, "Interrupt Controller")
         isa = VectorParam.ArmISA([ isa_class() ], "ISA instance")
@@ -282,10 +285,7 @@ class BaseCPU(MemObject):
 
     def addTwoLevelCacheHierarchy(self, ic, dc, l2c, iwc = None, dwc = None):
         self.addPrivateSplitL1Caches(ic, dc, iwc, dwc)
-        # Set a width of 32 bytes (256-bits), which is four times that
-        # of the default bus. The clock of the CPU is inherited by
-        # default.
-        self.toL2Bus = CoherentBus(width = 32)
+        self.toL2Bus = L2XBar()
         self.connectCachedPorts(self.toL2Bus)
         self.l2cache = l2c
         self.toL2Bus.master = self.l2cache.cpu_side

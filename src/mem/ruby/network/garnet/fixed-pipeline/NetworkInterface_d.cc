@@ -34,7 +34,7 @@
 #include "base/cast.hh"
 #include "base/stl_helpers.hh"
 #include "debug/RubyNetwork.hh"
-#include "mem/ruby/buffers/MessageBuffer.hh"
+#include "mem/ruby/network/MessageBuffer.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/NetworkInterface_d.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/flitBuffer_d.hh"
 #include "mem/ruby/slicc_interface/NetworkMessage.hh"
@@ -42,33 +42,34 @@
 using namespace std;
 using m5::stl_helpers::deletePointers;
 
-NetworkInterface_d::NetworkInterface_d(int id, int virtual_networks,
-                                       GarnetNetwork_d *network_ptr)
-    : Consumer(network_ptr)
+NetworkInterface_d::NetworkInterface_d(const Params *p)
+    : ClockedObject(p), Consumer(this)
 {
-    m_id = id;
-    m_net_ptr = network_ptr;
-    m_virtual_networks  = virtual_networks;
-    m_vc_per_vnet = m_net_ptr->getVCsPerVnet();
+    m_id = p->id;
+    m_virtual_networks  = p->virt_nets;
+    m_vc_per_vnet = p->vcs_per_vnet;
     m_num_vcs = m_vc_per_vnet*m_virtual_networks;
 
     m_vc_round_robin = 0;
     m_ni_buffers.resize(m_num_vcs);
     m_ni_enqueue_time.resize(m_num_vcs);
-    inNode_ptr.resize(m_virtual_networks);
-    outNode_ptr.resize(m_virtual_networks);
     creditQueue = new flitBuffer_d();
 
     // instantiating the NI flit buffers
     for (int i = 0; i < m_num_vcs; i++) {
         m_ni_buffers[i] = new flitBuffer_d();
-        m_ni_enqueue_time[i] = INFINITE_;
+        m_ni_enqueue_time[i] = Cycles(INFINITE_);
     }
+
     m_vc_allocator.resize(m_virtual_networks); // 1 allocator per vnet
     for (int i = 0; i < m_virtual_networks; i++) {
         m_vc_allocator[i] = 0;
     }
+}
 
+void
+NetworkInterface_d::init()
+{
     for (int i = 0; i < m_num_vcs; i++) {
         m_out_vc_state.push_back(new OutVcState_d(i, m_net_ptr));
     }
@@ -108,16 +109,20 @@ void
 NetworkInterface_d::addNode(vector<MessageBuffer *>& in,
                             vector<MessageBuffer *>& out)
 {
-    assert(in.size() == m_virtual_networks);
     inNode_ptr = in;
     outNode_ptr = out;
-    for (int j = 0; j < m_virtual_networks; j++) {
 
-        // the protocol injects messages into the NI
-        inNode_ptr[j]->setConsumer(this);
-        inNode_ptr[j]->setReceiver(m_net_ptr);
+    for (auto& it : in) {
+        if (it != nullptr) {
+            it->setConsumer(this);
+            it->setReceiver(this);
+        }
+    }
 
-        outNode_ptr[j]->setSender(m_net_ptr);
+    for (auto& it : out) {
+        if (it != nullptr) {
+            it->setSender(this);
+        }
     }
 }
 
@@ -172,15 +177,14 @@ NetworkInterface_d::flitisizeMessage(MsgPtr msg_ptr, int vnet)
         for (int i = 0; i < num_flits; i++) {
             m_net_ptr->increment_injected_flits(vnet);
             flit_d *fl = new flit_d(i, vc, vnet, num_flits, new_msg_ptr,
-                m_net_ptr->curCycle());
+                curCycle());
 
-            fl->set_delay(m_net_ptr->curCycle() -
-                          m_net_ptr->ticksToCycles(msg_ptr->getTime()));
+            fl->set_delay(curCycle() - ticksToCycles(msg_ptr->getTime()));
             m_ni_buffers[vc]->insert(fl);
         }
 
-        m_ni_enqueue_time[vc] = m_net_ptr->curCycle();
-        m_out_vc_state[vc]->setState(ACTIVE_, m_net_ptr->curCycle());
+        m_ni_enqueue_time[vc] = curCycle();
+        m_out_vc_state[vc]->setState(ACTIVE_, curCycle());
     }
     return true ;
 }
@@ -196,7 +200,7 @@ NetworkInterface_d::calculateVC(int vnet)
                         m_vc_allocator[vnet] = 0;
 
                 if (m_out_vc_state[(vnet*m_vc_per_vnet) + delta]->isInState(
-                    IDLE_, m_net_ptr->curCycle())) {
+                    IDLE_, curCycle())) {
                         return ((vnet*m_vc_per_vnet) + delta);
                 }
         }
@@ -216,18 +220,22 @@ NetworkInterface_d::calculateVC(int vnet)
 void
 NetworkInterface_d::wakeup()
 {
-    DPRINTF(RubyNetwork, "m_id: %d woke up at time: %lld",
-            m_id, m_net_ptr->curCycle());
+    DPRINTF(RubyNetwork, "m_id: %d woke up at time: %lld", m_id, curCycle());
 
     MsgPtr msg_ptr;
 
     // Checking for messages coming from the protocol
     // can pick up a message/cycle for each virtual net
-    for (int vnet = 0; vnet < m_virtual_networks; vnet++) {
-        while (inNode_ptr[vnet]->isReady()) { // Is there a message waiting
-            msg_ptr = inNode_ptr[vnet]->peekMsgPtr();
+    for (int vnet = 0; vnet < inNode_ptr.size(); ++vnet) {
+        MessageBuffer *b = inNode_ptr[vnet];
+        if (b == nullptr) {
+            continue;
+        }
+
+        while (b->isReady()) { // Is there a message waiting
+            msg_ptr = b->peekMsgPtr();
             if (flitisizeMessage(msg_ptr, vnet)) {
-                inNode_ptr[vnet]->pop();
+                b->dequeue();
             } else {
                 break;
             }
@@ -239,7 +247,7 @@ NetworkInterface_d::wakeup()
 
     /*********** Picking messages destined for this NI **********/
 
-    if (inNetLink->isReady(m_net_ptr->curCycle())) {
+    if (inNetLink->isReady(curCycle())) {
         flit_d *t_flit = inNetLink->consumeLink();
         bool free_signal = false;
         if (t_flit->get_type() == TAIL_ || t_flit->get_type() == HEAD_TAIL_) {
@@ -251,15 +259,14 @@ NetworkInterface_d::wakeup()
         // Simply send a credit back since we are not buffering
         // this flit in the NI
         flit_d *credit_flit = new flit_d(t_flit->get_vc(), free_signal,
-                                         m_net_ptr->curCycle());
+                                         curCycle());
         creditQueue->insert(credit_flit);
         m_ni_credit_link->
-            scheduleEventAbsolute(m_net_ptr->clockEdge(Cycles(1)));
+            scheduleEventAbsolute(clockEdge(Cycles(1)));
 
         int vnet = t_flit->get_vnet();
         m_net_ptr->increment_received_flits(vnet);
-        Cycles network_delay = m_net_ptr->curCycle() -
-                               t_flit->get_enqueue_time();
+        Cycles network_delay = curCycle() - t_flit->get_enqueue_time();
         Cycles queueing_delay = t_flit->get_delay();
 
         m_net_ptr->increment_network_latency(network_delay, vnet);
@@ -269,12 +276,11 @@ NetworkInterface_d::wakeup()
 
     /****************** Checking for credit link *******/
 
-    if (m_credit_link->isReady(m_net_ptr->curCycle())) {
+    if (m_credit_link->isReady(curCycle())) {
         flit_d *t_flit = m_credit_link->consumeLink();
         m_out_vc_state[t_flit->get_vc()]->increment_credit();
         if (t_flit->is_free_signal()) {
-            m_out_vc_state[t_flit->get_vc()]->setState(IDLE_,
-                m_net_ptr->curCycle());
+            m_out_vc_state[t_flit->get_vc()]->setState(IDLE_, curCycle());
         }
         delete t_flit;
     }
@@ -300,7 +306,7 @@ NetworkInterface_d::scheduleOutputLink()
             vc = 0;
 
         // model buffer backpressure
-        if (m_ni_buffers[vc]->isReady(m_net_ptr->curCycle()) &&
+        if (m_ni_buffers[vc]->isReady(curCycle()) &&
             m_out_vc_state[vc]->has_credits()) {
 
             bool is_candidate_vc = true;
@@ -311,7 +317,7 @@ NetworkInterface_d::scheduleOutputLink()
                 for (int vc_offset = 0; vc_offset < m_vc_per_vnet;
                      vc_offset++) {
                     int t_vc = vc_base + vc_offset;
-                    if (m_ni_buffers[t_vc]->isReady(m_net_ptr->curCycle())) {
+                    if (m_ni_buffers[t_vc]->isReady(curCycle())) {
                         if (m_ni_enqueue_time[t_vc] < m_ni_enqueue_time[vc]) {
                             is_candidate_vc = false;
                             break;
@@ -325,15 +331,14 @@ NetworkInterface_d::scheduleOutputLink()
             m_out_vc_state[vc]->decrement_credit();
             // Just removing the flit
             flit_d *t_flit = m_ni_buffers[vc]->getTopFlit();
-            t_flit->set_time(m_net_ptr->curCycle() + Cycles(1));
+            t_flit->set_time(curCycle() + Cycles(1));
             outSrcQueue->insert(t_flit);
             // schedule the out link
-            outNetLink->
-                scheduleEventAbsolute(m_net_ptr->clockEdge(Cycles(1)));
+            outNetLink->scheduleEventAbsolute(clockEdge(Cycles(1)));
 
             if (t_flit->get_type() == TAIL_ ||
                t_flit->get_type() == HEAD_TAIL_) {
-                m_ni_enqueue_time[vc] = INFINITE_;
+                m_ni_enqueue_time[vc] = Cycles(INFINITE_);
             }
             return;
         }
@@ -343,7 +348,7 @@ NetworkInterface_d::scheduleOutputLink()
 int
 NetworkInterface_d::get_vnet(int vc)
 {
-    for (int i = 0; i < m_net_ptr->getNumberOfVirtualNetworks(); i++) {
+    for (int i = 0; i < m_virtual_networks; i++) {
         if (vc >= (i*m_vc_per_vnet) && vc < ((i+1)*m_vc_per_vnet)) {
             return i;
         }
@@ -354,14 +359,19 @@ NetworkInterface_d::get_vnet(int vc)
 void
 NetworkInterface_d::checkReschedule()
 {
-    for (int vnet = 0; vnet < m_virtual_networks; vnet++) {
-        if (inNode_ptr[vnet]->isReady()) { // Is there a message waiting
+    for (const auto& it : inNode_ptr) {
+        if (it == nullptr) {
+            continue;
+        }
+
+        while (it->isReady()) { // Is there a message waiting
             scheduleEvent(Cycles(1));
             return;
         }
     }
+
     for (int vc = 0; vc < m_num_vcs; vc++) {
-        if (m_ni_buffers[vc]->isReadyForNext(m_net_ptr->curCycle())) {
+        if (m_ni_buffers[vc]->isReady(curCycle() + Cycles(1))) {
             scheduleEvent(Cycles(1));
             return;
         }
@@ -385,3 +395,10 @@ NetworkInterface_d::functionalWrite(Packet *pkt)
     num_functional_writes += outSrcQueue->functionalWrite(pkt);
     return num_functional_writes;
 }
+
+NetworkInterface_d *
+GarnetNetworkInterface_dParams::create()
+{
+    return new NetworkInterface_d(this);
+}
+

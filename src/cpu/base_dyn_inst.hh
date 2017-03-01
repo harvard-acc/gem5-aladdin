@@ -46,16 +46,19 @@
 #ifndef __CPU_BASE_DYN_INST_HH__
 #define __CPU_BASE_DYN_INST_HH__
 
+#include <array>
 #include <bitset>
 #include <list>
 #include <string>
 #include <queue>
 
+#include "arch/generic/tlb.hh"
 #include "arch/utility.hh"
 #include "base/trace.hh"
 #include "config/the_isa.hh"
 #include "cpu/checker/cpu.hh"
 #include "cpu/o3/comm.hh"
+#include "cpu/exec_context.hh"
 #include "cpu/exetrace.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/op_class.hh"
@@ -63,9 +66,7 @@
 #include "cpu/translation.hh"
 #include "mem/packet.hh"
 #include "sim/byteswap.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/system.hh"
-#include "sim/tlb.hh"
 
 /**
  * @file
@@ -73,7 +74,7 @@
  */
 
 template <class Impl>
-class BaseDynInst : public RefCounted
+class BaseDynInst : public ExecContext, public RefCounted
 {
   public:
     // Typedef for the CPU.
@@ -82,10 +83,6 @@ class BaseDynInst : public RefCounted
 
     // Logical register index type.
     typedef TheISA::RegIndex RegIndex;
-    // Integer register type.
-    typedef TheISA::IntReg IntReg;
-    // Floating point register type.
-    typedef TheISA::FloatReg FloatReg;
 
     // The DynInstPtr type.
     typedef typename Impl::DynInstPtr DynInstPtr;
@@ -148,7 +145,7 @@ class BaseDynInst : public RefCounted
          *  @todo: Consider if this is necessary or not.
          */
         EACalcDone,
-        IsUncacheable,
+        IsStrictlyOrdered,
         ReqMade,
         MemOpDone,
         MaxFlags
@@ -159,10 +156,12 @@ class BaseDynInst : public RefCounted
     InstSeqNum seqNum;
 
     /** The StaticInst used by this BaseDynInst. */
-    StaticInstPtr staticInst;
+    const StaticInstPtr staticInst;
 
     /** Pointer to the Impl's CPU object. */
     ImplCPU *cpu;
+
+    BaseCPU *getCpuPtr() { return cpu; }
 
     /** Pointer to the thread state. */
     ImplState *thread;
@@ -205,7 +204,7 @@ class BaseDynInst : public RefCounted
     TheISA::PCState predPC;
 
     /** The Macroop if one exists */
-    StaticInstPtr macroop;
+    const StaticInstPtr macroop;
 
     /** How many source registers are ready. */
     uint8_t readyRegs;
@@ -260,22 +259,22 @@ class BaseDynInst : public RefCounted
     /** Flattened register index of the destination registers of this
      *  instruction.
      */
-    TheISA::RegIndex _flatDestRegIdx[TheISA::MaxInstDestRegs];
+    std::array<TheISA::RegIndex, TheISA::MaxInstDestRegs> _flatDestRegIdx;
 
     /** Physical register index of the destination registers of this
      *  instruction.
      */
-    PhysRegIndex _destRegIdx[TheISA::MaxInstDestRegs];
+    std::array<PhysRegIndex, TheISA::MaxInstDestRegs> _destRegIdx;
 
     /** Physical register index of the source registers of this
      *  instruction.
      */
-    PhysRegIndex _srcRegIdx[TheISA::MaxInstSrcRegs];
+    std::array<PhysRegIndex, TheISA::MaxInstSrcRegs> _srcRegIdx;
 
     /** Physical register index of the previous producers of the
      *  architected destinations.
      */
-    PhysRegIndex _prevDestRegIdx[TheISA::MaxInstDestRegs];
+    std::array<PhysRegIndex, TheISA::MaxInstDestRegs> _prevDestRegIdx;
 
 
   public:
@@ -428,14 +427,14 @@ class BaseDynInst : public RefCounted
      *  @param seq_num The sequence number of the instruction.
      *  @param cpu Pointer to the instruction's CPU.
      */
-    BaseDynInst(StaticInstPtr staticInst, StaticInstPtr macroop,
+    BaseDynInst(const StaticInstPtr &staticInst, const StaticInstPtr &macroop,
                 TheISA::PCState pc, TheISA::PCState predPC,
                 InstSeqNum seq_num, ImplCPU *cpu);
 
     /** BaseDynInst constructor given a StaticInst pointer.
      *  @param _staticInst The StaticInst for this BaseDynInst.
      */
-    BaseDynInst(StaticInstPtr staticInst, StaticInstPtr macroop);
+    BaseDynInst(const StaticInstPtr &staticInst, const StaticInstPtr &macroop);
 
     /** BaseDynInst destructor. */
     ~BaseDynInst();
@@ -452,16 +451,19 @@ class BaseDynInst : public RefCounted
     void dump(std::string &outstring);
 
     /** Read this CPU's ID. */
-    int cpuId() { return cpu->cpuId(); }
+    int cpuId() const { return cpu->cpuId(); }
+
+    /** Read this CPU's Socket ID. */
+    uint32_t socketId() const { return cpu->socketId(); }
 
     /** Read this CPU's data requestor ID */
-    MasterID masterId() { return cpu->dataMasterId(); }
+    MasterID masterId() const { return cpu->dataMasterId(); }
 
     /** Read this context's system-wide ID **/
-    int contextId() { return thread->contextId(); }
+    int contextId() const { return thread->contextId(); }
 
     /** Returns the fault type. */
-    Fault getFault() { return fault; }
+    Fault getFault() const { return fault; }
 
     /** Checks whether or not this instruction has had its branch target
      *  calculated yet.  For now it is not utilized and is hacked to be
@@ -593,6 +595,7 @@ class BaseDynInst : public RefCounted
     // for machines with separate int & FP reg files
     int8_t numFPDestRegs()  const { return staticInst->numFPDestRegs(); }
     int8_t numIntDestRegs() const { return staticInst->numIntDestRegs(); }
+    int8_t numCCDestRegs() const { return staticInst->numCCDestRegs(); }
 
     /** Returns the logical register index of the i'th destination register. */
     RegIndex destRegIdx(int i) const { return staticInst->destRegIdx(i); }
@@ -629,26 +632,15 @@ class BaseDynInst : public RefCounted
     }
 
     /** Records an integer register being set to a value. */
-    void setIntRegOperand(const StaticInst *si, int idx, uint64_t val)
+    void setIntRegOperand(const StaticInst *si, int idx, IntReg val)
     {
         setResult<uint64_t>(val);
     }
 
     /** Records a CC register being set to a value. */
-    void setCCRegOperand(const StaticInst *si, int idx, uint64_t val)
+    void setCCRegOperand(const StaticInst *si, int idx, CCReg val)
     {
         setResult<uint64_t>(val);
-    }
-
-    /** Records an fp register being set to a value. */
-    void setFloatRegOperand(const StaticInst *si, int idx, FloatReg val,
-                            int width)
-    {
-        if (width == 32 || width == 64) {
-            setResult<double>(val);
-        } else {
-            panic("Unsupported width!");
-        }
     }
 
     /** Records an fp register being set to a value. */
@@ -658,14 +650,7 @@ class BaseDynInst : public RefCounted
     }
 
     /** Records an fp register being set to an integer value. */
-    void setFloatRegOperandBits(const StaticInst *si, int idx, uint64_t val,
-                                int width)
-    {
-        setResult<uint64_t>(val);
-    }
-
-    /** Records an fp register being set to an integer value. */
-    void setFloatRegOperandBits(const StaticInst *si, int idx, uint64_t val)
+    void setFloatRegOperandBits(const StaticInst *si, int idx, FloatRegBits val)
     {
         setResult<uint64_t>(val);
     }
@@ -797,10 +782,10 @@ class BaseDynInst : public RefCounted
     bool isSquashedInROB() const { return status[SquashedInROB]; }
 
     /** Read the PC state of this instruction. */
-    const TheISA::PCState pcState() const { return pc; }
+    TheISA::PCState pcState() const { return pc; }
 
     /** Set the PC state of this instruction. */
-    const void pcState(const TheISA::PCState &val) { pc = val; }
+    void pcState(const TheISA::PCState &val) { pc = val; }
 
     /** Read the PC of this instruction. */
     const Addr instAddr() const { return pc.instAddr(); }
@@ -839,10 +824,10 @@ class BaseDynInst : public RefCounted
 
   public:
     /** Sets the effective address. */
-    void setEA(Addr &ea) { instEffAddr = ea; instFlags[EACalcDone] = true; }
+    void setEA(Addr ea) { instEffAddr = ea; instFlags[EACalcDone] = true; }
 
     /** Returns the effective address. */
-    const Addr &getEA() const { return instEffAddr; }
+    Addr getEA() const { return instEffAddr; }
 
     /** Returns whether or not the eff. addr. calculation has been completed. */
     bool doneEACalc() { return instFlags[EACalcDone]; }
@@ -850,8 +835,8 @@ class BaseDynInst : public RefCounted
     /** Returns whether or not the eff. addr. source registers are ready. */
     bool eaSrcsReady();
 
-    /** Is this instruction's memory access uncacheable. */
-    bool uncacheable() { return instFlags[IsUncacheable]; }
+    /** Is this instruction's memory access strictly ordered? */
+    bool strictlyOrdered() const { return instFlags[IsStrictlyOrdered]; }
 
     /** Has this instruction generated a memory request. */
     bool hasRequest() { return instFlags[ReqMade]; }
@@ -864,12 +849,20 @@ class BaseDynInst : public RefCounted
 
   public:
     /** Returns the number of consecutive store conditional failures. */
-    unsigned readStCondFailures()
+    unsigned int readStCondFailures() const
     { return thread->storeCondFailures; }
 
     /** Sets the number of consecutive store conditional failures. */
-    void setStCondFailures(unsigned sc_failures)
+    void setStCondFailures(unsigned int sc_failures)
     { thread->storeCondFailures = sc_failures; }
+
+  public:
+    // monitor/mwait funtions
+    void armMonitor(Addr address) { cpu->armMonitor(address); }
+    bool mwait(PacketPtr pkt) { return cpu->mwait(pkt); }
+    void mwaitAtomic(ThreadContext *tc)
+    { return cpu->mwaitAtomic(tc, cpu->dtb); }
+    AddressMonitor *getAddrMonitor() { return cpu->getCpuAddrMonitor(); }
 };
 
 template<class Impl>
@@ -889,6 +882,8 @@ BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
     } else {
         req = new Request(asid, addr, size, flags, masterId(), this->pc.instAddr(),
                           thread->contextId(), threadNumber);
+
+        req->taskId(cpu->taskId());
 
         // Only split the request if the ISA supports unaligned accesses.
         if (TheISA::HasUnalignedMemAcc) {
@@ -924,9 +919,8 @@ BaseDynInst<Impl>::readMem(Addr addr, uint8_t *data,
         }
     }
 
-    if (traceData) {
-        traceData->setAddr(addr);
-    }
+    if (traceData)
+        traceData->setMem(addr, size, flags);
 
     return fault;
 }
@@ -936,9 +930,8 @@ Fault
 BaseDynInst<Impl>::writeMem(uint8_t *data, unsigned size,
                             Addr addr, unsigned flags, uint64_t *res)
 {
-    if (traceData) {
-        traceData->setAddr(addr);
-    }
+    if (traceData)
+        traceData->setMem(addr, size, flags);
 
     instFlags[ReqMade] = true;
     Request *req = NULL;
@@ -952,6 +945,8 @@ BaseDynInst<Impl>::writeMem(uint8_t *data, unsigned size,
     } else {
         req = new Request(asid, addr, size, flags, masterId(), this->pc.instAddr(),
                           thread->contextId(), threadNumber);
+
+        req->taskId(cpu->taskId());
 
         // Only split the request if the ISA supports unaligned accesses.
         if (TheISA::HasUnalignedMemAcc) {
@@ -1058,7 +1053,7 @@ BaseDynInst<Impl>::finishTranslation(WholeTranslationState *state)
 {
     fault = state->getFault();
 
-    instFlags[IsUncacheable] = state->isUncacheable();
+    instFlags[IsStrictlyOrdered] = state->isStrictlyOrdered();
 
     if (fault == NoFault) {
         physEffAddr = state->getPaddr();

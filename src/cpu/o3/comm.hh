@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011 ARM Limited
+ * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -144,13 +145,15 @@ struct TimeBufStruct {
     struct iewComm {
         // Also eventually include skid buffer space.
         unsigned freeIQEntries;
-        unsigned freeLSQEntries;
+        unsigned freeLQEntries;
+        unsigned freeSQEntries;
+        unsigned dispatchedToLQ;
+        unsigned dispatchedToSQ;
 
         unsigned iqCount;
         unsigned ldstqCount;
 
         unsigned dispatched;
-        unsigned dispatchedToLSQ;
         bool usedIQ;
         bool usedLSQ;
     };
@@ -182,8 +185,9 @@ struct TimeBufStruct {
         /// Instruction that caused the a non-mispredict squash
         DynInstPtr squashInst; // *F
 
-        /// Hack for now to send back an uncached access to the IEW stage.
-        DynInstPtr uncachedLoad; // *I
+        /// Hack for now to send back a strictly ordered access to the
+        /// IEW stage.
+        DynInstPtr strictlyOrderedLoad; // *I
 
         /// Communication specifically to the IQ to tell the IQ that it can
         /// schedule a non-speculative instruction.
@@ -213,8 +217,9 @@ struct TimeBufStruct {
         /// If the interrupt ended up being cleared before being handled
         bool clearInterrupt; // *F
 
-        /// Hack for now to send back an uncached access to the IEW stage.
-        bool uncached; // *I
+        /// Hack for now to send back an strictly ordered access to
+        /// the IEW stage.
+        bool strictlyOrdered; // *I
 
     };
 
@@ -226,8 +231,6 @@ struct TimeBufStruct {
     bool renameUnblock[Impl::MaxThreads];
     bool iewBlock[Impl::MaxThreads];
     bool iewUnblock[Impl::MaxThreads];
-    bool commitBlock[Impl::MaxThreads];
-    bool commitUnblock[Impl::MaxThreads];
 };
 
 #endif //__CPU_O3_COMM_HH__

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012, 2014 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,12 +51,12 @@
 #include <utility>
 #include <vector>
 
+#include "arch/isa_traits.hh"
 #include "base/loader/symtab.hh"
 #include "base/misc.hh"
 #include "base/statistics.hh"
-#include "cpu/pc_event.hh"
+#include "config/the_isa.hh"
 #include "enums/MemoryMode.hh"
-#include "kern/system_events.hh"
 #include "mem/mem_object.hh"
 #include "mem/port.hh"
 #include "mem/port_proxy.hh"
@@ -65,6 +65,14 @@
 
 #include "aladdin/gem5/Gem5Datapath.h"
 #include "debug/Aladdin.hh"
+
+/**
+ * To avoid linking errors with LTO, only include the header if we
+ * actually have the definition.
+ */
+#if THE_ISA != NULL_ISA
+#include "cpu/pc_event.hh"
+#endif
 
 class BaseCPU;
 class BaseRemoteGDB;
@@ -94,7 +102,7 @@ class System : public MemObject
         { }
         bool recvTimingResp(PacketPtr pkt)
         { panic("SystemPort does not receive timing!\n"); return false; }
-        void recvRetry()
+        void recvReqRetry()
         { panic("SystemPort does not expect retry!\n"); }
     };
 
@@ -123,8 +131,6 @@ class System : public MemObject
      */
     BaseMasterPort& getMasterPort(const std::string &if_name,
                                   PortID idx = InvalidPortID);
-
-    static const char *MemoryModeStrings[4];
 
     /** @{ */
     /**
@@ -363,6 +369,13 @@ class System : public MemObject
      */
     Addr loadAddrMask;
 
+    /** Offset that should be used for binary/symbol loading.
+     * This further allows more flexibily than the loadAddrMask allows alone in
+     * loading kernels and similar. The loadAddrOffset is applied after the
+     * loadAddrMask.
+     */
+    Addr loadAddrOffset;
+
   protected:
     uint64_t nextPID;
 
@@ -389,6 +402,21 @@ class System : public MemObject
      * @return Whether the address corresponds to a memory
      */
     bool isMemAddr(Addr addr) const;
+
+    /**
+     * Get the architecture.
+     */
+    Arch getArch() const { return Arch::TheISA; }
+
+     /**
+     * Get the page bytes for the ISA.
+     */
+    Addr getPageBytes() const { return TheISA::PageBytes; }
+
+    /**
+     * Get the number of bits worth of in-page adress for the ISA.
+     */
+    Addr getPageShift() const { return TheISA::PageShift; }
 
   protected:
 

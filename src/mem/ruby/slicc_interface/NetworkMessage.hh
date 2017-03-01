@@ -30,14 +30,14 @@
 #define __MEM_RUBY_SLICC_INTERFACE_NETWORKMESSAGE_HH__
 
 #include <iostream>
+#include <memory>
 
-#include "base/refcnt.hh"
 #include "mem/protocol/MessageSizeType.hh"
 #include "mem/ruby/common/NetDest.hh"
 #include "mem/ruby/slicc_interface/Message.hh"
 
 class NetworkMessage;
-typedef RefCountingPtr<NetworkMessage> NetMsgPtr;
+typedef std::shared_ptr<NetworkMessage> NetMsgPtr;
 
 class NetworkMessage : public Message
 {
@@ -61,7 +61,7 @@ class NetworkMessage : public Message
     const NetDest&
     getInternalDestination() const
     {
-        if (m_internal_dest_valid == false)
+        if (!m_internal_dest_valid)
             return getDestination();
 
         return m_internal_dest;
@@ -70,7 +70,7 @@ class NetworkMessage : public Message
     NetDest&
     getInternalDestination()
     {
-        if (m_internal_dest_valid == false) {
+        if (!m_internal_dest_valid) {
             m_internal_dest = getDestination();
             m_internal_dest_valid = true;
         }

@@ -106,7 +106,7 @@ FaultVect IntegerOverflowFault::_vect = 0x0501;
 FaultStat IntegerOverflowFault::_count;
 
 void
-AlphaFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+AlphaFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     FaultBase::invoke(tc);
     if (!FullSystem)
@@ -130,7 +130,7 @@ AlphaFault::invoke(ThreadContext *tc, StaticInstPtr inst)
 }
 
 void
-ArithmeticFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+ArithmeticFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     FaultBase::invoke(tc);
     if (!FullSystem)
@@ -139,7 +139,7 @@ ArithmeticFault::invoke(ThreadContext *tc, StaticInstPtr inst)
 }
 
 void
-DtbFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+DtbFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     if (FullSystem) {
         // Set fault address and flags.  Even though we're modeling an
@@ -147,8 +147,7 @@ DtbFault::invoke(ThreadContext *tc, StaticInstPtr inst)
         // on VPTE loads (instead of locking the registers until IPR_VA is
         // read, like the EV5).  The EV6 approach is cleaner and seems to
         // work with EV5 PAL code, but not the other way around.
-        if (!tc->misspeculating() &&
-            reqFlags.noneSet(Request::VPTE | Request::PREFETCH)) {
+        if (reqFlags.noneSet(AlphaRequestFlags::VPTE | Request::PREFETCH)) {
             // set VA register with faulting address
             tc->setMiscRegNoEffect(IPR_VA, vaddr);
 
@@ -169,21 +168,19 @@ DtbFault::invoke(ThreadContext *tc, StaticInstPtr inst)
 }
 
 void
-ItbFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+ItbFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     if (FullSystem) {
-        if (!tc->misspeculating()) {
-            tc->setMiscRegNoEffect(IPR_ITB_TAG, pc);
-            tc->setMiscRegNoEffect(IPR_IFAULT_VA_FORM,
-                tc->readMiscRegNoEffect(IPR_IVPTBR) | (VAddr(pc).vpn() << 3));
-        }
+        tc->setMiscRegNoEffect(IPR_ITB_TAG, pc);
+        tc->setMiscRegNoEffect(IPR_IFAULT_VA_FORM,
+            tc->readMiscRegNoEffect(IPR_IVPTBR) | (VAddr(pc).vpn() << 3));
     }
 
     AlphaFault::invoke(tc);
 }
 
 void
-ItbPageFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+ItbPageFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     if (FullSystem) {
         ItbFault::invoke(tc);
@@ -202,7 +199,7 @@ ItbPageFault::invoke(ThreadContext *tc, StaticInstPtr inst)
 }
 
 void
-NDtbMissFault::invoke(ThreadContext *tc, StaticInstPtr inst)
+NDtbMissFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 {
     if (FullSystem) {
         DtbFault::invoke(tc, inst);

@@ -30,7 +30,6 @@ from slicc.ast.AST import *
 from slicc.ast.ActionDeclAST import *
 from slicc.ast.AssignStatementAST import *
 from slicc.ast.CheckAllocateStatementAST import *
-from slicc.ast.CopyHeadStatementAST import *
 from slicc.ast.DeclAST import *
 from slicc.ast.DeclListAST import *
 from slicc.ast.EnqueueStatementAST import *
@@ -68,7 +67,5 @@ from slicc.ast.TypeAST import *
 from slicc.ast.TypeDeclAST import *
 from slicc.ast.TypeFieldAST import *
 from slicc.ast.TypeFieldEnumAST import *
-from slicc.ast.TypeFieldMemberAST import *
-from slicc.ast.TypeFieldMethodAST import *
 from slicc.ast.TypeFieldStateAST import *
 from slicc.ast.VarExprAST import *

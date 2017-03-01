@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2014 Advanced Micro Devices, Inc.
  * Copyright (c) 2012 ARM Limited
  * All rights reserved
  *
@@ -55,6 +56,7 @@
 #include "config/the_isa.hh"
 #include "cpu/thread_context.hh"
 #include "mem/page_table.hh"
+#include "mem/multi_level_page_table.hh"
 #include "mem/se_translating_port_proxy.hh"
 #include "params/LiveProcess.hh"
 #include "params/Process.hh"
@@ -75,6 +77,7 @@
 #include "arch/mips/linux/process.hh"
 #elif THE_ISA == ARM_ISA
 #include "arch/arm/linux/process.hh"
+#include "arch/arm/freebsd/process.hh"
 #elif THE_ISA == X86_ISA
 #include "arch/x86/linux/process.hh"
 #elif THE_ISA == POWER_ISA
@@ -102,9 +105,15 @@ template struct AuxVector<uint64_t>;
 
 Process::Process(ProcessParams * params)
     : SimObject(params), system(params->system),
+      brk_point(0), stack_base(0), stack_size(0), stack_min(0),
       max_stack_size(params->max_stack_size),
+      next_thread_stack_base(0),
       M5_pid(system->allocatePID()),
-      pTable(new PageTable(name(), M5_pid)),
+      useArchPT(params->useArchPT),
+      kvmInSE(params->kvmInSE),
+      pTable(useArchPT ?
+        static_cast<PageTableBase *>(new ArchPageTable(name(), M5_pid, system)) :
+        static_cast<PageTableBase *>(new FuncPageTable(name(), M5_pid)) ),
       initVirtMem(system->getSystemPort(), this,
                   SETranslatingPortProxy::Always)
 {
@@ -245,7 +254,9 @@ Process::initState()
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
 
     // mark this context as active so it will start ticking.
-    tc->activate(Cycles(0));
+    tc->activate();
+
+    pTable->initState(tc);
 }
 
 // map simulator fd sim_fd to target fd tgt_fd
@@ -262,7 +273,8 @@ Process::dup_fd(int sim_fd, int tgt_fd)
 
 // generate new target fd for sim_fd
 int
-Process::alloc_fd(int sim_fd, string filename, int flags, int mode, bool pipe)
+Process::alloc_fd(int sim_fd, const string& filename, int flags, int mode,
+                  bool pipe)
 {
     // in case open() returns an error, don't allocate a new fd
     if (sim_fd == -1)
@@ -271,7 +283,7 @@ Process::alloc_fd(int sim_fd, string filename, int flags, int mode, bool pipe)
     // find first free target fd
     for (int free_fd = 0; free_fd <= MAX_FD; ++free_fd) {
         Process::FdMap *fdo = &fd_map[free_fd];
-        if (fdo->fd == -1) {
+        if (fdo->fd == -1 && fdo->driver == NULL) {
             fdo->fd = sim_fd;
             fdo->filename = filename;
             fdo->mode = mode;
@@ -302,6 +314,7 @@ Process::free_fd(int tgt_fd)
     fdo->flags = 0;
     fdo->isPipe = false;
     fdo->readPipeSource = 0;
+    fdo->driver = NULL;
 }
 
 
@@ -327,9 +340,9 @@ Process::sim_fd_obj(int tgt_fd)
 void
 Process::allocateMem(Addr vaddr, int64_t size, bool clobber)
 {
-    int npages = divCeil(size, (int64_t)VMPageSize);
+    int npages = divCeil(size, (int64_t)PageBytes);
     Addr paddr = system->allocPhysPages(npages);
-    pTable->map(vaddr, paddr, size, clobber);
+    pTable->map(vaddr, paddr, size, clobber ? PageTableBase::Clobber : 0);
 }
 
 bool
@@ -338,7 +351,7 @@ Process::fixupStackFault(Addr vaddr)
     // Check if this is already on the stack and there's just no page there
     // yet.
     if (vaddr >= stack_min && vaddr < stack_base) {
-        allocateMem(roundDown(vaddr, VMPageSize), VMPageSize);
+        allocateMem(roundDown(vaddr, PageBytes), PageBytes);
         return true;
     }
 
@@ -373,7 +386,7 @@ Process::fix_file_offsets()
 
     if (in == "stdin" || in == "cin")
         stdin_fd = STDIN_FILENO;
-    else if (in == "None")
+    else if (in == "NULL")
         stdin_fd = -1;
     else {
         // open standard in and seek to the right location
@@ -386,7 +399,7 @@ Process::fix_file_offsets()
         stdout_fd = STDOUT_FILENO;
     else if (out == "stderr" || out == "cerr")
         stdout_fd = STDERR_FILENO;
-    else if (out == "None")
+    else if (out == "NULL")
         stdout_fd = -1;
     else {
         stdout_fd = Process::openOutputFile(out);
@@ -398,7 +411,7 @@ Process::fix_file_offsets()
         stderr_fd = STDOUT_FILENO;
     else if (err == "stderr" || err == "cerr")
         stderr_fd = STDERR_FILENO;
-    else if (err == "None")
+    else if (err == "NULL")
         stderr_fd = -1;
     else if (err == out)
         stderr_fd = stdout_fd;
@@ -445,7 +458,7 @@ Process::fix_file_offsets()
                 fdo->fd = fd;
 
                 //Seek to correct location before checkpoint
-                if (lseek(fd,fdo->fileOffset, SEEK_SET) < 0)
+                if (lseek(fd, fdo->fileOffset, SEEK_SET) < 0)
                     panic("Unable to seek to correct location in file: %s",
                           fdo->filename);
             }
@@ -461,8 +474,8 @@ Process::find_file_offsets()
         if (fdo->fd != -1) {
             fdo->fileOffset = lseek(fdo->fd, 0, SEEK_CUR);
         } else {
-                fdo->filename = "NULL";
-                fdo->fileOffset = 0;
+            fdo->filename = "NULL";
+            fdo->fileOffset = 0;
         }
     }
 }
@@ -544,9 +557,10 @@ Process::unserialize(Checkpoint *cp, const std::string &section)
 
 
 bool
-Process::map(Addr vaddr, Addr paddr, int size)
+Process::map(Addr vaddr, Addr paddr, int size, bool cacheable)
 {
-    pTable->map(vaddr, paddr, size);
+    pTable->map(vaddr, paddr, size,
+                cacheable ? 0 : PageTableBase::Uncacheable);
     return true;
 }
 
@@ -558,16 +572,14 @@ Process::map(Addr vaddr, Addr paddr, int size)
 ////////////////////////////////////////////////////////////////////////
 
 
-LiveProcess::LiveProcess(LiveProcessParams * params, ObjectFile *_objFile)
+LiveProcess::LiveProcess(LiveProcessParams *params, ObjectFile *_objFile)
     : Process(params), objFile(_objFile),
-      argv(params->cmd), envp(params->env), cwd(params->cwd)
+      argv(params->cmd), envp(params->env), cwd(params->cwd),
+      __uid(params->uid), __euid(params->euid),
+      __gid(params->gid), __egid(params->egid),
+      __pid(params->pid), __ppid(params->ppid),
+      drivers(params->drivers)
 {
-    __uid = params->uid;
-    __euid = params->euid;
-    __gid = params->gid;
-    __egid = params->egid;
-    __pid = params->pid;
-    __ppid = params->ppid;
 
     // load up symbols, if any... these may be used for debugging or
     // profiling.
@@ -600,6 +612,19 @@ LiveProcess::getSyscallArg(ThreadContext *tc, int &i, int width)
 {
     return getSyscallArg(tc, i);
 }
+
+
+EmulatedDriver *
+LiveProcess::findDriver(std::string filename)
+{
+    for (EmulatedDriver *d : drivers) {
+        if (d->match(filename))
+            return d;
+    }
+
+    return NULL;
+}
+
 
 LiveProcess *
 LiveProcess::create(LiveProcessParams * params)
@@ -695,15 +720,31 @@ LiveProcess::create(LiveProcessParams * params)
         fatal("Unknown/unsupported operating system.");
     }
 #elif THE_ISA == ARM_ISA
-    if (objFile->getArch() != ObjectFile::Arm &&
-        objFile->getArch() != ObjectFile::Thumb)
+    ObjectFile::Arch arch = objFile->getArch();
+    if (arch != ObjectFile::Arm && arch != ObjectFile::Thumb &&
+        arch != ObjectFile::Arm64)
         fatal("Object file architecture does not match compiled ISA (ARM).");
     switch (objFile->getOpSys()) {
       case ObjectFile::UnknownOpSys:
         warn("Unknown operating system; assuming Linux.");
         // fall through
       case ObjectFile::Linux:
-        process = new ArmLinuxProcess(params, objFile, objFile->getArch());
+        if (arch == ObjectFile::Arm64) {
+            process = new ArmLinuxProcess64(params, objFile,
+                                            objFile->getArch());
+        } else {
+            process = new ArmLinuxProcess32(params, objFile,
+                                            objFile->getArch());
+        }
+        break;
+      case ObjectFile::FreeBSD:
+        if (arch == ObjectFile::Arm64) {
+            process = new ArmFreebsdProcess64(params, objFile,
+                                              objFile->getArch());
+        } else {
+            process = new ArmFreebsdProcess32(params, objFile,
+                                              objFile->getArch());
+        }
         break;
       case ObjectFile::LinuxArmOABI:
         fatal("M5 does not support ARM OABI binaries. Please recompile with an"

@@ -36,7 +36,6 @@
 #include <vector>
 
 #include "base/inifile.hh"
-#include "base/str.hh"        // for to_number
 #include "base/trace.hh"
 #include "config/the_isa.hh"
 #include "debug/Uart.hh"
@@ -114,7 +113,6 @@ Uart8250::read(PacketPtr pkt)
     assert(pkt->getSize() == 1);
 
     Addr daddr = pkt->getAddr() - pioAddr;
-    pkt->allocate();
 
     DPRINTF(Uart, " read register %#x\n", daddr);
 

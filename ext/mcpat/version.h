@@ -32,9 +32,9 @@
 #ifndef VERSION_H_
 #define VERSION_H_
 
-#define VER_MAJOR		1
-#define VER_MINOR		3
+#define VER_MAJOR		0	/* beta release */
+#define VER_MINOR		8
 
-#define VER_UPDATE	        "Feb, 2015"
+#define VER_UPDATE	        "Aug, 2010"
 
 #endif /* VERSION_H_ */

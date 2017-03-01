@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012 ARM Limited
+ * Copyright (c) 2010-2012, 2014 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -50,6 +50,7 @@
 #include "cpu/exetrace.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/timebuf.hh"
+#include "sim/probe/probe.hh"
 
 struct DerivO3CPUParams;
 
@@ -150,6 +151,10 @@ class DefaultCommit
     /** Commit policy used in SMT mode. */
     CommitPolicy commitPolicy;
 
+    /** Probe Points. */
+    ProbePointArg<DynInstPtr> *ppCommit;
+    ProbePointArg<DynInstPtr> *ppCommitStall;
+
   public:
     /** Construct a DefaultCommit with the given parameters. */
     DefaultCommit(O3CPU *_cpu, DerivO3CPUParams *params);
@@ -159,6 +164,9 @@ class DefaultCommit
 
     /** Registers statistics. */
     void regStats();
+
+    /** Registers probes. */
+    void regProbePoints();
 
     /** Sets the list of threads. */
     void setThreads(std::vector<Thread *> &threads);
@@ -176,9 +184,6 @@ class DefaultCommit
 
     /** Sets the pointer to the IEW stage. */
     void setIEWStage(IEW *iew_stage);
-
-    /** Skid buffer between rename and commit. */
-    std::queue<DynInstPtr> skidBuffer;
 
     /** The pointer to the IEW stage. Used solely to ensure that
      * various events (traps, interrupts, syscalls) do not occur until
@@ -213,6 +218,9 @@ class DefaultCommit
     /** Takes over from another CPU's thread. */
     void takeOverFrom();
 
+    /** Deschedules a thread from scheduling */
+    void deactivateThread(ThreadID tid);
+
     /** Ticks the commit stage, which tries to commit instructions. */
     void tick();
 
@@ -237,16 +245,6 @@ class DefaultCommit
      * tell the CPU if commit is active/inactive.
      */
     void updateStatus();
-
-    /** Sets the next status based on threads' statuses, which becomes the
-     * current status at the end of the cycle.
-     */
-    void setNextStatus();
-
-    /** Checks if the ROB is completed with squashing. This is for the case
-     * where the ROB can take multiple cycles to complete squashing.
-     */
-    bool robDoneSquashing();
 
     /** Returns if any of the threads have the number of ROB entries changed
      * on this cycle. Used to determine if the number of free ROB entries needs
@@ -312,9 +310,6 @@ class DefaultCommit
 
     /** Gets instructions from rename and inserts them into the ROB. */
     void getInsts();
-
-    /** Insert all instructions from rename into skidBuffer */
-    void skidInsert();
 
     /** Marks completed instructions using information sent from IEW. */
     void markCompletedInsts();
@@ -392,9 +387,6 @@ class DefaultCommit
      */
     bool changedROBNumEntries[Impl::MaxThreads];
 
-    /** A counter of how many threads are currently squashing. */
-    ThreadID squashCounter;
-
     /** Records if a thread has to squash this cycle due to a trap. */
     bool trapSquash[Impl::MaxThreads];
 
@@ -414,37 +406,46 @@ class DefaultCommit
     std::list<ThreadID> priority_list;
 
     /** IEW to Commit delay. */
-    Cycles iewToCommitDelay;
+    const Cycles iewToCommitDelay;
 
     /** Commit to IEW delay. */
-    Cycles commitToIEWDelay;
+    const Cycles commitToIEWDelay;
 
     /** Rename to ROB delay. */
-    Cycles renameToROBDelay;
+    const Cycles renameToROBDelay;
 
-    Cycles fetchToCommitDelay;
+    const Cycles fetchToCommitDelay;
 
     /** Rename width, in instructions.  Used so ROB knows how many
      *  instructions to get from the rename instruction queue.
      */
-    unsigned renameWidth;
+    const unsigned renameWidth;
 
     /** Commit width, in instructions. */
-    unsigned commitWidth;
+    const unsigned commitWidth;
 
     /** Number of Reorder Buffers */
     unsigned numRobs;
 
     /** Number of Active Threads */
-    ThreadID numThreads;
+    const ThreadID numThreads;
 
-    /** Is a drain pending. */
+    /** Is a drain pending? Commit is looking for an instruction boundary while
+     * there are no pending interrupts
+     */
     bool drainPending;
+
+    /** Is a drain imminent? Commit has found an instruction boundary while no
+     * interrupts were present or in flight.  This was the last architecturally
+     * committed instruction.  Interrupts disabled and pipeline flushed.
+     * Waiting for structures to finish draining.
+     */
+    bool drainImminent;
 
     /** The latency to handle a trap.  Used when scheduling trap
      * squash event.
      */
-    Cycles trapLatency;
+    const Cycles trapLatency;
 
     /** The interrupt fault. */
     Fault interrupt;
@@ -491,10 +492,6 @@ class DefaultCommit
     /** Stat for the total number of squashed instructions discarded by commit.
      */
     Stats::Scalar commitSquashedInsts;
-    /** Stat for the total number of times commit is told to squash.
-     * @todo: Actually increment this stat.
-     */
-    Stats::Scalar commitSquashEvents;
     /** Stat for the total number of times commit has had to stall due to a non-
      * speculative instruction reaching the head of the ROB.
      */
@@ -524,11 +521,11 @@ class DefaultCommit
     Stats::Vector statComInteger;
     /** Total number of function calls */
     Stats::Vector statComFunctionCalls;
+    /** Committed instructions by instruction type (OpClass) */
+    Stats::Vector2d statCommittedInstType;
 
     /** Number of cycles where the commit bandwidth limit is reached. */
     Stats::Scalar commitEligibleSamples;
-    /** Number of instructions not committed due to bandwidth limits. */
-    Stats::Vector commitEligible;
 };
 
 #endif // __CPU_O3_COMMIT_HH__

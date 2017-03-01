@@ -62,11 +62,27 @@
 #include "sim/eventq.hh"
 #include "sim/full_system.hh"
 #include "sim/insttracer.hh"
+#include "sim/probe/pmu.hh"
 #include "sim/system.hh"
+#include "debug/Mwait.hh"
 
+class BaseCPU;
 struct BaseCPUParams;
 class CheckerCPU;
 class ThreadContext;
+
+struct AddressMonitor
+{
+    AddressMonitor();
+    bool doMonitor(PacketPtr pkt);
+
+    bool armed;
+    Addr vAddr;
+    Addr pAddr;
+    uint64_t val;
+    bool waiting;   // 0=normal, 1=mwaiting
+    bool gotWakeup;
+};
 
 class CPUProgressEvent : public Event
 {
@@ -93,13 +109,22 @@ class BaseCPU : public MemObject
 {
   protected:
 
-    // @todo remove me after debugging with legion done
+    /// Instruction count used for SPARC misc register
+    /// @todo unify this with the counters that cpus individually keep
     Tick instCnt;
+
     // every cpu has an id, put it in the base cpu
     // Set at initialization, only time a cpuId might change is during a
     // takeover (which should be done from within the BaseCPU anyway,
     // therefore no setCpuId() method is provided
     int _cpuId;
+
+    /** Each cpu will have a socket ID that corresponds to its physical location
+     * in the system. This is usually used to bucket cpu cores under single DVFS
+     * domain. This information may also be required by the OS to identify the
+     * cpu core grouping (as in the case of ARM via MPIDR register)
+     */
+    const uint32_t _socketId;
 
     /** instruction side request id that must be placed in all requests */
     MasterID _instMasterId;
@@ -143,7 +168,10 @@ class BaseCPU : public MemObject
     virtual MasterPort &getInstPort() = 0;
 
     /** Reads this CPU's ID. */
-    int cpuId() { return _cpuId; }
+    int cpuId() const { return _cpuId; }
+
+    /** Reads this CPU's Socket ID. */
+    uint32_t socketId() const { return _socketId; }
 
     /** Reads this CPU's unique data requestor ID */
     MasterID dataMasterId() { return _dataMasterId; }
@@ -241,16 +269,11 @@ class BaseCPU : public MemObject
     /// Provide access to the tracer pointer
     Trace::InstTracer * getTracer() { return tracer; }
 
-    /// Notify the CPU that the indicated context is now active.  The
-    /// delay parameter indicates the number of ticks to wait before
-    /// executing (typically 0 or 1).
-    virtual void activateContext(ThreadID thread_num, Cycles delay) {}
+    /// Notify the CPU that the indicated context is now active.
+    virtual void activateContext(ThreadID thread_num) {}
 
     /// Notify the CPU that the indicated context is now suspended.
     virtual void suspendContext(ThreadID thread_num) {}
-
-    /// Notify the CPU that the indicated context is now deallocated.
-    virtual void deallocateContext(ThreadID thread_num) {}
 
     /// Notify the CPU that the indicated context is now halted.
     virtual void haltContext(ThreadID thread_num) {}
@@ -260,6 +283,9 @@ class BaseCPU : public MemObject
 
    /// Given a thread num get tho thread context for it
    virtual ThreadContext *getContext(int tn) { return threadContexts[tn]; }
+
+   /// Get the number of thread contexts available
+   unsigned numContexts() { return threadContexts.size(); }
 
   public:
     typedef BaseCPUParams Params;
@@ -272,7 +298,7 @@ class BaseCPU : public MemObject
     virtual void startup();
     virtual void regStats();
 
-    virtual void activateWhenReady(ThreadID tid) {};
+    void regProbePoints() M5_ATTR_OVERRIDE;
 
     void registerThreadContexts();
 
@@ -431,6 +457,54 @@ class BaseCPU : public MemObject
      */
     void scheduleLoadStop(ThreadID tid, Counter loads, const char *cause);
 
+  public:
+    /**
+     * @{
+     * @name PMU Probe points.
+     */
+
+    /**
+     * Helper method to trigger PMU probes for a committed
+     * instruction.
+     *
+     * @param inst Instruction that just committed
+     */
+    virtual void probeInstCommit(const StaticInstPtr &inst);
+
+    /**
+     * Helper method to instantiate probe points belonging to this
+     * object.
+     *
+     * @param name Name of the probe point.
+     * @return A unique_ptr to the new probe point.
+     */
+    ProbePoints::PMUUPtr pmuProbePoint(const char *name);
+
+    /** CPU cycle counter */
+    ProbePoints::PMUUPtr ppCycles;
+
+    /**
+     * Instruction commit probe point.
+     *
+     * This probe point is triggered whenever one or more instructions
+     * are committed. It is normally triggered once for every
+     * instruction. However, CPU models committing bundles of
+     * instructions may call notify once for the entire bundle.
+     */
+    ProbePoints::PMUUPtr ppRetiredInsts;
+
+    /** Retired load instructions */
+    ProbePoints::PMUUPtr ppRetiredLoads;
+    /** Retired store instructions */
+    ProbePoints::PMUUPtr ppRetiredStores;
+
+    /** Retired branches (any type) */
+    ProbePoints::PMUUPtr ppRetiredBranches;
+
+    /** @} */
+
+
+
     // Function tracing
   private:
     bool functionTracingEnabled;
@@ -479,6 +553,16 @@ class BaseCPU : public MemObject
     Stats::Scalar numCycles;
     Stats::Scalar numWorkItemsStarted;
     Stats::Scalar numWorkItemsCompleted;
+
+  private:
+    AddressMonitor addressMonitor;
+
+  public:
+    void armMonitor(Addr address);
+    bool mwait(PacketPtr pkt);
+    void mwaitAtomic(ThreadContext *tc, TheISA::TLB *dtb);
+    AddressMonitor *getCpuAddrMonitor() { return &addressMonitor; }
+    void atomicNotify(Addr address);
 };
 
 #endif // THE_ISA == NULL_ISA

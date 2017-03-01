@@ -71,6 +71,8 @@ thread_loop(EventQueue *queue)
     }
 }
 
+GlobalSimLoopExitEvent *simulate_limit_event = nullptr;
+
 /** Simulate for num_cycles additional cycles.  If num_cycles is -1
  * (the default), do not limit simulation; some other event must
  * terminate the loop.  Exported to Python via SWIG.
@@ -96,6 +98,9 @@ simulate(Tick num_cycles)
         }
 
         threads_initialized = true;
+        simulate_limit_event =
+            new GlobalSimLoopExitEvent(mainEventQueue[0]->getCurTick(),
+                                       "simulate() limit reached", 0);
     }
 
     inform("Entering event queue @ %d.  Starting simulation...\n", curTick());
@@ -105,8 +110,7 @@ simulate(Tick num_cycles)
     else // counter would roll over or be set to MaxTick anyhow
         num_cycles = MaxTick;
 
-    GlobalEvent *limit_event = new GlobalSimLoopExitEvent(num_cycles,
-                                "simulate() limit reached", 0, 0);
+    simulate_limit_event->reschedule(num_cycles);
 
     GlobalSyncEvent *quantum_event = NULL;
     if (numMainEventQueues > 1) {
@@ -114,7 +118,7 @@ simulate(Tick num_cycles)
             fatal("Quantum for multi-eventq simulation not specified");
         }
 
-        quantum_event = new GlobalSyncEvent(simQuantum, simQuantum,
+        quantum_event = new GlobalSyncEvent(curTick() + simQuantum, simQuantum,
                             EventBase::Progress_Event_Pri, 0);
 
         inParallelMode = true;
@@ -136,13 +140,6 @@ simulate(Tick num_cycles)
     GlobalSimLoopExitEvent *global_exit_event =
         dynamic_cast<GlobalSimLoopExitEvent *>(global_event);
     assert(global_exit_event != NULL);
-
-    // if we didn't hit limit_event, delete it.
-    if (global_exit_event != limit_event) {
-        assert(limit_event->scheduled());
-        limit_event->deschedule();
-        delete limit_event;
-    }
 
     //! Delete the simulation quantum event.
     if (quantum_event != NULL) {
@@ -192,22 +189,14 @@ doSimLoop(EventQueue *eventq)
         assert(curTick() <= eventq->nextTick() &&
                "event scheduled in the past");
 
-        Event *exit_event = eventq->serviceOne();
-        if (exit_event != NULL) {
-            return exit_event;
-        }
-
         if (async_event && testAndClearAsyncEvent()) {
-            async_event = false;
+            // Take the event queue lock in case any of the service
+            // routines want to schedule new events.
+            std::lock_guard<EventQueue> lock(*eventq);
             if (async_statdump || async_statreset) {
                 Stats::schedStatEvent(async_statdump, async_statreset);
                 async_statdump = false;
                 async_statreset = false;
-            }
-
-            if (async_exit) {
-                async_exit = false;
-                exitSimLoop("user interrupt received");
             }
 
             if (async_io) {
@@ -215,10 +204,20 @@ doSimLoop(EventQueue *eventq)
                 pollQueue.service();
             }
 
+            if (async_exit) {
+                async_exit = false;
+                exitSimLoop("user interrupt received");
+            }
+
             if (async_exception) {
                 async_exception = false;
                 return NULL;
             }
+        }
+
+        Event *exit_event = eventq->serviceOne();
+        if (exit_event != NULL) {
+            return exit_event;
         }
     }
 

@@ -43,17 +43,51 @@
 #ifndef __BASE_COMPILER_HH__
 #define __BASE_COMPILER_HH__
 
+// gcc C++11 status: http://gcc.gnu.org/projects/cxx0x.html
+// clang C++11 status: http://clang.llvm.org/cxx_status.html
 // http://gcc.gnu.org/onlinedocs/gcc/Function-Attributes.html
 
-#if defined(__GNUC__)
-#define M5_ATTR_NORETURN  __attribute__((noreturn))
-#define M5_PRAGMA_NORETURN(x)
-#define M5_DUMMY_RETURN
-#define M5_VAR_USED __attribute__((unused))
-#define M5_ATTR_PACKED __attribute__ ((__packed__))
-#define M5_NO_INLINE __attribute__ ((__noinline__))
+/* Support for override control (final/override) */
+#undef M5_COMP_HAS_OVERRIDE_CONTROL
+
+#if defined(__GNUC__) && !defined(__clang__) /* Check for gcc */
+
+#  define M5_GCC_VERSION(maj, min) \
+    (__GNUC__ > (maj) || (__GNUC__ == (maj) && __GNUC_MINOR__ >= (min)))
+
+#  define M5_COMP_HAS_OVERRIDE_CONTROL M5_GCC_VERSION(4, 7)
+
+#elif defined(__clang__) /* Check for clang */
+
+#  define M5_COMP_HAS_OVERRIDE_CONTROL __has_feature(cxx_override_control)
+
 #else
-#error "Need to define compiler options in base/compiler.hh"
+#  error "Need to define compiler options in base/compiler.hh"
+#endif
+
+
+#if M5_COMP_HAS_OVERRIDE_CONTROL
+#  define M5_ATTR_FINAL final
+#  define M5_ATTR_OVERRIDE override
+#else
+#  define M5_ATTR_FINAL
+#  define M5_ATTR_OVERRIDE
+#endif
+
+#if defined(__GNUC__) // clang or gcc
+#  define M5_ATTR_NORETURN  __attribute__((noreturn))
+#  define M5_DUMMY_RETURN
+#  define M5_VAR_USED __attribute__((unused))
+#  define M5_ATTR_PACKED __attribute__ ((__packed__))
+#  define M5_NO_INLINE __attribute__ ((__noinline__))
+#  define M5_DEPRECATED __attribute__((deprecated))
+#  define M5_DEPRECATED_MSG(MSG) __attribute__((deprecated(MSG)))
+#endif
+
+#if defined(__clang__)
+#  define M5_CLASS_VAR_USED M5_VAR_USED
+#else
+#  define M5_CLASS_VAR_USED
 #endif
 
 #endif // __BASE_COMPILER_HH__

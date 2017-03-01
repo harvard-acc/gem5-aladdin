@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012, 2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -63,8 +63,6 @@
 /* Used by some KVM macros */
 #define PAGE_SIZE pageSize
 
-volatile bool timerOverflowed = false;
-
 BaseKvmCPU::BaseKvmCPU(BaseKvmCPUParams *params)
     : BaseCPU(params),
       vm(*params->kvmVM),
@@ -87,23 +85,17 @@ BaseKvmCPU::BaseKvmCPU(BaseKvmCPUParams *params)
         panic("KVM: Failed to determine host page size (%i)\n",
               errno);
 
-    thread = new SimpleThread(this, 0, params->system,
-                              params->itb, params->dtb, params->isa[0]);
+    if (FullSystem)
+        thread = new SimpleThread(this, 0, params->system, params->itb, params->dtb,
+                                  params->isa[0]);
+    else
+        thread = new SimpleThread(this, /* thread_num */ 0, params->system,
+                                  params->workload[0], params->itb,
+                                  params->dtb, params->isa[0]);
+
     thread->setStatus(ThreadContext::Halted);
     tc = thread->getTC();
     threadContexts.push_back(tc);
-
-    setupCounters();
-
-    if (params->usePerfOverflow)
-        runTimer.reset(new PerfKvmTimer(hwCycles,
-                                        KVM_TIMER_SIGNAL,
-                                        params->hostFactor,
-                                        params->hostFreq));
-    else
-        runTimer.reset(new PosixKvmTimer(KVM_TIMER_SIGNAL, CLOCK_MONOTONIC,
-                                         params->hostFactor,
-                                         params->hostFreq));
 }
 
 BaseKvmCPU::~BaseKvmCPU()
@@ -126,8 +118,6 @@ BaseKvmCPU::init()
     // initialize CPU, including PC
     if (FullSystem && !switchedOut())
         TheISA::initCPU(tc, tc->contextId());
-
-    mmio_req.setThreadContext(tc->contextId(), 0);
 }
 
 void
@@ -149,10 +139,6 @@ BaseKvmCPU::startup()
     // not guaranteed that the parent KVM VM has initialized at that
     // point. Initialize virtual CPUs here instead.
     vcpuFD = vm.createVCPU(vcpuID);
-
-    // Setup signal handlers. This has to be done after the vCPU is
-    // created since it manipulates the vCPU signal mask.
-    setupSignalHandler();
 
     // Map the KVM run structure */
     vcpuMMapSize = kvm.getVCPUMMapSize();
@@ -177,6 +163,41 @@ BaseKvmCPU::startup()
     }
 
     thread->startup();
+
+    Event *startupEvent(
+        new EventWrapper<BaseKvmCPU,
+                         &BaseKvmCPU::startupThread>(this, true));
+    schedule(startupEvent, curTick());
+}
+
+void
+BaseKvmCPU::startupThread()
+{
+    // Do thread-specific initialization. We need to setup signal
+    // delivery for counters and timers from within the thread that
+    // will execute the event queue to ensure that signals are
+    // delivered to the right threads.
+    const BaseKvmCPUParams * const p(
+        dynamic_cast<const BaseKvmCPUParams *>(params()));
+
+    vcpuThread = pthread_self();
+
+    // Setup signal handlers. This has to be done after the vCPU is
+    // created since it manipulates the vCPU signal mask.
+    setupSignalHandler();
+
+    setupCounters();
+
+    if (p->usePerfOverflow)
+        runTimer.reset(new PerfKvmTimer(hwCycles,
+                                        KVM_KICK_SIGNAL,
+                                        p->hostFactor,
+                                        p->hostFreq));
+    else
+        runTimer.reset(new PosixKvmTimer(KVM_KICK_SIGNAL, CLOCK_MONOTONIC,
+                                         p->hostFactor,
+                                         p->hostFreq));
+
 }
 
 void
@@ -398,6 +419,13 @@ void
 BaseKvmCPU::wakeup()
 {
     DPRINTF(Kvm, "wakeup()\n");
+    // This method might have been called from another
+    // context. Migrate to this SimObject's event queue when
+    // delivering the wakeup signal.
+    EventQueue::ScopedMigration migrate(eventQueue());
+
+    // Kick the vCPU to get it to come out of KVM.
+    kick();
 
     if (thread->status() != ThreadContext::Suspended)
         return;
@@ -406,9 +434,9 @@ BaseKvmCPU::wakeup()
 }
 
 void
-BaseKvmCPU::activateContext(ThreadID thread_num, Cycles delay)
+BaseKvmCPU::activateContext(ThreadID thread_num)
 {
-    DPRINTF(Kvm, "ActivateContext %d (%d cycles)\n", thread_num, delay);
+    DPRINTF(Kvm, "ActivateContext %d\n", thread_num);
 
     assert(thread_num == 0);
     assert(thread);
@@ -418,7 +446,7 @@ BaseKvmCPU::activateContext(ThreadID thread_num, Cycles delay)
 
     numCycles += ticksToCycles(thread->lastActivate - thread->lastSuspend);
 
-    schedule(tickEvent, clockEdge(delay));
+    schedule(tickEvent, clockEdge(Cycles(0)));
     _status = Running;
 }
 
@@ -434,7 +462,7 @@ BaseKvmCPU::suspendContext(ThreadID thread_num)
     if (_status == Idle)
         return;
 
-    assert(_status == Running);
+    assert(_status == Running || _status == RunningServiceCompletion);
 
     // The tick event may no be scheduled if the quest has requested
     // the monitor to wait for interrupts. The normal CPU models can
@@ -505,15 +533,23 @@ BaseKvmCPU::tick()
 
       case RunningServiceCompletion:
       case Running: {
-          EventQueue *q = curEventQueue();
-          Tick ticksToExecute(q->nextTick() - curTick());
+          const uint64_t nextInstEvent(
+              !comInstEventQueue[0]->empty() ?
+              comInstEventQueue[0]->nextTick() : UINT64_MAX);
+          // Enter into KVM and complete pending IO instructions if we
+          // have an instruction event pending.
+          const Tick ticksToExecute(
+              nextInstEvent > ctrInsts ?
+              curEventQueue()->nextTick() - curTick() : 0);
 
           // We might need to update the KVM state.
           syncKvmState();
 
           // Setup any pending instruction count breakpoints using
-          // PerfEvent.
-          setupInstStop();
+          // PerfEvent if we are going to execute more than just an IO
+          // completion.
+          if (ticksToExecute > 0)
+              setupInstStop();
 
           DPRINTF(KvmRun, "Entering KVM...\n");
           if (drainManager) {
@@ -525,6 +561,12 @@ BaseKvmCPU::tick()
           } else {
               delay = kvmRun(ticksToExecute);
           }
+
+          // The CPU might have been suspended before entering into
+          // KVM. Assume that the CPU was suspended /before/ entering
+          // into KVM and skip the exit handling.
+          if (_status == Idle)
+              break;
 
           // Entering into KVM implies that we'll have to reload the thread
           // context from KVM if we want to access it. Flag the KVM state as
@@ -584,7 +626,6 @@ BaseKvmCPU::kvmRun(Tick ticks)
 {
     Tick ticksExecuted;
     DPRINTF(KvmRun, "KVM: Executing for %i ticks\n", ticks);
-    timerOverflowed = false;
 
     if (ticks == 0) {
         // Settings ticks == 0 is a special case which causes an entry
@@ -594,16 +635,18 @@ BaseKvmCPU::kvmRun(Tick ticks)
 
         ++numVMHalfEntries;
 
-        // This signal is always masked while we are executing in gem5
-        // and gets unmasked temporarily as soon as we enter into
+        // Send a KVM_KICK_SIGNAL to the vCPU thread (i.e., this
+        // thread). The KVM control signal is masked while executing
+        // in gem5 and gets unmasked temporarily as when entering
         // KVM. See setSignalMask() and setupSignalHandler().
-        raise(KVM_TIMER_SIGNAL);
+        kick();
 
-        // Enter into KVM. KVM will check for signals after completing
-        // pending operations (IO). Since the KVM_TIMER_SIGNAL is
-        // pending, this forces an immediate exit into gem5 again. We
+        // Start the vCPU. KVM will check for signals after completing
+        // pending operations (IO). Since the KVM_KICK_SIGNAL is
+        // pending, this forces an immediate exit to gem5 again. We
         // don't bother to setup timers since this shouldn't actually
-        // execute any code in the guest.
+        // execute any code (other than completing half-executed IO
+        // instructions) in the guest.
         ioctlRun();
 
         // We always execute at least one cycle to prevent the
@@ -611,6 +654,14 @@ BaseKvmCPU::kvmRun(Tick ticks)
         // twice.
         ticksExecuted = clockPeriod();
     } else {
+        // This method is executed as a result of a tick event. That
+        // means that the event queue will be locked when entering the
+        // method. We temporarily unlock the event queue to allow
+        // other threads to steal control of this thread to inject
+        // interrupts. They will typically lock the queue and then
+        // force an exit from KVM by kicking the vCPU.
+        EventQueue::ScopedRelease release(curEventQueue());
+
         if (ticks < runTimer->resolution()) {
             DPRINTF(KvmRun, "KVM: Adjusting tick count (%i -> %i)\n",
                     ticks, runTimer->resolution());
@@ -636,26 +687,17 @@ BaseKvmCPU::kvmRun(Tick ticks)
         if (!perfControlledByTimer)
             hwCycles.stop();
 
-        // The timer signal may have been delivered after we exited
+        // The control signal may have been delivered after we exited
         // from KVM. It will be pending in that case since it is
         // masked when we aren't executing in KVM. Discard it to make
         // sure we don't deliver it immediately next time we try to
         // enter into KVM.
-        discardPendingSignal(KVM_TIMER_SIGNAL);
-        discardPendingSignal(KVM_INST_SIGNAL);
+        discardPendingSignal(KVM_KICK_SIGNAL);
 
         const uint64_t hostCyclesExecuted(getHostCycles() - baseCycles);
         const uint64_t simCyclesExecuted(hostCyclesExecuted * hostFactor);
         const uint64_t instsExecuted(hwInstructions.read() - baseInstrs);
         ticksExecuted = runTimer->ticksFromHostCycles(hostCyclesExecuted);
-
-        if (ticksExecuted < ticks &&
-            timerOverflowed &&
-            _kvmRun->exit_reason == KVM_EXIT_INTR) {
-            // TODO: We should probably do something clever here...
-            warn("KVM: Early timer event, requested %i ticks but got %i ticks.\n",
-                 ticks, ticksExecuted);
-        }
 
         /* Update statistics */
         numCycles += simCyclesExecuted;;
@@ -782,14 +824,14 @@ BaseKvmCPU::getAndFormatOneReg(uint64_t id) const
         ss << value;                             \
     }  break
 
-#define HANDLE_ARRAY(len)                       \
-    case KVM_REG_SIZE_U ## len: {               \
-        uint8_t value[len / 8];                 \
-        getOneReg(id, value);                   \
-        ss << "[" << value[0];                  \
-        for (int i = 1; i < len  / 8; ++i)      \
-            ss << ", " << value[i];             \
-        ss << "]";                              \
+#define HANDLE_ARRAY(len)                               \
+    case KVM_REG_SIZE_U ## len: {                       \
+        uint8_t value[len / 8];                         \
+        getOneReg(id, value);                           \
+        ccprintf(ss, "[0x%x", value[0]);                \
+        for (int i = 1; i < len  / 8; ++i)              \
+            ccprintf(ss, ", 0x%x", value[i]);           \
+        ccprintf(ss, "]");                              \
       } break
 
     switch (id & KVM_REG_SIZE_MASK) {
@@ -959,7 +1001,8 @@ BaseKvmCPU::doMMIOAccess(Addr paddr, void *data, int size, bool write)
     ThreadContext *tc(thread->getTC());
     syncThreadContext();
 
-    mmio_req.setPhys(paddr, size, Request::UNCACHEABLE, dataMasterId());
+    Request mmio_req(paddr, size, Request::UNCACHEABLE, dataMasterId());
+    mmio_req.setThreadContext(tc->contextId(), 0);
     // Some architectures do need to massage physical addresses a bit
     // before they are inserted into the memory system. This enables
     // APIC accesses on x86 and m5ops where supported through a MMIO
@@ -975,11 +1018,20 @@ BaseKvmCPU::doMMIOAccess(Addr paddr, void *data, int size, bool write)
     pkt.dataStatic(data);
 
     if (mmio_req.isMmappedIpr()) {
+        // We currently assume that there is no need to migrate to a
+        // different event queue when doing IPRs. Currently, IPRs are
+        // only used for m5ops, so it should be a valid assumption.
         const Cycles ipr_delay(write ?
                              TheISA::handleIprWrite(tc, &pkt) :
                              TheISA::handleIprRead(tc, &pkt));
+        threadContextDirty = true;
         return clockPeriod() * ipr_delay;
     } else {
+        // Temporarily lock and migrate to the event queue of the
+        // VM. This queue is assumed to "own" all devices we need to
+        // access if running in multi-core mode.
+        EventQueue::ScopedMigration migrate(vm.eventQueue());
+
         return dataPort.sendAtomic(&pkt);
     }
 }
@@ -1042,22 +1094,17 @@ BaseKvmCPU::flushCoalescedMMIO()
 }
 
 /**
- * Cycle timer overflow when running in KVM. Forces the KVM syscall to
- * exit with EINTR and allows us to run the event queue.
+ * Dummy handler for KVM kick signals.
+ *
+ * @note This function is usually not called since the kernel doesn't
+ * seem to deliver signals when the signal is only unmasked when
+ * running in KVM. This doesn't matter though since we are only
+ * interested in getting KVM to exit, which happens as expected. See
+ * setupSignalHandler() and kvmRun() for details about KVM signal
+ * handling.
  */
 static void
-onTimerOverflow(int signo, siginfo_t *si, void *data)
-{
-    timerOverflowed = true;
-}
-
-/**
- * Instruction counter overflow when running in KVM. Forces the KVM
- * syscall to exit with EINTR and allows us to handle instruction
- * count events.
- */
-static void
-onInstEvent(int signo, siginfo_t *si, void *data)
+onKickSignal(int signo, siginfo_t *si, void *data)
 {
 }
 
@@ -1067,32 +1114,26 @@ BaseKvmCPU::setupSignalHandler()
     struct sigaction sa;
 
     memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = onTimerOverflow;
+    sa.sa_sigaction = onKickSignal;
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    if (sigaction(KVM_TIMER_SIGNAL, &sa, NULL) == -1)
+    if (sigaction(KVM_KICK_SIGNAL, &sa, NULL) == -1)
         panic("KVM: Failed to setup vCPU timer signal handler\n");
 
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = onInstEvent;
-    sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    if (sigaction(KVM_INST_SIGNAL, &sa, NULL) == -1)
-        panic("KVM: Failed to setup vCPU instruction signal handler\n");
-
     sigset_t sigset;
-    if (sigprocmask(SIG_BLOCK, NULL, &sigset) == -1)
+    if (pthread_sigmask(SIG_BLOCK, NULL, &sigset) == -1)
         panic("KVM: Failed get signal mask\n");
 
     // Request KVM to setup the same signal mask as we're currently
-    // running with. We'll sometimes need to mask the KVM_TIMER_SIGNAL
-    // to cause immediate exits from KVM after servicing IO
-    // requests. See kvmRun().
+    // running with except for the KVM control signal. We'll sometimes
+    // need to raise the KVM_KICK_SIGNAL to cause immediate exits from
+    // KVM after servicing IO requests. See kvmRun().
+    sigdelset(&sigset, KVM_KICK_SIGNAL);
     setSignalMask(&sigset);
 
     // Mask our control signals so they aren't delivered unless we're
     // actually executing inside KVM.
-    sigaddset(&sigset, KVM_TIMER_SIGNAL);
-    sigaddset(&sigset, KVM_INST_SIGNAL);
-    if (sigprocmask(SIG_SETMASK, &sigset, NULL) == -1)
+    sigaddset(&sigset, KVM_KICK_SIGNAL);
+    if (pthread_sigmask(SIG_SETMASK, &sigset, NULL) == -1)
         panic("KVM: Failed mask the KVM control signals\n");
 }
 
@@ -1234,7 +1275,7 @@ BaseKvmCPU::setupInstCounter(uint64_t period)
                           hwCycles);
 
     if (period)
-        hwInstructions.enableSignals(KVM_INST_SIGNAL);
+        hwInstructions.enableSignals(KVM_KICK_SIGNAL);
 
     activeInstPeriod = period;
 }

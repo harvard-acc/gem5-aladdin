@@ -59,14 +59,8 @@ namespace X86ISA
     //XXX This needs to be set to an intermediate instruction struct
     //which encodes this instruction
 
-    //4k. This value is not constant on x86.
-    const int LogVMPageSize = 12;
-    const int VMPageSize = (1 << LogVMPageSize);
-
-    const int PageShift = 12;
-    const int PageBytes = 1ULL << PageShift;
-
-    const int BranchPredAddrShiftAmt = 0;
+    const Addr PageShift = 12;
+    const Addr PageBytes = ULL(1) << PageShift;
 
     // Memory accesses can be unaligned
     const bool HasUnalignedMemAcc = true;
@@ -74,10 +68,10 @@ namespace X86ISA
     const bool CurThreadInfoImplemented = false;
     const int CurThreadInfoReg = -1;
 
-    const ExtMachInst NoopMachInst = {
+    const ExtMachInst NoopMachInst M5_VAR_USED = {
         0x0,                            // No legacy prefixes.
         0x0,                            // No rex prefix.
-        { 1, 0x0, 0x0, 0x90 },          // One opcode byte, 0x90.
+        { OneByteOpcode, 0x90 },          // One opcode byte, 0x90.
         0x0, 0x0,                       // No modrm or sib.
         0, 0,                           // No immediate or displacement.
         8, 8, 8,                        // All sizes are 8.

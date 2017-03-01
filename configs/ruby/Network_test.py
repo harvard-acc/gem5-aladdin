@@ -42,7 +42,7 @@ class Cache(RubyCache):
 def define_options(parser):
     return
 
-def create_system(options, system, piobus, dma_ports, ruby_system):
+def create_system(options, full_system, system, dma_ports, ruby_system):
     
     if buildEnv['PROTOCOL'] != 'Network_test':
         panic("This script requires the Network_test protocol to be built.")
@@ -52,7 +52,6 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
     #
     # The Garnet tester protocol does not support fs nor dma
     #
-    assert(piobus == None)
     assert(dma_ports == [])
     
     #
@@ -68,8 +67,6 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
     # controller constructors are called before the network constructor
     #
 
-    cntrl_count = 0
-
     for i in xrange(options.num_cpus):
         #
         # First create the Ruby objects associated with this cpu
@@ -83,7 +80,6 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
         # Only one unified L1 cache exists.  Can cache instructions and data.
         #
         l1_cntrl = L1Cache_Controller(version = i,
-                                      cntrl_id = cntrl_count,
                                       cacheMemory = cache,
                                       ruby_system = ruby_system)
 
@@ -95,53 +91,39 @@ def create_system(options, system, piobus, dma_ports, ruby_system):
         l1_cntrl.sequencer = cpu_seq
         exec("ruby_system.l1_cntrl%d = l1_cntrl" % i)
 
-        #
         # Add controllers and sequencers to the appropriate lists
-        #
         cpu_sequencers.append(cpu_seq)
         l1_cntrl_nodes.append(l1_cntrl)
 
-        cntrl_count += 1
+        # Connect the L1 controllers and the network
+        l1_cntrl.requestFromCache =  ruby_system.network.slave
+        l1_cntrl.responseFromCache =  ruby_system.network.slave
+        l1_cntrl.forwardFromCache =  ruby_system.network.slave
+
 
     phys_mem_size = sum(map(lambda r: r.size(), system.mem_ranges))
     assert(phys_mem_size % options.num_dirs == 0)
     mem_module_size = phys_mem_size / options.num_dirs
 
-    # Run each of the ruby memory controllers at a ratio of the frequency of
-    # the ruby system.
-    # clk_divider value is a fix to pass regression.
-    ruby_system.memctrl_clk_domain = DerivedClockDomain(
-                                          clk_domain=ruby_system.clk_domain,
-                                          clk_divider=3)
-
     for i in xrange(options.num_dirs):
-        #
-        # Create the Ruby objects associated with the directory controller
-        #
-
-        mem_cntrl = RubyMemoryControl(
-                              clk_domain = ruby_system.memctrl_clk_domain,
-                              version = i,
-                              ruby_system = ruby_system)
-
         dir_size = MemorySize('0B')
         dir_size.value = mem_module_size
 
         dir_cntrl = Directory_Controller(version = i,
-                                         cntrl_id = cntrl_count,
                                          directory = \
                                          RubyDirectoryMemory(version = i,
                                                              size = dir_size),
-                                         memBuffer = mem_cntrl,
                                          ruby_system = ruby_system)
 
         exec("ruby_system.dir_cntrl%d = dir_cntrl" % i)
         dir_cntrl_nodes.append(dir_cntrl)
 
-        cntrl_count += 1
+        # Connect the directory controllers and the network
+        dir_cntrl.requestToDir = ruby_system.network.master
+        dir_cntrl.forwardToDir = ruby_system.network.master
+        dir_cntrl.responseToDir = ruby_system.network.master
+
 
     all_cntrls = l1_cntrl_nodes + dir_cntrl_nodes
-
     topology = create_topology(all_cntrls, options)
-
     return (cpu_sequencers, dir_cntrl_nodes, topology)

@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "base/misc.hh"
+#include "base/random.hh"
 #include "base/statistics.hh"
 #include "cpu/testers/networktest/networktest.hh"
 #include "debug/NetworkTest.hh"
@@ -58,7 +59,7 @@ NetworkTest::CpuPort::recvTimingResp(PacketPtr pkt)
 }
 
 void
-NetworkTest::CpuPort::recvRetry()
+NetworkTest::CpuPort::recvReqRetry()
 {
     networktest->doRetry();
 }
@@ -83,6 +84,7 @@ NetworkTest::NetworkTest(const Params *p)
       simCycles(p->sim_cycles),
       fixedPkts(p->fixed_pkts),
       maxPackets(p->max_packets),
+      numPacketsSent(0),
       trafficType(p->traffic_type),
       injRate(p->inj_rate),
       precision(p->precision),
@@ -143,7 +145,7 @@ NetworkTest::tick()
     // - send pkt if this number is < injRate*(10^precision)
     bool send_this_cycle;
     double injRange = pow((double) 10, (double) precision);
-    unsigned trySending = random() % (int) injRange;
+    unsigned trySending = random_mt.random<unsigned>(0, (int) injRange);
     if (trySending < injRate*injRange)
         send_this_cycle = true;
     else
@@ -174,7 +176,7 @@ NetworkTest::generatePkt()
 {
     unsigned destination = id;
     if (trafficType == 0) { // Uniform Random
-        destination = random() % numMemories;
+        destination = random_mt.random<unsigned>(0, numMemories - 1);
     } else if (trafficType == 1) { // Tornado
         int networkDimension = (int) sqrt(numMemories);
         int my_x = id%networkDimension;
@@ -195,9 +197,6 @@ NetworkTest::generatePkt()
 
         destination = dest_y*networkDimension + dest_x;
     }
-
-    Request *req = new Request();
-    Request::Flags flags;
 
     // The source of the packets is a cache.
     // The destination of the packets is a directory.
@@ -232,21 +231,24 @@ NetworkTest::generatePkt()
     // 
     MemCmd::Command requestType;
 
-    unsigned randomReqType = random() % 3;
+    Request *req = nullptr;
+    Request::Flags flags;
+
+    unsigned randomReqType = random_mt.random(0, 2);
     if (randomReqType == 0) {
         // generate packet for virtual network 0
         requestType = MemCmd::ReadReq;
-        req->setPhys(paddr, access_size, flags, masterId);
+        req = new Request(paddr, access_size, flags, masterId);
     } else if (randomReqType == 1) {
         // generate packet for virtual network 1
         requestType = MemCmd::ReadReq;
         flags.set(Request::INST_FETCH);
-        req->setVirt(0, 0x0, access_size, flags, 0x0, masterId);
+        req = new Request(0, 0x0, access_size, flags, masterId, 0x0, 0, 0);
         req->setPaddr(paddr);
     } else {  // if (randomReqType == 2)
         // generate packet for virtual network 2
         requestType = MemCmd::WriteReq;
-        req->setPhys(paddr, access_size, flags, masterId);
+        req = new Request(paddr, access_size, flags, masterId);
     }
 
     req->setThreadContext(id,0);
@@ -259,7 +261,7 @@ NetworkTest::generatePkt()
             destination, req->getPaddr());
 
     PacketPtr pkt = new Packet(req, requestType);
-    pkt->dataDynamicArray(new uint8_t[req->getSize()]);
+    pkt->dataDynamic(new uint8_t[req->getSize()]);
     pkt->senderState = NULL;
 
     sendPkt(pkt);

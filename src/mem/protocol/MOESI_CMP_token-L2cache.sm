@@ -27,34 +27,41 @@
  */
 
 machine(L2Cache, "Token protocol")
- : CacheMemory * L2cache,
-   int N_tokens,
-   Cycles l2_request_latency = 5,
-   Cycles l2_response_latency = 5,
-   bool filtering_enabled = true
+ : CacheMemory * L2cache;
+   int N_tokens;
+   Cycles l2_request_latency := 5;
+   Cycles l2_response_latency := 5;
+   bool filtering_enabled := "True";
+
+   // L2 BANK QUEUES
+   // From local bank of L2 cache TO the network
+ 
+   // this L2 bank -> a local L1 || mod-directory
+   MessageBuffer * responseFromL2Cache, network="To", virtual_network="4",
+        ordered="false", vnet_type="response";
+   // this L2 bank -> mod-directory
+   MessageBuffer * GlobalRequestFromL2Cache, network="To", virtual_network="2",
+        ordered="false", vnet_type="request";
+   // this L2 bank -> a local L1
+   MessageBuffer * L1RequestFromL2Cache, network="To", virtual_network="1",
+        ordered="false", vnet_type="request";
+ 
+ 
+   // FROM the network to this local bank of L2 cache
+ 
+   // a local L1 || mod-directory -> this L2 bank
+   MessageBuffer * responseToL2Cache, network="From", virtual_network="4",
+        ordered="false", vnet_type="response";
+   MessageBuffer * persistentToL2Cache, network="From", virtual_network="3",
+        ordered="true", vnet_type="persistent";
+   // mod-directory -> this L2 bank
+   MessageBuffer * GlobalRequestToL2Cache, network="From", virtual_network="2",
+        ordered="false", vnet_type="request";
+   // a local L1 -> this L2 bank
+   MessageBuffer * L1RequestToL2Cache, network="From", virtual_network="1",
+        ordered="false", vnet_type="request";
+
 {
-
-  // L2 BANK QUEUES
-  // From local bank of L2 cache TO the network
-
-  // this L2 bank -> a local L1 || mod-directory
-  MessageBuffer responseFromL2Cache, network="To", virtual_network="4", ordered="false", vnet_type="response";
-  // this L2 bank -> mod-directory
-  MessageBuffer GlobalRequestFromL2Cache, network="To", virtual_network="2", ordered="false", vnet_type="request";
-  // this L2 bank -> a local L1
-  MessageBuffer L1RequestFromL2Cache, network="To", virtual_network="1", ordered="false", vnet_type="request";
-
-
-  // FROM the network to this local bank of L2 cache
-
-  // a local L1 || mod-directory -> this L2 bank
-  MessageBuffer responseToL2Cache, network="From", virtual_network="4", ordered="false", vnet_type="response";
-  MessageBuffer persistentToL2Cache, network="From", virtual_network="3", ordered="true", vnet_type="persistent";
-  // mod-directory -> this L2 bank
-  MessageBuffer GlobalRequestToL2Cache, network="From", virtual_network="2", ordered="false", vnet_type="request";
-  // a local L1 -> this L2 bank
-  MessageBuffer L1RequestToL2Cache, network="From", virtual_network="1", ordered="false", vnet_type="request";
-
   // STATES
   state_declaration(State, desc="L2 Cache states", default="L2Cache_State_I") {
     // Base states
@@ -150,8 +157,15 @@ machine(L2Cache, "Token protocol")
     return cache_entry;
   }
 
-  DataBlock getDataBlock(Address addr), return_by_ref="yes" {
-    return getCacheEntry(addr).DataBlk;
+  void functionalRead(Address addr, Packet *pkt) {
+    testAndRead(addr, getCacheEntry(addr).DataBlk, pkt);
+  }
+
+  int functionalWrite(Address addr, Packet *pkt) {
+    int num_functional_writes := 0;
+    num_functional_writes := num_functional_writes +
+        testAndWrite(addr, getCacheEntry(addr).DataBlk, pkt);
+    return num_functional_writes;
   }
 
   int getTokens(Entry cache_entry) {
@@ -165,7 +179,7 @@ machine(L2Cache, "Token protocol")
   State getState(Entry cache_entry, Address addr) {
     if (is_valid(cache_entry)) {
       return cache_entry.CacheState;
-    } else if (persistentTable.isLocked(addr) == true) {
+    } else if (persistentTable.isLocked(addr)) {
       return State:I_L;
     } else {
       return State:NP;
@@ -250,7 +264,7 @@ machine(L2Cache, "Token protocol")
 
   bool exclusiveExists(Address addr) {
     if (localDirectory.isTagPresent(addr)) {
-      if (localDirectory[addr].exclusive == true) {
+      if (localDirectory[addr].exclusive) {
         return true;
       }
       else {
@@ -285,7 +299,7 @@ machine(L2Cache, "Token protocol")
   }
 
   void clearExclusiveBitIfExists(Address addr) {
-    if (localDirectory.isTagPresent(addr) == true) {
+    if (localDirectory.isTagPresent(addr)) {
       localDirectory[addr].exclusive := false;
     }
   }
@@ -482,9 +496,7 @@ machine(L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
 
      // if this is a retry or no local sharers, broadcast normally
-
-     // if (in_msg.RetryNum > 0 || (in_msg.Type == CoherenceRequestType:GETX && exclusiveExists(in_msg.Addr) == false) || (in_msg.Type == CoherenceRequestType:GETS && sharersExist(in_msg.Addr) == false)) {
-        enqueue(globalRequestNetwork_out, RequestMsg, latency=l2_request_latency) {
+        enqueue(globalRequestNetwork_out, RequestMsg, l2_request_latency) {
            out_msg.Addr := in_msg.Addr;
            out_msg.Type := in_msg.Type;
            out_msg.Requestor := in_msg.Requestor;
@@ -513,7 +525,7 @@ machine(L2Cache, "Token protocol")
   action(bb_bounceResponse, "\b", desc="Bounce tokens and data to memory") {
     peek(responseNetwork_in, ResponseMsg) {
       // FIXME, should use a 3rd vnet
-      enqueue(responseNetwork_out, ResponseMsg, latency="1") {
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
         out_msg.Addr := address;
         out_msg.Type := in_msg.Type;
         out_msg.Sender := machineID;
@@ -529,7 +541,7 @@ machine(L2Cache, "Token protocol")
   action(c_cleanReplacement, "c", desc="Issue clean writeback") {
     assert(is_valid(cache_entry));
     if (cache_entry.Tokens > 0) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:ACK;
         out_msg.Sender := machineID;
@@ -543,7 +555,7 @@ machine(L2Cache, "Token protocol")
 
   action(cc_dirtyReplacement, "\c", desc="Issue dirty writeback") {
     assert(is_valid(cache_entry));
-    enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+    enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
       out_msg.Addr := address;
       out_msg.Sender := machineID;
       out_msg.Destination.add(map_Address_to_Directory(address));
@@ -566,7 +578,7 @@ machine(L2Cache, "Token protocol")
     peek(requestNetwork_in, RequestMsg) {
       assert(is_valid(cache_entry));
       if (cache_entry.Tokens > (N_tokens + (max_tokens() / 2))) {
-        enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+        enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
           out_msg.Addr := address;
           out_msg.Type := CoherenceResponseType:DATA_SHARED;
           out_msg.Sender := machineID;
@@ -579,7 +591,7 @@ machine(L2Cache, "Token protocol")
         cache_entry.Tokens := cache_entry.Tokens - N_tokens;
       }
       else {
-        enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+        enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
           out_msg.Addr := address;
           out_msg.Type := CoherenceResponseType:DATA_SHARED;
           out_msg.Sender := machineID;
@@ -597,7 +609,7 @@ machine(L2Cache, "Token protocol")
   action(dd_sendDataWithAllTokens, "\d", desc="Send data and all tokens from cache to requestor") {
     assert(is_valid(cache_entry));
     peek(requestNetwork_in, RequestMsg) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -615,7 +627,7 @@ machine(L2Cache, "Token protocol")
   action(e_sendAckWithCollectedTokens, "e", desc="Send ack with the tokens we've collected thus far.") {
     assert(is_valid(cache_entry));
     if (cache_entry.Tokens > 0) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:ACK;
         out_msg.Sender := machineID;
@@ -630,7 +642,7 @@ machine(L2Cache, "Token protocol")
 
   action(ee_sendDataWithAllTokens, "\e", desc="Send data and all tokens from cache to starver") {
     assert(is_valid(cache_entry));
-    enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+    enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
       out_msg.Addr := address;
       out_msg.Type := CoherenceResponseType:DATA_OWNER;
       out_msg.Sender := machineID;
@@ -649,7 +661,7 @@ machine(L2Cache, "Token protocol")
     assert(is_valid(cache_entry));
     assert(cache_entry.Tokens > 0);
     if (cache_entry.Tokens > 1) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:ACK;
         out_msg.Sender := machineID;
@@ -666,7 +678,7 @@ machine(L2Cache, "Token protocol")
     //assert(persistentTable.findSmallest(address) != id); // Make sure we never bounce tokens to ourself
     assert(is_valid(cache_entry));
     assert(cache_entry.Tokens > (max_tokens() / 2) + 1);
-    enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+    enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -683,7 +695,7 @@ machine(L2Cache, "Token protocol")
     //assert(persistentTable.findSmallest(address) != id); // Make sure we never bounce tokens to ourself
     assert(is_valid(cache_entry));
     assert(cache_entry.Tokens == (max_tokens() / 2) + 1);
-    enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+    enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -702,7 +714,7 @@ machine(L2Cache, "Token protocol")
     // assert(persistentTable.isLocked(address));
     peek(responseNetwork_in, ResponseMsg) {
       // FIXME, should use a 3rd vnet in some cases
-      enqueue(responseNetwork_out, ResponseMsg, latency="1") {
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
         out_msg.Addr := address;
         out_msg.Type := in_msg.Type;
         out_msg.Sender := machineID;
@@ -719,7 +731,7 @@ machine(L2Cache, "Token protocol")
     //assert(persistentTable.isLocked(address));
     peek(responseNetwork_in, ResponseMsg) {
       // FIXME, should use a 3rd vnet in some cases
-      enqueue(responseNetwork_out, ResponseMsg, latency="1") {
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
         out_msg.Addr := address;
         if (in_msg.Type == CoherenceResponseType:WB_SHARED_DATA) {
           out_msg.Type := CoherenceResponseType:DATA_SHARED;
@@ -741,7 +753,7 @@ machine(L2Cache, "Token protocol")
     // assert(persistentTable.isLocked(address));
     peek(responseNetwork_in, ResponseMsg) {
       // FIXME, should use a 3rd vnet in some cases
-      enqueue(responseNetwork_out, ResponseMsg, latency="1") {
+      enqueue(responseNetwork_out, ResponseMsg, 1) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -763,13 +775,13 @@ machine(L2Cache, "Token protocol")
 
   action(j_forwardTransientRequestToLocalSharers, "j", desc="Forward external transient request to local sharers") {
     peek(requestNetwork_in, RequestMsg) {
-      if (filtering_enabled == true && in_msg.RetryNum == 0 && sharersExist(in_msg.Addr) == false) {
+      if (filtering_enabled && in_msg.RetryNum == 0 && sharersExist(in_msg.Addr) == false) {
         //profile_filter_action(1);
         DPRINTF(RubySlicc, "filtered message, Retry Num: %d\n",
                 in_msg.RetryNum);
       }
       else {
-        enqueue(localRequestNetwork_out, RequestMsg, latency=l2_response_latency ) {
+        enqueue(localRequestNetwork_out, RequestMsg, l2_response_latency ) {
            out_msg.Addr := in_msg.Addr;
            out_msg.Requestor := in_msg.Requestor;
 
@@ -795,8 +807,7 @@ machine(L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
       assert(is_valid(cache_entry));
       assert(cache_entry.Tokens > 0);
-      //enqueue(responseIntraChipL2Network_out, ResponseMsg, latency="L2_to_L1_RESPONSE_LATENCY") {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_SHARED;
         out_msg.Sender := machineID;
@@ -814,7 +825,7 @@ machine(L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
       assert(is_valid(cache_entry));
       assert(cache_entry.Tokens == (max_tokens() / 2) + 1);
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -832,8 +843,7 @@ machine(L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
       assert(is_valid(cache_entry));
 //      assert(cache_entry.Tokens == max_tokens());
-      //enqueue(responseIntraChipL2Network_out, ResponseMsg, latency="L2_to_L1_RESPONSE_LATENCY") {
-      enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
         out_msg.Addr := address;
         out_msg.Type := CoherenceResponseType:DATA_OWNER;
         out_msg.Sender := machineID;
@@ -908,7 +918,7 @@ machine(L2Cache, "Token protocol")
     assert(is_valid(cache_entry));
     if (cache_entry.Tokens > 0) {
       peek(requestNetwork_in, RequestMsg) {
-        enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+        enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
           out_msg.Addr := address;
           out_msg.Type := CoherenceResponseType:ACK;
           out_msg.Sender := machineID;
@@ -926,7 +936,7 @@ machine(L2Cache, "Token protocol")
     assert(is_valid(cache_entry));
     if (cache_entry.Tokens > 0) {
       peek(L1requestNetwork_in, RequestMsg) {
-        enqueue(responseNetwork_out, ResponseMsg, latency=l2_response_latency) {
+        enqueue(responseNetwork_out, ResponseMsg, l2_response_latency) {
           out_msg.Addr := address;
           out_msg.Type := CoherenceResponseType:ACK;
           out_msg.Sender := machineID;

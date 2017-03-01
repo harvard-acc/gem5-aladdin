@@ -225,8 +225,6 @@ Device::read(PacketPtr pkt)
     Addr index = daddr >> Regs::VirtualShift;
     Addr raddr = daddr & Regs::VirtualMask;
 
-    pkt->allocate();
-
     if (!regValid(raddr))
         panic("invalid register: cpu=%d vnic=%d da=%#x pa=%#x size=%d",
               cpu, index, daddr, pkt->getAddr(), pkt->getSize());
@@ -1056,7 +1054,7 @@ Device::txKick()
         assert(Regs::get_TxDone_Busy(vnic->TxDone));
         if (!txPacket) {
             // Grab a new packet from the fifo.
-            txPacket = new EthPacketData(16384);
+            txPacket = make_shared<EthPacketData>(16384);
             txPacketOffset = 0;
         }
 
@@ -1403,7 +1401,7 @@ Device::serialize(std::ostream &os)
     SERIALIZE_SCALAR(txState);
     SERIALIZE_SCALAR(txFull);
     txFifo.serialize("txFifo", os);
-    bool txPacketExists = txPacket;
+    bool txPacketExists = txPacket != nullptr;
     SERIALIZE_SCALAR(txPacketExists);
     if (txPacketExists) {
         txPacket->serialize("txPacket", os);
@@ -1498,7 +1496,7 @@ Device::unserialize(Checkpoint *cp, const std::string &section)
     UNSERIALIZE_SCALAR(txPacketExists);
     txPacket = 0;
     if (txPacketExists) {
-        txPacket = new EthPacketData(16384);
+        txPacket = make_shared<EthPacketData>(16384);
         txPacket->unserialize("txPacket", cp, section);
         UNSERIALIZE_SCALAR(txPacketOffset);
         UNSERIALIZE_SCALAR(txPacketBytes);

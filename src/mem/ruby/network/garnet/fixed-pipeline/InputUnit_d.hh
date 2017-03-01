@@ -37,11 +37,10 @@
 #include "mem/ruby/common/Consumer.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/CreditLink_d.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/NetworkLink_d.hh"
+#include "mem/ruby/network/garnet/fixed-pipeline/Router_d.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/VirtualChannel_d.hh"
 #include "mem/ruby/network/garnet/fixed-pipeline/flitBuffer_d.hh"
 #include "mem/ruby/network/garnet/NetworkHeader.hh"
-
-class Router_d;
 
 class InputUnit_d : public Consumer
 {
@@ -125,16 +124,9 @@ class InputUnit_d : public Consumer
     }
 
     inline bool
-    need_stage(int vc, VC_state_type state, flit_stage stage, Cycles curTime)
+    need_stage(int vc, VC_state_type state, flit_stage stage, Cycles cTime)
     {
-        return m_vcs[vc]->need_stage(state, stage, curTime);
-    }
-
-    inline bool
-    need_stage_nextcycle(int vc, VC_state_type state, flit_stage stage,
-                         Cycles curTime)
-    {
-        return m_vcs[vc]->need_stage_nextcycle(state, stage, curTime);
+        return m_vcs[vc]->need_stage(state, stage, cTime);
     }
 
     inline bool
@@ -167,6 +159,7 @@ class InputUnit_d : public Consumer
     { return m_num_buffer_writes[vnet]; }
 
     uint32_t functionalWrite(Packet *pkt);
+    void resetStats();
 
   private:
     int m_id;

@@ -49,8 +49,8 @@
 #include "debug/O3PipeView.hh"
 
 template <class Impl>
-BaseO3DynInst<Impl>::BaseO3DynInst(StaticInstPtr staticInst,
-                                   StaticInstPtr macroop,
+BaseO3DynInst<Impl>::BaseO3DynInst(const StaticInstPtr &staticInst,
+                                   const StaticInstPtr &macroop,
                                    TheISA::PCState pc, TheISA::PCState predPC,
                                    InstSeqNum seq_num, O3CPU *cpu)
     : BaseDynInst<Impl>(staticInst, macroop, pc, predPC, seq_num, cpu)
@@ -59,8 +59,8 @@ BaseO3DynInst<Impl>::BaseO3DynInst(StaticInstPtr staticInst,
 }
 
 template <class Impl>
-BaseO3DynInst<Impl>::BaseO3DynInst(StaticInstPtr _staticInst,
-                                   StaticInstPtr _macroop)
+BaseO3DynInst<Impl>::BaseO3DynInst(const StaticInstPtr &_staticInst,
+                                   const StaticInstPtr &_macroop)
     : BaseDynInst<Impl>(_staticInst, _macroop)
 {
     initVars();
@@ -202,7 +202,7 @@ BaseO3DynInst<Impl>::hwrei()
 #if THE_ISA == ALPHA_ISA
     // Can only do a hwrei when in pal mode.
     if (!(this->instAddr() & 0x3))
-        return new AlphaISA::UnimplementedOpcodeFault;
+        return std::make_shared<AlphaISA::UnimplementedOpcodeFault>();
 
     // Set the next PC based on the value of the EXC_ADDR IPR.
     AlphaISA::PCState pc = this->pcState();
@@ -225,7 +225,7 @@ BaseO3DynInst<Impl>::hwrei()
 
 template <class Impl>
 void
-BaseO3DynInst<Impl>::trap(Fault fault)
+BaseO3DynInst<Impl>::trap(const Fault &fault)
 {
     this->cpu->trap(fault, this->threadNumber, this->staticInst);
 }

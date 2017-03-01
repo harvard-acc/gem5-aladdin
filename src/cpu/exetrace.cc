@@ -56,7 +56,7 @@ ExeTracerRecord::dumpTicks(ostream &outs)
 }
 
 void
-Trace::ExeTracerRecord::traceInst(StaticInstPtr inst, bool ran)
+Trace::ExeTracerRecord::traceInst(const StaticInstPtr &inst, bool ran)
 {
     ostream &outs = Trace::output();
 
@@ -70,9 +70,6 @@ Trace::ExeTracerRecord::traceInst(StaticInstPtr inst, bool ran)
         dumpTicks(outs);
 
     outs << thread->getCpuPtr()->name() << " ";
-
-    if (Debug::ExecSpeculative)
-        outs << (misspeculating ? "-" : "+") << " ";
 
     if (Debug::ExecAsid)
         outs << "A" << dec << TheISA::getExecutingAsid(thread) << " ";
@@ -115,7 +112,7 @@ Trace::ExeTracerRecord::traceInst(StaticInstPtr inst, bool ran)
             outs << Enums::OpClassStrings[inst->opClass()] << " : ";
         }
 
-        if (Debug::ExecResult && predicate == false) {
+        if (Debug::ExecResult && !predicate) {
             outs << "Predicated False";
         }
 
@@ -123,7 +120,7 @@ Trace::ExeTracerRecord::traceInst(StaticInstPtr inst, bool ran)
             ccprintf(outs, " D=%#018x", data.as_int);
         }
 
-        if (Debug::ExecEffAddr && addr_valid)
+        if (Debug::ExecEffAddr && getMemValid())
             outs << " A=0x" << hex << addr;
 
         if (Debug::ExecFetchSeq && fetch_seq_valid)
@@ -131,6 +128,12 @@ Trace::ExeTracerRecord::traceInst(StaticInstPtr inst, bool ran)
 
         if (Debug::ExecCPSeq && cp_seq_valid)
             outs << "  CPSeq=" << dec << cp_seq;
+
+        if (Debug::ExecFlags) {
+            outs << "  flags=(";
+            inst->printFlags(outs, "|");
+            outs << ")";
+        }
     }
 
     //

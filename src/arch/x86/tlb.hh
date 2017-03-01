@@ -44,15 +44,14 @@
 #include <string>
 #include <vector>
 
+#include "arch/generic/tlb.hh"
 #include "arch/x86/regs/segment.hh"
 #include "arch/x86/pagetable.hh"
 #include "base/trie.hh"
 #include "mem/mem_object.hh"
 #include "mem/request.hh"
 #include "params/X86TLB.hh"
-#include "sim/fault_fwd.hh"
 #include "sim/sim_object.hh"
-#include "sim/tlb.hh"
 
 class ThreadContext;
 class Packet;
@@ -74,6 +73,8 @@ namespace X86ISA
 
         typedef X86TLBParams Params;
         TLB(const Params *p);
+
+        void takeOverFrom(BaseTLB *otlb) {}
 
         TlbEntry *lookup(Addr va, bool update_lru = true);
 

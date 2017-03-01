@@ -186,7 +186,7 @@ output decoder {{
 }};
 
 def template ControlRegConstructor {{
-        inline %(class_name)s::%(class_name)s(ExtMachInst machInst)
+        %(class_name)s::%(class_name)s(ExtMachInst machInst)
             : %(base_class)s("%(mnemonic)s", machInst,
                     %(op_class)s, "%(reg_name)s")
         {
@@ -195,7 +195,7 @@ def template ControlRegConstructor {{
 }};
 
 def template PrivExecute {{
-    Fault %(class_name)s::execute(%(CPU_exec_context)s *xc,
+    Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
             Trace::InstRecord *traceData) const
     {
         %(op_decl)s;
@@ -203,10 +203,10 @@ def template PrivExecute {{
 
         // If the processor isn't in privileged mode, fault out right away
         if (%(check)s)
-            return new PrivilegedAction;
+            return std::make_shared<PrivilegedAction>();
 
         if (%(tlCheck)s)
-            return new IllegalInstruction;
+            return std::make_shared<IllegalInstruction>();
 
         Fault fault = NoFault;
         %(code)s;

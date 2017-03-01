@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2010 ARM Limited
+// Copyright (c) 2010-2013 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -39,32 +39,125 @@
 
 let {{
     vfpEnabledCheckCode = '''
-        if (!vfpEnabled(Cpacr, Cpsr, Fpexc))
-            return disabledFault();
+        uint32_t issEnCheck;
+        bool trapEnCheck;
+        uint32_t seq;
+        if (!vfpNeonEnabled(seq,Hcptr, Nsacr, Cpacr, Cpsr, issEnCheck,
+                            trapEnCheck, xc->tcBase(), Fpexc))
+            {return disabledFault();}
+        if (trapEnCheck) {
+            CPSR cpsrEnCheck = Cpsr;
+            if (cpsrEnCheck.mode == MODE_HYP) {
+                return std::make_shared<UndefinedInstruction>(
+                                                machInst, issEnCheck,
+                                                EC_TRAPPED_HCPTR, mnemonic);
+            } else {
+                if (!inSecureState(Scr, Cpsr)) {
+                    return std::make_shared<HypervisorTrap>(
+                                              machInst, issEnCheck,
+                                              EC_TRAPPED_HCPTR);
+                }
+            }
+        }
+    '''
+
+    vfp64EnabledCheckCode = '''
+        CPSR cpsrEnCheck = Cpsr;
+        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsrEnCheck.el;
+        if (!vfpNeon64Enabled(Cpacr64, el))
+             return std::make_shared<SupervisorTrap>(machInst, 0x1E00000,
+                                       EC_TRAPPED_SIMD_FP);
+
+        if (ArmSystem::haveVirtualization(xc->tcBase()) && el <= EL2) {
+            HCPTR cptrEnCheck = xc->tcBase()->readMiscReg(MISCREG_CPTR_EL2);
+            if (cptrEnCheck.tfp)
+                return std::make_shared<HypervisorTrap>(machInst, 0x1E00000,
+                                          EC_TRAPPED_SIMD_FP);
+        }
+
+        if (ArmSystem::haveSecurity(xc->tcBase())) {
+            HCPTR cptrEnCheck = xc->tcBase()->readMiscReg(MISCREG_CPTR_EL3);
+            if (cptrEnCheck.tfp)
+                return std::make_shared<SecureMonitorTrap>(machInst, 0x1E00000,
+                                             EC_TRAPPED_SIMD_FP);
+        }
     '''
 
     vmsrEnabledCheckCode = '''
-        if (!vfpEnabled(Cpacr, Cpsr))
+        uint32_t issEnCheck;
+        bool trapEnCheck;
+        uint32_t seq;
+        if (!vfpNeonEnabled(seq,Hcptr, Nsacr, Cpacr, Cpsr, issEnCheck,
+                            trapEnCheck, xc->tcBase()))
             if (dest != (int)MISCREG_FPEXC && dest != (int)MISCREG_FPSID)
-                return disabledFault();
+                {return disabledFault();}
         if (!inPrivilegedMode(Cpsr))
             if (dest != (int)MISCREG_FPSCR)
                 return disabledFault();
-
+        if (trapEnCheck) {
+            CPSR cpsrEnCheck = Cpsr;
+            if (cpsrEnCheck.mode == MODE_HYP) {
+                return std::make_shared<UndefinedInstruction>(
+                                                machInst, issEnCheck,
+                                                EC_TRAPPED_HCPTR, mnemonic);
+            } else {
+                if (!inSecureState(Scr, Cpsr)) {
+                    return std::make_shared<HypervisorTrap>(
+                                              machInst, issEnCheck,
+                                              EC_TRAPPED_HCPTR);
+                }
+            }
+        }
     '''
 
     vmrsEnabledCheckCode = '''
-        if (!vfpEnabled(Cpacr, Cpsr))
+        uint32_t issEnCheck;
+        bool trapEnCheck;
+        uint32_t seq;
+        if (!vfpNeonEnabled(seq,Hcptr, Nsacr, Cpacr, Cpsr, issEnCheck,
+                            trapEnCheck, xc->tcBase()))
             if (op1 != (int)MISCREG_FPEXC && op1 != (int)MISCREG_FPSID &&
                 op1 != (int)MISCREG_MVFR0 && op1 != (int)MISCREG_MVFR1)
-                return disabledFault();
+                {return disabledFault();}
         if (!inPrivilegedMode(Cpsr))
             if (op1 != (int)MISCREG_FPSCR)
                 return disabledFault();
+        if (trapEnCheck) {
+            CPSR cpsrEnCheck = Cpsr;
+            if (cpsrEnCheck.mode == MODE_HYP) {
+                return std::make_shared<UndefinedInstruction>(
+                                                machInst, issEnCheck,
+                                                EC_TRAPPED_HCPTR, mnemonic);
+            } else {
+                if (!inSecureState(Scr, Cpsr)) {
+                    return std::make_shared<HypervisorTrap>(
+                                              machInst, issEnCheck,
+                                              EC_TRAPPED_HCPTR);
+                }
+            }
+        }
     '''
     vmrsApsrEnabledCheckCode = '''
-        if (!vfpEnabled(Cpacr, Cpsr))
-                return disabledFault();
+        uint32_t issEnCheck;
+        bool trapEnCheck;
+        uint32_t seq;
+        if (!vfpNeonEnabled(seq,Hcptr, Nsacr, Cpacr, Cpsr, issEnCheck,
+                            trapEnCheck, xc->tcBase()))
+            {return disabledFault();}
+        if (trapEnCheck) {
+            CPSR cpsrEnCheck = Cpsr;
+            if (cpsrEnCheck.mode == MODE_HYP) {
+                return std::make_shared<UndefinedInstruction>(
+                                                machInst, issEnCheck,
+                                                EC_TRAPPED_HCPTR, mnemonic);
+            } else {
+                if (!inSecureState(Scr, Cpsr)) {
+                    return std::make_shared<HypervisorTrap>(
+                                              machInst, issEnCheck,
+                                              EC_TRAPPED_HCPTR);
+                }
+            }
+        }
     '''
 }};
 
@@ -81,7 +174,7 @@ class %(class_name)s : public %(base_class)s
 }};
 
 def template FpRegRegOpConstructor {{
-    inline %(class_name)s::%(class_name)s(ExtMachInst machInst,
+    %(class_name)s::%(class_name)s(ExtMachInst machInst,
                                           IntRegIndex _dest, IntRegIndex _op1,
                                           VfpMicroMode mode)
         : %(base_class)s("%(mnemonic)s", machInst, %(op_class)s,
@@ -108,7 +201,7 @@ class %(class_name)s : public %(base_class)s
 }};
 
 def template FpRegImmOpConstructor {{
-    inline %(class_name)s::%(class_name)s(ExtMachInst machInst,
+    %(class_name)s::%(class_name)s(ExtMachInst machInst,
             IntRegIndex _dest, uint64_t _imm, VfpMicroMode mode)
         : %(base_class)s("%(mnemonic)s", machInst, %(op_class)s,
                 _dest, _imm, mode)
@@ -135,7 +228,7 @@ class %(class_name)s : public %(base_class)s
 }};
 
 def template FpRegRegImmOpConstructor {{
-    inline %(class_name)s::%(class_name)s(ExtMachInst machInst,
+    %(class_name)s::%(class_name)s(ExtMachInst machInst,
                                           IntRegIndex _dest,
                                           IntRegIndex _op1,
                                           uint64_t _imm,
@@ -165,7 +258,7 @@ class %(class_name)s : public %(base_class)s
 }};
 
 def template FpRegRegRegOpConstructor {{
-    inline %(class_name)s::%(class_name)s(ExtMachInst machInst,
+    %(class_name)s::%(class_name)s(ExtMachInst machInst,
                                           IntRegIndex _dest,
                                           IntRegIndex _op1,
                                           IntRegIndex _op2,

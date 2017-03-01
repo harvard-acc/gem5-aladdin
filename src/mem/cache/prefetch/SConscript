@@ -33,7 +33,7 @@ Import('*')
 SimObject('Prefetcher.py')
 
 Source('base.cc')
-Source('ghb.cc')
+Source('queued.cc')
 Source('stride.cc')
 Source('tagged.cc')
 

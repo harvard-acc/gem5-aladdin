@@ -61,7 +61,7 @@ class ISA : public SimObject
     }
 
     MiscReg
-    readMiscRegNoEffect(int misc_reg)
+    readMiscRegNoEffect(int misc_reg) const
     {
         fatal("Power does not currently have any misc regs defined\n");
         return dummy;
@@ -87,20 +87,26 @@ class ISA : public SimObject
     }
 
     int
-    flattenIntIndex(int reg)
+    flattenIntIndex(int reg) const
     {
         return reg;
     }
 
     int
-    flattenFloatIndex(int reg)
+    flattenFloatIndex(int reg) const
     {
         return reg;
     }
 
     // dummy
     int
-    flattenCCIndex(int reg)
+    flattenCCIndex(int reg) const
+    {
+        return reg;
+    }
+
+    int
+    flattenMiscIndex(int reg) const
     {
         return reg;
     }

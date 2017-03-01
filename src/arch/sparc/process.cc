@@ -57,7 +57,7 @@ SparcLiveProcess::SparcLiveProcess(LiveProcessParams * params,
 
     // XXX all the below need to be updated for SPARC - Ali
     brk_point = objFile->dataBase() + objFile->dataSize() + objFile->bssSize();
-    brk_point = roundUp(brk_point, VMPageSize);
+    brk_point = roundUp(brk_point, PageBytes);
 
     // Set pointer for next thread stack.  Reserve 8M for main stack.
     next_thread_stack_base = stack_base - (8 * 1024 * 1024);
@@ -166,7 +166,7 @@ Sparc32LiveProcess::initState()
     pstate.am = 1;
     tc->setMiscReg(MISCREG_PSTATE, pstate);
 
-    argsInit(32 / 8, VMPageSize);
+    argsInit(32 / 8, PageBytes);
 }
 
 void
@@ -180,7 +180,7 @@ Sparc64LiveProcess::initState()
     pstate.ie = 1;
     tc->setMiscReg(MISCREG_PSTATE, pstate);
 
-    argsInit(sizeof(IntReg), VMPageSize);
+    argsInit(sizeof(IntReg), PageBytes);
 }
 
 template<class IntType>
@@ -234,7 +234,7 @@ SparcLiveProcess::argsInit(int pageSize)
         // Bits which describe the system hardware capabilities
         auxv.push_back(auxv_t(M5_AT_HWCAP, hwcap));
         // The system page size
-        auxv.push_back(auxv_t(M5_AT_PAGESZ, SparcISA::VMPageSize));
+        auxv.push_back(auxv_t(M5_AT_PAGESZ, SparcISA::PageBytes));
         // Defined to be 100 in the kernel source.
         // Frequency at which times() increments
         auxv.push_back(auxv_t(M5_AT_CLKTCK, 100));
@@ -532,26 +532,25 @@ Sparc64LiveProcess::setSyscallArg(ThreadContext *tc, int i, IntReg val)
 }
 
 void
-SparcLiveProcess::setSyscallReturn(ThreadContext *tc,
-        SyscallReturn return_value)
+SparcLiveProcess::setSyscallReturn(ThreadContext *tc, SyscallReturn sysret)
 {
     // check for error condition.  SPARC syscall convention is to
     // indicate success/failure in reg the carry bit of the ccr
     // and put the return value itself in the standard return value reg ().
     PSTATE pstate = tc->readMiscRegNoEffect(MISCREG_PSTATE);
-    if (return_value.successful()) {
+    if (sysret.successful()) {
         // no error, clear XCC.C
         tc->setIntReg(NumIntArchRegs + 2,
-                tc->readIntReg(NumIntArchRegs + 2) & 0xEE);
-        IntReg val = return_value.value();
+                      tc->readIntReg(NumIntArchRegs + 2) & 0xEE);
+        IntReg val = sysret.returnValue();
         if (pstate.am)
             val = bits(val, 31, 0);
         tc->setIntReg(ReturnValueReg, val);
     } else {
         // got an error, set XCC.C
         tc->setIntReg(NumIntArchRegs + 2,
-                tc->readIntReg(NumIntArchRegs + 2) | 0x11);
-        IntReg val = -return_value.value();
+                      tc->readIntReg(NumIntArchRegs + 2) | 0x11);
+        IntReg val = sysret.errnoValue();
         if (pstate.am)
             val = bits(val, 31, 0);
         tc->setIntReg(ReturnValueReg, val);

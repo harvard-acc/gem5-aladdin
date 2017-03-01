@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013 ARM Limited
+ * Copyright (c) 2011-2014 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -45,18 +45,15 @@
  *          Rick Strong
  */
 
-#include "arch/isa_traits.hh"
 #include "arch/remote_gdb.hh"
 #include "arch/utility.hh"
 #include "base/loader/object_file.hh"
 #include "base/loader/symtab.hh"
 #include "base/str.hh"
 #include "base/trace.hh"
-#include "config/the_isa.hh"
 #include "cpu/thread_context.hh"
 #include "debug/Loader.hh"
 #include "debug/WorkItems.hh"
-#include "kern/kernel_stats.hh"
 #include "mem/abstract_mem.hh"
 #include "mem/physical.hh"
 #include "params/System.hh"
@@ -64,6 +61,14 @@
 #include "sim/debug.hh"
 #include "sim/full_system.hh"
 #include "sim/system.hh"
+
+/**
+ * To avoid linking errors with LTO, only include the header if we
+ * actually have a definition.
+ */
+#if THE_ISA != NULL_ISA
+#include "kern/kernel_stats.hh"
+#endif
 
 using namespace std;
 using namespace TheISA;
@@ -78,9 +83,12 @@ System::System(Params *p)
       pagePtr(0),
       init_param(p->init_param),
       physProxy(_systemPort, p->cache_line_size),
+      kernelSymtab(nullptr),
+      kernel(nullptr),
       loadAddrMask(p->load_addr_mask),
+      loadAddrOffset(p->load_offset),
       nextPID(0),
-      physmem(name() + ".physmem", p->memories),
+      physmem(name() + ".physmem", p->memories, p->mmap_using_noreserve),
       memoryMode(p->mem_mode),
       _cacheLineSize(p->cache_line_size),
       workItemsBegin(0),
@@ -117,8 +125,6 @@ System::System(Params *p)
         if (params()->kernel == "") {
             inform("No kernel set for full system simulation. "
                    "Assuming you know what you're doing\n");
-
-            kernel = NULL;
         } else {
             // Get the kernel code
             kernel = createObjectFile(params()->kernel);
@@ -273,15 +279,22 @@ System::initState()
          * Load the kernel code into memory
          */
         if (params()->kernel != "")  {
-            // Validate kernel mapping before loading binary
-            if (!(isMemAddr(kernelStart & loadAddrMask) &&
-                            isMemAddr(kernelEnd & loadAddrMask))) {
-                fatal("Kernel is mapped to invalid location (not memory). "
-                      "kernelStart 0x(%x) - kernelEnd 0x(%x)\n", kernelStart,
-                      kernelEnd);
+            if (params()->kernel_addr_check) {
+                // Validate kernel mapping before loading binary
+                if (!(isMemAddr((kernelStart & loadAddrMask) +
+                                loadAddrOffset) &&
+                      isMemAddr((kernelEnd & loadAddrMask) +
+                                loadAddrOffset))) {
+                    fatal("Kernel is mapped to invalid location (not memory). "
+                          "kernelStart 0x(%x) - kernelEnd 0x(%x) %#x:%#x\n",
+                          kernelStart,
+                          kernelEnd, (kernelStart & loadAddrMask) +
+                          loadAddrOffset,
+                          (kernelEnd & loadAddrMask) + loadAddrOffset);
+                }
             }
             // Load program sections into memory
-            kernel->loadSections(physProxy, loadAddrMask);
+            kernel->loadSections(physProxy, loadAddrMask, loadAddrOffset);
 
             DPRINTF(Loader, "Kernel start = %#x\n", kernelStart);
             DPRINTF(Loader, "Kernel end   = %#x\n", kernelEnd);
@@ -289,8 +302,6 @@ System::initState()
             DPRINTF(Loader, "Kernel loaded...\n");
         }
     }
-
-    activeCpus.clear();
 }
 
 void
@@ -309,9 +320,19 @@ System::replaceThreadContext(ThreadContext *tc, int context_id)
 Addr
 System::allocPhysPages(int npages)
 {
-    Addr return_addr = pagePtr << LogVMPageSize;
+    Addr return_addr = pagePtr << PageShift;
     pagePtr += npages;
-    if ((pagePtr << LogVMPageSize) > physmem.totalSize())
+
+    Addr next_return_addr = pagePtr << PageShift;
+
+    AddrRange m5opRange(0xffff0000, 0xffffffff);
+    if (m5opRange.contains(next_return_addr)) {
+        warn("Reached m5ops MMIO region\n");
+        return_addr = 0xffffffff;
+        pagePtr = 0xffffffff >> PageShift;
+    }
+
+    if ((pagePtr << PageShift) > physmem.totalSize())
         fatal("Out of memory, please increase size of physical memory.");
     return return_addr;
 }
@@ -325,7 +346,7 @@ System::memSize() const
 Addr
 System::freeMemSize() const
 {
-   return physmem.totalSize() - (pagePtr << LogVMPageSize);
+   return physmem.totalSize() - (pagePtr << PageShift);
 }
 
 bool
@@ -410,12 +431,16 @@ System::workItemEnd(uint32_t tid, uint32_t workid)
 void
 System::printSystems()
 {
+    ios::fmtflags flags(cerr.flags());
+
     vector<System *>::iterator i = systemList.begin();
     vector<System *>::iterator end = systemList.end();
     for (; i != end; ++i) {
         System *sys = *i;
         cerr << "System " << sys->name() << ": " << hex << sys << endl;
     }
+
+    cerr.flags(flags);
 }
 
 void
@@ -442,9 +467,10 @@ System::getMasterId(std::string master_name)
     // Otherwise objects will have sized their stat buckets and
     // they will be too small
 
-    if (Stats::enabled())
-        fatal("Can't request a masterId after regStats(). \
-                You must do so in init().\n");
+    if (Stats::enabled()) {
+        fatal("Can't request a masterId after regStats(). "
+                "You must do so in init().\n");
+    }
 
     masterIds.push_back(master_name);
 
@@ -459,9 +485,6 @@ System::getMasterName(MasterID master_id)
 
     return masterIds[master_id];
 }
-
-const char *System::MemoryModeStrings[4] = {"invalid", "atomic", "timing",
-                                            "atomic_noncaching"};
 
 System *
 SystemParams::create()

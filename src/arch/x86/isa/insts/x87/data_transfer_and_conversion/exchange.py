@@ -36,5 +36,20 @@
 # Authors: Gabe Black
 
 microcode = '''
-# FXCH
+def macroop FXCH_R
+{
+    movfp ufp1, sti
+    movfp sti, st(0)
+    movfp st(0), ufp1
+};
+
+def macroop FXCH_M
+{
+    fault "std::make_shared<UnimpInstFault>()"
+};
+
+def macroop FXCH_P
+{
+   fault "std::make_shared<UnimpInstFault>()"
+};
 '''

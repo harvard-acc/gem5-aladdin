@@ -49,6 +49,8 @@
  * Authors: Gabe Black
  */
 
+#include <memory>
+
 #include "arch/x86/pagetable.hh"
 #include "arch/x86/pagetable_walker.hh"
 #include "arch/x86/tlb.hh"
@@ -62,23 +64,6 @@
 #include "mem/request.hh"
 
 namespace X86ISA {
-
-// Unfortunately, the placement of the base field in a page table entry is
-// very erratic and would make a mess here. It might be moved here at some
-// point in the future.
-BitUnion64(PageTableEntry)
-    Bitfield<63> nx;
-    Bitfield<11, 9> avl;
-    Bitfield<8> g;
-    Bitfield<7> ps;
-    Bitfield<6> d;
-    Bitfield<5> a;
-    Bitfield<4> pcd;
-    Bitfield<3> pwt;
-    Bitfield<2> u;
-    Bitfield<1> w;
-    Bitfield<0> p;
-EndBitUnion(PageTableEntry)
 
 Fault
 Walker::start(ThreadContext * _tc, BaseTLB::Translation *_translation,
@@ -139,20 +124,22 @@ Walker::recvTimingResp(PacketPtr pkt)
         delete senderWalk;
         // Since we block requests when another is outstanding, we
         // need to check if there is a waiting request to be serviced
-        if (currStates.size())
-            startWalkWrapper();
+        if (currStates.size() && !startWalkWrapperEvent.scheduled())
+            // delay sending any new requests until we are finished
+            // with the responses
+            schedule(startWalkWrapperEvent, clockEdge());
     }
     return true;
 }
 
 void
-Walker::WalkerPort::recvRetry()
+Walker::WalkerPort::recvReqRetry()
 {
-    walker->recvRetry();
+    walker->recvReqRetry();
 }
 
 void
-Walker::recvRetry()
+Walker::recvReqRetry()
 {
     std::list<WalkerState *>::iterator iter;
     for (iter = currStates.begin(); iter != currStates.end(); iter++) {
@@ -165,8 +152,18 @@ Walker::recvRetry()
 
 bool Walker::sendTiming(WalkerState* sendingState, PacketPtr pkt)
 {
-    pkt->pushSenderState(new WalkerSenderState(sendingState));
-    return port.sendTimingReq(pkt);
+    WalkerSenderState* walker_state = new WalkerSenderState(sendingState);
+    pkt->pushSenderState(walker_state);
+    if (port.sendTimingReq(pkt)) {
+        return true;
+    } else {
+        // undo the adding of the sender state and delete it, as we
+        // will do it again the next time we attempt to send it
+        pkt->popSenderState();
+        delete walker_state;
+        return false;
+    }
+
 }
 
 BaseMasterPort &
@@ -203,8 +200,9 @@ Walker::startWalkWrapper()
             currState->req->getVaddr());
 
         // finish the translation which will delete the translation object
-        currState->translation->finish(new UnimpFault("Squashed Inst"),
-                currState->req, currState->tc, currState->mode);
+        currState->translation->finish(
+            std::make_shared<UnimpFault>("Squashed Inst"),
+            currState->req, currState->tc, currState->mode);
 
         // delete the current request
         delete currState;
@@ -223,7 +221,7 @@ Fault
 Walker::WalkerState::startWalk()
 {
     Fault fault = NoFault;
-    assert(started == false);
+    assert(!started);
     started = true;
     setupWalk(req->getVaddr());
     if (timing) {
@@ -252,7 +250,7 @@ Fault
 Walker::WalkerState::startFunctional(Addr &addr, unsigned &logBytes)
 {
     Fault fault = NoFault;
-    assert(started == false);
+    assert(!started);
     started = true;
     setupWalk(addr);
 
@@ -525,7 +523,6 @@ Walker::WalkerState::stepWalk(PacketPtr &write)
             write = oldRead;
             write->set<uint64_t>(pte);
             write->cmd = MemCmd::WriteReq;
-            write->clearDest();
         } else {
             write = NULL;
             delete oldRead->req;
@@ -598,11 +595,13 @@ Walker::WalkerState::recvPacket(PacketPtr pkt)
     assert(pkt->isResponse());
     assert(inflight);
     assert(state == Waiting);
-    assert(!read);
     inflight--;
     if (pkt->isRead()) {
+        // should not have a pending read it we also had one outstanding
+        assert(!read);
+
         // @todo someone should pay for this
-        pkt->busFirstWordDelay = pkt->busLastWordDelay = 0;
+        pkt->headerDelay = pkt->payloadDelay = 0;
 
         state = nextState;
         nextState = Ready;
@@ -710,7 +709,8 @@ Walker::WalkerState::pageFault(bool present)
     HandyM5Reg m5reg = tc->readMiscRegNoEffect(MISCREG_M5_REG);
     if (mode == BaseTLB::Execute && !enableNX)
         mode = BaseTLB::Read;
-    return new PageFault(entry.vaddr, present, mode, m5reg.cpl == 3, false);
+    return std::make_shared<PageFault>(entry.vaddr, present, mode,
+                                       m5reg.cpl == 3, false);
 }
 
 /* end namespace X86ISA */ }

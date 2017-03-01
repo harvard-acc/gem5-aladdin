@@ -39,11 +39,10 @@
 #include "arch/alpha/pagetable.hh"
 #include "arch/alpha/utility.hh"
 #include "arch/alpha/vtophys.hh"
+#include "arch/generic/tlb.hh"
 #include "base/statistics.hh"
 #include "mem/request.hh"
 #include "params/AlphaTLB.hh"
-#include "sim/fault_fwd.hh"
-#include "sim/tlb.hh"
 
 class ThreadContext;
 
@@ -86,6 +85,8 @@ class TLB : public BaseTLB
     typedef AlphaTLBParams Params;
     TLB(const Params *p);
     virtual ~TLB();
+
+    void takeOverFrom(BaseTLB *otlb) {}
 
     virtual void regStats();
 

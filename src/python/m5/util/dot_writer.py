@@ -58,6 +58,7 @@
 
 import m5, os, re
 from m5.SimObject import isRoot, isSimObjectVector
+from m5.params import PortRef
 from m5.util import warn
 try:
     import pydot
@@ -106,7 +107,7 @@ def dot_create_edges(simNode, callgraph):
             full_port_name = full_path + "_" + port_name
             port_node = dot_create_node(simNode, full_port_name, port_name)
             # create edges
-            if type(port) is m5.params.PortRef:
+            if isinstance(port, PortRef):
                 dot_add_edge(simNode, callgraph, full_port_name, port)
             else:
                 for p in port.elements:
@@ -172,7 +173,7 @@ def dot_create_node(simNode, full_path, label):
 class NodeType:
     SYS = 0
     CPU = 1
-    BUS = 2
+    XBAR = 2
     MEM = 3
     DEV = 4
     OTHER = 5
@@ -189,8 +190,8 @@ def get_node_type(simNode):
     elif 'PioDevice' in dir(m5.objects) and \
             isinstance(simNode, m5.objects.PioDevice):
         return NodeType.DEV
-    elif isinstance(simNode, m5.objects.BaseBus):
-        return NodeType.BUS
+    elif isinstance(simNode, m5.objects.BaseXBar):
+        return NodeType.XBAR
     elif isinstance(simNode, m5.objects.AbstractMemory):
         return NodeType.MEM
     else:
@@ -204,7 +205,7 @@ def get_type_colour(nodeType):
         return (228, 231, 235)
     elif nodeType == NodeType.CPU:
         return (187, 198, 217)
-    elif nodeType == NodeType.BUS:
+    elif nodeType == NodeType.XBAR:
         return (111, 121, 140)
     elif nodeType == NodeType.MEM:
         return (94, 89, 88)

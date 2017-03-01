@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2014 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2002-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -27,41 +39,59 @@
  *
  * Authors: Nathan Binkert
  *          Dave Greene
+ *          Andreas Sandberg
  */
 
 #ifndef __BASE_MISC_HH__
 #define __BASE_MISC_HH__
 
+#include <cassert>
+#include <iostream>
+
 #include "base/compiler.hh"
 #include "base/cprintf.hh"
-#include "base/varargs.hh"
 
 #if defined(__SUNPRO_CC)
 #define __FUNCTION__ "how to fix me?"
 #endif
 
+void __exit_epilogue(int code,
+                     const char *func, const char *file, int line,
+                     const char *format) M5_ATTR_NORETURN;
+
 // General exit message, these functions will never return and will
 // either abort() if code is < 0 or exit with the code if >= 0
-void __exit_message(const char *prefix, int code,
-    const char *func, const char *file, int line,
-    const char *format, CPRINTF_DECLARATION) M5_ATTR_NORETURN;
-
-void __exit_message(const char *prefix, int code,
-    const char *func, const char *file, int line,
-    const std::string &format, CPRINTF_DECLARATION) M5_ATTR_NORETURN;
-
-inline void
+template<typename ...Args> void
 __exit_message(const char *prefix, int code,
-    const char *func, const char *file, int line,
-    const std::string& format, CPRINTF_DEFINITION)
+               const char *func, const char *file, int line,
+               const char *format, const Args &...args) M5_ATTR_NORETURN;
+template<typename ...Args> void
+__exit_message(const char *prefix, int code,
+               const char *func, const char *file, int line,
+               const std::string &format, const Args &...args) M5_ATTR_NORETURN;
+
+template<typename ...Args> void
+__exit_message(const char *prefix, int code,
+               const char *func, const char *file, int line,
+               const char *format, const Args &...args)
 {
-    __exit_message(prefix, code, func, file, line, format.c_str(),
-                   VARARGS_ALLARGS);
+    std::cerr << prefix << ": ";
+    ccprintf(std::cerr, format, args...);
+
+    __exit_epilogue(code, func, file, line, format);
 }
 
-M5_PRAGMA_NORETURN(__exit_message)
-#define exit_message(prefix, code, ...)                            \
-    __exit_message(prefix, code, __FUNCTION__, __FILE__, __LINE__, \
+template<typename ...Args> void
+__exit_message(const char *prefix, int code,
+               const char *func, const char *file, int line,
+               const std::string &format, const Args &...args)
+{
+    __exit_message(prefix, code, func, file, line, format.c_str(),
+                   args...);
+}
+
+#define exit_message(prefix, code, ...)                                 \
+    __exit_message(prefix, code, __FUNCTION__, __FILE__, __LINE__,      \
                    __VA_ARGS__)
 
 //
@@ -77,24 +107,65 @@ M5_PRAGMA_NORETURN(__exit_message)
 // This implements a cprintf based fatal() function.  fatal() should
 // be called when the simulation cannot continue due to some condition
 // that is the user's fault (bad configuration, invalid arguments,
-// etc.) and not a simulator bug.  fatal() calls exit(1), i.e., a
-// "normal" exit with an error code, as opposed to abort() like
+// etc.) and not a simulator bug.  fatal() calls  abort() like
 // panic() does.
 //
-#define fatal(...) exit_message("fatal", 1, __VA_ARGS__)
+#define fatal(...) exit_message("fatal", -1, __VA_ARGS__)
+
+/**
+ * Conditional panic macro that checks the supplied condition and only panics
+ * if the condition is true and allows the programmer to specify diagnostic
+ * printout.  Useful to replace if + panic, or if + print + assert, etc.
+ *
+ * @param cond Condition that is checked; if true -> panic
+ * @param ...  Printf-based format string with arguments, extends printout.
+ */
+#define panic_if(cond, ...) \
+    do { \
+        if ((cond)) \
+            exit_message("panic condition "#cond" occurred", -1, __VA_ARGS__); \
+    } while (0)
+
+
+/**
+ * Conditional fatal macro that checks the supplied condition and only causes a
+ * fatal error if the condition is true and allows the programmer to specify
+ * diagnostic printout.  Useful to replace if + fatal, or if + print + assert,
+ * etc.
+ *
+ * @param cond Condition that is checked; if true -> fatal
+ * @param ...  Printf-based format string with arguments, extends printout.
+ */
+#define fatal_if(cond, ...) \
+    do { \
+        if ((cond)) \
+            exit_message("fatal condition "#cond" occurred", 1, __VA_ARGS__); \
+    } while (0)
+
 
 void
-__base_message(std::ostream &stream, const char *prefix, bool verbose,
-          const char *func, const char *file, int line,
-          const char *format, CPRINTF_DECLARATION);
+__base_message_epilogue(std::ostream &stream, bool verbose,
+                        const char *func, const char *file, int line,
+                        const char *format);
 
-inline void
+template<typename ...Args> void
 __base_message(std::ostream &stream, const char *prefix, bool verbose,
-          const char *func, const char *file, int line,
-          const std::string &format, CPRINTF_DECLARATION)
+               const char *func, const char *file, int line,
+               const char *format, const Args &...args)
+{
+    stream << prefix << ": ";
+    ccprintf(stream, format, args...);
+
+    __base_message_epilogue(stream, verbose, func, file, line, format);
+}
+
+template<typename ...Args> void
+__base_message(std::ostream &stream, const char *prefix, bool verbose,
+               const char *func, const char *file, int line,
+               const std::string &format, const Args &...args)
 {
     __base_message(stream, prefix, verbose, func, file, line, format.c_str(),
-              VARARGS_ALLARGS);
+                   args...);
 }
 
 #define base_message(stream, prefix, verbose, ...)                      \
@@ -147,4 +218,38 @@ extern bool want_hack, hack_verbose;
 #define hack_once(...) \
     cond_message_once(want_hack, std::cerr, "hack", hack_verbose, __VA_ARGS__)
 
+/**
+ * Conditional warning macro that checks the supplied condition and
+ * only prints a warning if the condition is true. Useful to replace
+ * if + warn.
+ *
+ * @param cond Condition that is checked; if true -> warn
+ * @param ...  Printf-based format string with arguments, extends printout.
+ */
+#define warn_if(cond, ...) \
+    do { \
+        if ((cond)) \
+            warn(__VA_ARGS__); \
+    } while (0)
+
+/**
+ * The chatty assert macro will function like a normal assert, but will allow the
+ * specification of additional, helpful material to aid debugging why the
+ * assertion actually failed.  Like the normal assertion, the chatty_assert
+ * will not be active in fast builds.
+ *
+ * @param cond Condition that is checked; if false -> assert
+ * @param ...  Printf-based format string with arguments, extends printout.
+ */
+#ifdef NDEBUG
+#define chatty_assert(cond, ...)
+#else //!NDEBUG
+#define chatty_assert(cond, ...)                                                \
+    do {                                                                        \
+        if (!(cond)) {                                                          \
+            base_message(std::cerr, "assert("#cond") failing", 1, __VA_ARGS__); \
+            assert(cond);                                                       \
+        }                                                                       \
+    } while (0)
+#endif // NDEBUG
 #endif // __BASE_MISC_HH__

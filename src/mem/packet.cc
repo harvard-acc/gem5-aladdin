@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 ARM Limited
+ * Copyright (c) 2011-2015 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -98,11 +98,11 @@ MemCmd::commandInfo[] =
     /* HardPFResp */
     { SET4(IsRead, IsResponse, IsHWPrefetch, HasData),
             InvalidCmd, "HardPFResp" },
-    /* WriteInvalidateReq (currently unused, see packet.hh) */
+    /* WriteInvalidateReq */
     { SET6(IsWrite, NeedsExclusive, IsInvalidate,
            IsRequest, HasData, NeedsResponse),
             WriteInvalidateResp, "WriteInvalidateReq" },
-    /* WriteInvalidateResp (currently unused, see packet.hh) */
+    /* WriteInvalidateResp */
     { SET3(IsWrite, NeedsExclusive, IsResponse),
             InvalidCmd, "WriteInvalidateResp" },
     /* UpgradeReq */
@@ -115,12 +115,13 @@ MemCmd::commandInfo[] =
     /* UpgradeResp */
     { SET3(NeedsExclusive, IsUpgrade, IsResponse),
             InvalidCmd, "UpgradeResp" },
-    /* SCUpgradeFailReq: generates UpgradeFailResp ASAP */
-    { SET5(IsInvalidate, NeedsExclusive, IsLlsc,
-           IsRequest, NeedsResponse),
+    /* SCUpgradeFailReq: generates UpgradeFailResp but still gets the data */
+    { SET6(IsRead, NeedsExclusive, IsInvalidate,
+           IsLlsc, IsRequest, NeedsResponse),
             UpgradeFailResp, "SCUpgradeFailReq" },
-    /* UpgradeFailResp */
-    { SET2(NeedsExclusive, IsResponse),
+    /* UpgradeFailResp - Behaves like a ReadExReq, but notifies an SC
+     * that it has failed, acquires line as Dirty*/
+    { SET4(IsRead, NeedsExclusive, IsResponse, HasData),
             InvalidCmd, "UpgradeFailResp" },
     /* ReadExReq */
     { SET5(IsRead, NeedsExclusive, IsInvalidate, IsRequest, NeedsResponse),
@@ -136,7 +137,7 @@ MemCmd::commandInfo[] =
     { SET6(IsWrite, NeedsExclusive, IsLlsc,
            IsRequest, NeedsResponse, HasData),
             StoreCondResp, "StoreCondReq" },
-    /* StoreCondFailReq: generates failing StoreCondResp ASAP */
+    /* StoreCondFailReq: generates failing StoreCondResp */
     { SET6(IsWrite, NeedsExclusive, IsLlsc,
            IsRequest, NeedsResponse, HasData),
             StoreCondResp, "StoreCondFailReq" },
@@ -172,26 +173,30 @@ MemCmd::commandInfo[] =
 };
 
 bool
-Packet::checkFunctional(Printable *obj, Addr addr, int size, uint8_t *data)
+Packet::checkFunctional(Printable *obj, Addr addr, bool is_secure, int size,
+                        uint8_t *_data)
 {
     Addr func_start = getAddr();
     Addr func_end   = getAddr() + getSize() - 1;
     Addr val_start  = addr;
     Addr val_end    = val_start + size - 1;
 
-    if (func_start > val_end || val_start > func_end) {
+    if (is_secure != _isSecure || func_start > val_end ||
+        val_start > func_end) {
         // no intersection
         return false;
     }
 
     // check print first since it doesn't require data
     if (isPrint()) {
-        dynamic_cast<PrintReqState*>(senderState)->printObj(obj);
+        assert(!_data);
+        safe_cast<PrintReqState*>(senderState)->printObj(obj);
         return false;
     }
 
-    // if there's no data, there's no need to look further
-    if (!data) {
+    // we allow the caller to pass NULL to signify the other packet
+    // has no data
+    if (!_data) {
         return false;
     }
 
@@ -201,8 +206,11 @@ Packet::checkFunctional(Printable *obj, Addr addr, int size, uint8_t *data)
 
     if (isRead()) {
         if (func_start >= val_start && func_end <= val_end) {
-            allocate();
-            memcpy(getPtr<uint8_t>(), data + offset, getSize());
+            memcpy(getPtr<uint8_t>(), _data + offset, getSize());
+            if (bytesValid.empty())
+                bytesValid.resize(getSize(), true);
+            // complete overlap, and as the current packet is a read
+            // we are done
             return true;
         } else {
             // Offsets and sizes to copy in case of partial overlap
@@ -212,99 +220,72 @@ Packet::checkFunctional(Printable *obj, Addr addr, int size, uint8_t *data)
 
             // calculate offsets and copy sizes for the two byte arrays
             if (val_start < func_start && val_end <= func_end) {
+                // the one we are checking against starts before and
+                // ends before or the same
                 val_offset = func_start - val_start;
                 func_offset = 0;
                 overlap_size = val_end - func_start;
             } else if (val_start >= func_start && val_end > func_end) {
+                // the one we are checking against starts after or the
+                // same, and ends after
                 val_offset = 0;
                 func_offset = val_start - func_start;
                 overlap_size = func_end - val_start;
             } else if (val_start >= func_start && val_end <= func_end) {
+                // the one we are checking against is completely
+                // subsumed in the current packet, possibly starting
+                // and ending at the same address
                 val_offset = 0;
                 func_offset = val_start - func_start;
                 overlap_size = size;
+            } else if (val_start < func_start && val_end > func_end) {
+                // the current packet is completely subsumed in the
+                // one we are checking against
+                val_offset = func_start - val_start;
+                func_offset = 0;
+                overlap_size = func_end - func_start;
             } else {
-                panic("BUG: Missed a case for a partial functional request");
+                panic("Missed a case for checkFunctional with "
+                      " %s 0x%x size %d, against 0x%x size %d\n",
+                      cmdString(), getAddr(), getSize(), addr, size);
             }
-
-            // Figure out how much of the partial overlap should be copied
-            // into the packet and not overwrite previously found bytes.
-            if (bytesValidStart == 0 && bytesValidEnd == 0) {
-                // No bytes have been copied yet, just set indices
-                // to found range
-                bytesValidStart = func_offset;
-                bytesValidEnd = func_offset + overlap_size;
-            } else {
-                // Some bytes have already been copied. Use bytesValid
-                // indices and offset values to figure out how much data
-                // to copy and where to copy it to.
-
-                // Indice overlap conditions to check
-                int a = func_offset - bytesValidStart;
-                int b = (func_offset + overlap_size) - bytesValidEnd;
-                int c = func_offset - bytesValidEnd;
-                int d = (func_offset + overlap_size) - bytesValidStart;
-
-                if (a >= 0 && b <= 0) {
-                    // bytes already in pkt data array are superset of
-                    // found bytes, will not copy any bytes
-                    overlap_size = 0;
-                } else if (a < 0 && d >= 0 && b <= 0) {
-                    // found bytes will move bytesValidStart towards 0
-                    overlap_size = bytesValidStart - func_offset;
-                    bytesValidStart = func_offset;
-                } else if (b > 0 && c <= 0 && a >= 0) {
-                    // found bytes will move bytesValidEnd
-                    // towards end of pkt data array
-                    overlap_size =
-                        (func_offset + overlap_size) - bytesValidEnd;
-                    val_offset += bytesValidEnd - func_offset;
-                    func_offset = bytesValidEnd;
-                    bytesValidEnd += overlap_size;
-                } else if (a < 0 && b > 0) {
-                    // Found bytes are superset of copied range. Will move
-                    // bytesValidStart towards 0 and bytesValidEnd towards
-                    // end of pkt data array.  Need to break copy into two
-                    // pieces so as to not overwrite previously found data.
-
-                    // copy the first half
-                    uint8_t *dest = getPtr<uint8_t>() + func_offset;
-                    uint8_t *src = data + val_offset;
-                    memcpy(dest, src, (bytesValidStart - func_offset));
-
-                    // re-calc the offsets and indices to do the copy
-                    // required for the second half
-                    val_offset += (bytesValidEnd - func_offset);
-                    bytesValidStart = func_offset;
-                    overlap_size =
-                        (func_offset + overlap_size) - bytesValidEnd;
-                    func_offset = bytesValidEnd;
-                    bytesValidEnd += overlap_size;
-                } else if ((c > 0 && b > 0)
-                           || (a < 0 && d < 0)) {
-                    // region to be copied is discontiguous! Not supported.
-                    panic("BUG: Discontiguous bytes found"
-                          "for functional copying!");
-                }
-            }
-            assert(bytesValidEnd <= getSize());
 
             // copy partial data into the packet's data array
             uint8_t *dest = getPtr<uint8_t>() + func_offset;
-            uint8_t *src = data + val_offset;
+            uint8_t *src = _data + val_offset;
             memcpy(dest, src, overlap_size);
 
-            // check if we're done filling the functional access
-            bool done = (bytesValidStart == 0) && (bytesValidEnd == getSize());
-            return done;
+            // initialise the tracking of valid bytes if we have not
+            // used it already
+            if (bytesValid.empty())
+                bytesValid.resize(getSize(), false);
+
+            // track if we are done filling the functional access
+            bool all_bytes_valid = true;
+
+            int i = 0;
+
+            // check up to func_offset
+            for (; all_bytes_valid && i < func_offset; ++i)
+                all_bytes_valid &= bytesValid[i];
+
+            // update the valid bytes
+            for (i = func_offset; i < func_offset + overlap_size; ++i)
+                bytesValid[i] = true;
+
+            // check the bit after the update we just made
+            for (; all_bytes_valid && i < getSize(); ++i)
+                all_bytes_valid &= bytesValid[i];
+
+            return all_bytes_valid;
         }
     } else if (isWrite()) {
         if (offset >= 0) {
-            memcpy(data + offset, getPtr<uint8_t>(),
+            memcpy(_data + offset, getConstPtr<uint8_t>(),
                    (min(func_end, val_end) - func_start) + 1);
         } else {
             // val_start > func_start
-            memcpy(data, getPtr<uint8_t>() - offset,
+            memcpy(_data, getConstPtr<uint8_t>() - offset,
                    (min(func_end, val_end) - val_start) + 1);
         }
     } else {

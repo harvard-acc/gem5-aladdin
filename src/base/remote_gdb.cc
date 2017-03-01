@@ -1,4 +1,5 @@
 /*
+ * Copyright 2014 Google, Inc.
  * Copyright (c) 2002-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -129,6 +130,7 @@
 #include "base/socket.hh"
 #include "base/trace.hh"
 #include "config/the_isa.hh"
+#include "cpu/base.hh"
 #include "cpu/static_inst.hh"
 #include "cpu/thread_context.hh"
 #include "debug/GDBAll.hh"
@@ -139,7 +141,6 @@
 #include "sim/system.hh"
 
 using namespace std;
-using namespace Debug;
 using namespace TheISA;
 
 #ifndef NDEBUG
@@ -164,18 +165,18 @@ debugger()
 //
 //
 
-GDBListener::Event::Event(GDBListener *l, int fd, int e)
+GDBListener::InputEvent::InputEvent(GDBListener *l, int fd, int e)
     : PollEvent(fd, e), listener(l)
 {}
 
 void
-GDBListener::Event::process(int revent)
+GDBListener::InputEvent::process(int revent)
 {
     listener->accept();
 }
 
 GDBListener::GDBListener(BaseRemoteGDB *g, int p)
-    : event(NULL), gdb(g), port(p)
+    : inputEvent(NULL), gdb(g), port(p)
 {
     assert(!gdb->listener);
     gdb->listener = this;
@@ -183,8 +184,8 @@ GDBListener::GDBListener(BaseRemoteGDB *g, int p)
 
 GDBListener::~GDBListener()
 {
-    if (event)
-        delete event;
+    if (inputEvent)
+        delete inputEvent;
 }
 
 string
@@ -206,8 +207,8 @@ GDBListener::listen()
         port++;
     }
 
-    event = new Event(this, listener.getfd(), POLLIN);
-    pollQueue.schedule(event);
+    inputEvent = new InputEvent(this, listener.getfd(), POLLIN);
+    pollQueue.schedule(inputEvent);
 
 #ifndef NDEBUG
     gdb->number = debuggers.size();
@@ -239,32 +240,48 @@ GDBListener::accept()
     }
 }
 
-BaseRemoteGDB::Event::Event(BaseRemoteGDB *g, int fd, int e)
+BaseRemoteGDB::InputEvent::InputEvent(BaseRemoteGDB *g, int fd, int e)
     : PollEvent(fd, e), gdb(g)
 {}
 
 void
-BaseRemoteGDB::Event::process(int revent)
+BaseRemoteGDB::InputEvent::process(int revent)
 {
-    if (revent & POLLIN)
-        gdb->trap(SIGILL);
-    else if (revent & POLLNVAL)
+    if (revent & POLLIN) {
+        gdb->trapEvent.type(SIGILL);
+        gdb->scheduleInstCommitEvent(&gdb->trapEvent, 0);
+    } else if (revent & POLLNVAL) {
+        gdb->descheduleInstCommitEvent(&gdb->trapEvent);
         gdb->detach();
+    }
 }
 
-BaseRemoteGDB::BaseRemoteGDB(System *_system, ThreadContext *c, size_t cacheSize)
-    : event(NULL), listener(NULL), number(-1), fd(-1),
-      active(false), attached(false),
-      system(_system), context(c),
-      gdbregs(cacheSize)
+void
+BaseRemoteGDB::TrapEvent::process()
+{
+    gdb->trap(_type);
+}
+
+void
+BaseRemoteGDB::SingleStepEvent::process()
+{
+    if (!gdb->singleStepEvent.scheduled())
+        gdb->scheduleInstCommitEvent(&gdb->singleStepEvent, 1);
+    gdb->trap(SIGTRAP);
+}
+
+BaseRemoteGDB::BaseRemoteGDB(System *_system, ThreadContext *c,
+        size_t cacheSize) : inputEvent(NULL), trapEvent(this), listener(NULL),
+        number(-1), fd(-1), active(false), attached(false), system(_system),
+        context(c), gdbregs(cacheSize), singleStepEvent(this)
 {
     memset(gdbregs.regs, 0, gdbregs.bytes());
 }
 
 BaseRemoteGDB::~BaseRemoteGDB()
 {
-    if (event)
-        delete event;
+    if (inputEvent)
+        delete inputEvent;
 }
 
 string
@@ -282,8 +299,8 @@ BaseRemoteGDB::attach(int f)
 {
     fd = f;
 
-    event = new Event(this, fd, POLLIN);
-    pollQueue.schedule(event);
+    inputEvent = new InputEvent(this, fd, POLLIN);
+    pollQueue.schedule(inputEvent);
 
     attached = true;
     DPRINTFN("remote gdb attached\n");
@@ -296,7 +313,7 @@ BaseRemoteGDB::detach()
     close(fd);
     fd = -1;
 
-    pollQueue.remove(event);
+    pollQueue.remove(inputEvent);
     DPRINTFN("remote gdb detached\n");
 }
 
@@ -515,9 +532,51 @@ BaseRemoteGDB::write(Addr vaddr, size_t size, const char *data)
     return true;
 }
 
+void
+BaseRemoteGDB::clearSingleStep()
+{
+    descheduleInstCommitEvent(&singleStepEvent);
+}
+
+void
+BaseRemoteGDB::setSingleStep()
+{
+    if (!singleStepEvent.scheduled())
+        scheduleInstCommitEvent(&singleStepEvent, 1);
+}
+
 PCEventQueue *BaseRemoteGDB::getPcEventQueue()
 {
     return &system->pcEventQueue;
+}
+
+EventQueue *
+BaseRemoteGDB::getComInstEventQueue()
+{
+    BaseCPU *cpu = context->getCpuPtr();
+    return cpu->comInstEventQueue[context->threadId()];
+}
+
+void
+BaseRemoteGDB::scheduleInstCommitEvent(Event *ev, int delta)
+{
+    EventQueue *eq = getComInstEventQueue();
+    // Here "ticks" aren't simulator ticks which measure time, they're
+    // instructions committed by the CPU.
+    eq->schedule(ev, eq->getCurTick() + delta);
+}
+
+void
+BaseRemoteGDB::descheduleInstCommitEvent(Event *ev)
+{
+    if (ev->scheduled())
+        getComInstEventQueue()->deschedule(ev);
+}
+
+bool
+BaseRemoteGDB::checkBpLen(size_t len)
+{
+    return len == sizeof(MachInst);
 }
 
 BaseRemoteGDB::HardBreakpoint::HardBreakpoint(BaseRemoteGDB *_gdb, Addr pc)
@@ -539,7 +598,7 @@ BaseRemoteGDB::HardBreakpoint::process(ThreadContext *tc)
 bool
 BaseRemoteGDB::insertSoftBreak(Addr addr, size_t len)
 {
-    if (len != sizeof(TheISA::MachInst))
+    if (!checkBpLen(len))
         panic("invalid length\n");
 
     return insertHardBreak(addr, len);
@@ -548,7 +607,7 @@ BaseRemoteGDB::insertSoftBreak(Addr addr, size_t len)
 bool
 BaseRemoteGDB::removeSoftBreak(Addr addr, size_t len)
 {
-    if (len != sizeof(MachInst))
+    if (!checkBpLen(len))
         panic("invalid length\n");
 
     return removeHardBreak(addr, len);
@@ -557,7 +616,7 @@ BaseRemoteGDB::removeSoftBreak(Addr addr, size_t len)
 bool
 BaseRemoteGDB::insertHardBreak(Addr addr, size_t len)
 {
-    if (len != sizeof(MachInst))
+    if (!checkBpLen(len))
         panic("invalid length\n");
 
     DPRINTF(GDBMisc, "inserting hardware breakpoint at %#x\n", addr);
@@ -574,7 +633,7 @@ BaseRemoteGDB::insertHardBreak(Addr addr, size_t len)
 bool
 BaseRemoteGDB::removeHardBreak(Addr addr, size_t len)
 {
-    if (len != sizeof(MachInst))
+    if (!checkBpLen(len))
         panic("invalid length\n");
 
     DPRINTF(GDBMisc, "removing hardware breakpoint at %#x\n", addr);
@@ -658,12 +717,13 @@ BaseRemoteGDB::trap(int type)
      * After the debugger is "active" (connected) it will be
      * waiting for a "signaled" message from us.
      */
-    if (!active)
+    if (!active) {
         active = true;
-    else
+    } else {
         // Tell remote host that an exception has occurred.
         snprintf((char *)buffer, bufferSize, "S%02x", type);
         send(buffer);
+    }
 
     // Stick frame regs into our reg cache.
     getregs();

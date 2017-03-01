@@ -96,7 +96,7 @@ restoreThread(TC *tc)
 
         // TODO: SET PC WITH AN EVENT INSTEAD OF INSTANTANEOUSLY
         tc->pcState(restartPC);
-        tc->activate(Cycles(0));
+        tc->activate();
 
         warn("%i: Restoring thread %i in %s @ PC %x",
                 curTick(), tc->threadId(), tc->getCpuPtr()->name(), restartPC);
@@ -165,7 +165,7 @@ forkThread(TC *tc, Fault &fault, int Rd_bits, int Rs, int Rt)
             tc->readMiscRegNoEffect(MISCREG_VPE_CONTROL);
         vpeControl.excpt = 1;
         tc->setMiscReg(MISCREG_VPE_CONTROL, vpeControl);
-        fault = new ThreadFault();
+        fault = std::make_shared<ThreadFault>();
     }
 }
 
@@ -215,7 +215,7 @@ yieldThread(TC *tc, Fault &fault, int src_reg, uint32_t yield_mask)
             VPEControlReg vpeControl = tc->readMiscReg(MISCREG_VPE_CONTROL);
             vpeControl.excpt = 2;
             tc->setMiscReg(MISCREG_VPE_CONTROL, vpeControl);
-            fault = new ThreadFault();
+            fault = std::make_shared<ThreadFault>();
         } else {
         }
     } else if (src_reg != -2) {
@@ -225,7 +225,7 @@ yieldThread(TC *tc, Fault &fault, int src_reg, uint32_t yield_mask)
 
         if (vpeControl.ysi == 1 && tcStatus.dt == 1 ) {
             vpeControl.excpt = 4;
-            fault = new ThreadFault();
+            fault = std::make_shared<ThreadFault>();
         } else {
         }
     }

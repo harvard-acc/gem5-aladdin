@@ -113,20 +113,18 @@ system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
 system.clk_domain = SrcClockDomain(clock = options.sys_clock,
                                    voltage_domain = system.voltage_domain)
 
-Ruby.create_system(options, system)
+Ruby.create_system(options, False, system)
 
 # Create a seperate clock domain for Ruby
 system.ruby.clk_domain = SrcClockDomain(clock = options.ruby_clock,
                                         voltage_domain = system.voltage_domain)
 
 i = 0
-for ruby_port in system.ruby._cpu_ruby_ports:
+for ruby_port in system.ruby._cpu_ports:
      #
      # Tie the cpu test ports to the ruby cpu port
      #
      cpus[i].test = ruby_port.slave
-     ruby_port.access_phys_mem = False
-
      i += 1
 
 # -----------------------

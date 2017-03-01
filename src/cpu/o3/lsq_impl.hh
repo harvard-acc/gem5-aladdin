@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2011-2012 ARM Limited
+ * Copyright (c) 2011-2012, 2014 ARM Limited
+ * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -61,8 +62,7 @@ LSQ<Impl>::LSQ(O3CPU *cpu_ptr, IEW *iew_ptr, DerivO3CPUParams *params)
     : cpu(cpu_ptr), iewStage(iew_ptr),
       LQEntries(params->LQEntries),
       SQEntries(params->SQEntries),
-      numThreads(params->numThreads),
-      retryTid(-1)
+      numThreads(params->numThreads)
 {
     assert(numThreads > 0 && numThreads <= Impl::MaxThreads);
 
@@ -171,11 +171,6 @@ LSQ<Impl>::isDrained() const
 
     if (!sqEmpty()) {
         DPRINTF(Drain, "Not drained, SQ not empty.\n");
-        drained = false;
-    }
-
-    if (retryTid != InvalidThreadID) {
-        DPRINTF(Drain, "Not drained, the LSQ has blocked the caches.\n");
         drained = false;
     }
 
@@ -335,18 +330,13 @@ LSQ<Impl>::violation()
 
 template <class Impl>
 void
-LSQ<Impl>::recvRetry()
+LSQ<Impl>::recvReqRetry()
 {
-    if (retryTid == InvalidThreadID)
-    {
-        //Squashed, so drop it
-        return;
+    iewStage->cacheUnblocked();
+
+    for (ThreadID tid : *activeThreads) {
+        thread[tid].recvRetry();
     }
-    int curr_retry_tid = retryTid;
-    // Speculatively clear the retry Tid.  This will get set again if
-    // the LSQUnit was unable to complete its access.
-    retryTid = -1;
-    thread[curr_retry_tid].recvRetry();
 }
 
 template <class Impl>
@@ -356,7 +346,31 @@ LSQ<Impl>::recvTimingResp(PacketPtr pkt)
     if (pkt->isError())
         DPRINTF(LSQ, "Got error packet back for address: %#X\n",
                 pkt->getAddr());
+
     thread[pkt->req->threadId()].completeDataAccess(pkt);
+
+    if (pkt->isInvalidate()) {
+        // This response also contains an invalidate; e.g. this can be the case
+        // if cmd is ReadRespWithInvalidate.
+        //
+        // The calling order between completeDataAccess and checkSnoop matters.
+        // By calling checkSnoop after completeDataAccess, we ensure that the
+        // fault set by checkSnoop is not lost. Calling writeback (more
+        // specifically inst->completeAcc) in completeDataAccess overwrites
+        // fault, and in case this instruction requires squashing (as
+        // determined by checkSnoop), the ReExec fault set by checkSnoop would
+        // be lost otherwise.
+
+        DPRINTF(LSQ, "received invalidation with response for addr:%#x\n",
+                pkt->getAddr());
+
+        for (ThreadID tid = 0; tid < numThreads; tid++) {
+            thread[tid].checkSnoop(pkt);
+        }
+    }
+
+    delete pkt->req;
+    delete pkt;
     return true;
 }
 
@@ -433,7 +447,7 @@ LSQ<Impl>::numStores()
 
 template<class Impl>
 unsigned
-LSQ<Impl>::numFreeEntries()
+LSQ<Impl>::numFreeLoadEntries()
 {
     unsigned total = 0;
 
@@ -443,7 +457,7 @@ LSQ<Impl>::numFreeEntries()
     while (threads != end) {
         ThreadID tid = *threads++;
 
-        total += thread[tid].numFreeEntries();
+        total += thread[tid].numFreeLoadEntries();
     }
 
     return total;
@@ -451,12 +465,34 @@ LSQ<Impl>::numFreeEntries()
 
 template<class Impl>
 unsigned
-LSQ<Impl>::numFreeEntries(ThreadID tid)
+LSQ<Impl>::numFreeStoreEntries()
 {
-    //if (lsqPolicy == Dynamic)
-    //return numFreeEntries();
-    //else
-        return thread[tid].numFreeEntries();
+    unsigned total = 0;
+
+    list<ThreadID>::iterator threads = activeThreads->begin();
+    list<ThreadID>::iterator end = activeThreads->end();
+
+    while (threads != end) {
+        ThreadID tid = *threads++;
+
+        total += thread[tid].numFreeStoreEntries();
+    }
+
+    return total;
+}
+
+template<class Impl>
+unsigned
+LSQ<Impl>::numFreeLoadEntries(ThreadID tid)
+{
+        return thread[tid].numFreeLoadEntries();
+}
+
+template<class Impl>
+unsigned
+LSQ<Impl>::numFreeStoreEntries(ThreadID tid)
+{
+        return thread[tid].numFreeStoreEntries();
 }
 
 template<class Impl>

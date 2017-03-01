@@ -31,10 +31,13 @@ from os import environ as env
 from m5.defines import buildEnv
 
 class SysConfig:
-    def __init__(self, script=None, mem=None, disk=None):
+    def __init__(self, script=None, mem=None, disk=None, rootdev=None,
+                 os_type='linux'):
         self.scriptname = script
         self.diskname = disk
         self.memsize = mem
+        self.root = rootdev
+        self.ostype = os_type
 
     def script(self):
         if self.scriptname:
@@ -56,11 +59,20 @@ class SysConfig:
         elif buildEnv['TARGET_ISA'] == 'x86':
             return env.get('LINUX_IMAGE', disk('x86root.img'))
         elif buildEnv['TARGET_ISA'] == 'arm':
-            return env.get('LINUX_IMAGE', disk('linux-arm-ael.img'))
+            return env.get('LINUX_IMAGE', disk('linux-aarch32-ael.img'))
         else:
             print "Don't know what default disk image to use for %s ISA" % \
                 buildEnv['TARGET_ISA']
             exit(1)
+
+    def rootdev(self):
+        if self.root:
+            return self.root
+        else:
+            return '/dev/sda1'
+
+    def os_type(self):
+        return self.ostype
 
 # Benchmarks are defined as a key in a dict which is a list of SysConfigs
 # The first defined machine is the test system, the others are driving systems
@@ -112,13 +124,17 @@ Benchmarks = {
 
     'MutexTest':        [SysConfig('mutex-test.rcS', '128MB')],
     'ArmAndroid-GB':    [SysConfig('null.rcS', '256MB',
-                    'ARMv7a-Gingerbread-Android.SMP.mouse.nolock.clean.img')],
+                    'ARMv7a-Gingerbread-Android.SMP.mouse.nolock.clean.img',
+                    None, 'android-gingerbread')],
     'bbench-gb':        [SysConfig('bbench-gb.rcS', '256MB',
-                          'ARMv7a-Gingerbread-Android.SMP.mouse.nolock.img')],
+                            'ARMv7a-Gingerbread-Android.SMP.mouse.nolock.img',
+                            None, 'android-gingerbread')],
     'ArmAndroid-ICS':   [SysConfig('null.rcS', '256MB',
-                            'ARMv7a-ICS-Android.SMP.nolock.clean.img')],
+                            'ARMv7a-ICS-Android.SMP.nolock.clean.img',
+                            None, 'android-ics')],
     'bbench-ics':       [SysConfig('bbench-ics.rcS', '256MB',
-                            'ARMv7a-ICS-Android.SMP.nolock.img')]
+                            'ARMv7a-ICS-Android.SMP.nolock.img',
+                            None, 'android-ics')]
 }
 
 benchs = Benchmarks.keys()

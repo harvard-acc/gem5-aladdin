@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 ARM Limited
+ * Copyright (c) 2013-2014 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -38,6 +38,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Ron Dreslinski
+ *          Mitch Hayenga
  */
 
 /**
@@ -45,14 +46,12 @@
  * Miss and writeback queue declarations.
  */
 
-#ifndef __MEM_CACHE_PREFETCH_BASE_PREFETCHER_HH__
-#define __MEM_CACHE_PREFETCH_BASE_PREFETCHER_HH__
-
-#include <list>
+#ifndef __MEM_CACHE_PREFETCH_BASE_HH__
+#define __MEM_CACHE_PREFETCH_BASE_HH__
 
 #include "base/statistics.hh"
 #include "mem/packet.hh"
-#include "params/BaseCache.hh"
+#include "params/BasePrefetcher.hh"
 #include "sim/clocked_object.hh"
 
 class BaseCache;
@@ -61,70 +60,54 @@ class BasePrefetcher : public ClockedObject
 {
   protected:
 
-    /** A deferred packet, buffered to transmit later. */
-    class DeferredPacket {
-      public:
-        Tick tick;      ///< The tick when the packet is ready to transmit
-        PacketPtr pkt;  ///< Pointer to the packet to transmit
-        DeferredPacket(Tick t, PacketPtr p)
-            : tick(t), pkt(p)
-        {}
-    };
-
-    /** The Prefetch Queue. */
-    std::list<DeferredPacket> pf;
-
     // PARAMETERS
-
-    /** The number of MSHRs in the Prefetch Queue. */
-    const unsigned size;
 
     /** Pointr to the parent cache. */
     BaseCache* cache;
 
     /** The block size of the parent cache. */
-    int blkSize;
-
-    /** The latency before a prefetch is issued */
-    const Cycles latency;
-
-    /** The number of prefetches to issue */
-    unsigned degree;
-
-    /** If patterns should be found per context id */
-    bool useMasterId;
-    /** Do we prefetch across page boundaries. */
-    bool pageStop;
-
-    /** Do we remove prefetches with later times than a new miss.*/
-    bool serialSquash;
-
-    /** Do we prefetch on only data reads, or on inst reads as well. */
-    bool onlyData;
+    unsigned blkSize;
 
     /** System we belong to */
     System* system;
 
+    /** Only consult prefetcher on cache misses? */
+    bool onMiss;
+
+    /** Consult prefetcher on reads? */
+    bool onRead;
+
+    /** Consult prefetcher on reads? */
+    bool onWrite;
+
+    /** Consult prefetcher on data accesses? */
+    bool onData;
+
+    /** Consult prefetcher on instruction accesses? */
+    bool onInst;
+
     /** Request id for prefetches */
     MasterID masterId;
 
-  public:
+    const Addr pageBytes;
 
-    Stats::Scalar pfIdentified;
-    Stats::Scalar pfMSHRHit;
-    Stats::Scalar pfCacheHit;
-    Stats::Scalar pfBufferHit;
-    Stats::Scalar pfRemovedFull;
-    Stats::Scalar pfRemovedMSHR;
+    /** Determine if this access should be observed */
+    bool observeAccess(const PacketPtr &pkt) const;
+
+    /** Determine if address is in cache */
+    bool inCache(Addr addr, bool is_secure) const;
+
+    /** Determine if address is in cache miss queue */
+    bool inMissQueue(Addr addr, bool is_secure) const;
+
+    /** Determine if addresses are on the same page */
+    bool samePage(Addr a, Addr b) const;
+
     Stats::Scalar pfIssued;
-    Stats::Scalar pfSpanPage;
-    Stats::Scalar pfSquashed;
-
-    void regStats();
 
   public:
-    typedef BasePrefetcherParams Params;
-    BasePrefetcher(const Params *p);
+
+    BasePrefetcher(const BasePrefetcherParams *p);
 
     virtual ~BasePrefetcher() {}
 
@@ -133,42 +116,14 @@ class BasePrefetcher : public ClockedObject
     /**
      * Notify prefetcher of cache access (may be any access or just
      * misses, depending on cache parameters.)
-     * @retval Time of next prefetch availability, or 0 if none.
+     * @retval Time of next prefetch availability, or MaxTick if none.
      */
-    Tick notify(PacketPtr &pkt, Tick tick);
+    virtual Tick notify(const PacketPtr &pkt) = 0;
 
-    bool inCache(Addr addr);
+    virtual PacketPtr getPacket() = 0;
 
-    bool inMissQueue(Addr addr);
+    virtual Tick nextPrefetchReadyTime() const = 0;
 
-    PacketPtr getPacket();
-
-    bool havePending()
-    {
-        return !pf.empty();
-    }
-
-    Tick nextPrefetchReadyTime()
-    {
-        return pf.empty() ? MaxTick : pf.front().tick;
-    }
-
-    virtual void calculatePrefetch(PacketPtr &pkt,
-                                   std::list<Addr> &addresses,
-                                   std::list<Cycles> &delays) = 0;
-
-    std::list<DeferredPacket>::iterator inPrefetch(Addr address);
-
-    /**
-     * Utility function: are addresses a and b on the same VM page?
-     */
-    bool samePage(Addr a, Addr b);
- public:
-    const Params*
-    params() const
-    {
-        return dynamic_cast<const Params *>(_params);
-    }
-
+    virtual void regStats();
 };
-#endif //__MEM_CACHE_PREFETCH_BASE_PREFETCHER_HH__
+#endif //__MEM_CACHE_PREFETCH_BASE_HH__

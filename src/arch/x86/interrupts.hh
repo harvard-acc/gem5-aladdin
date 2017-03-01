@@ -180,7 +180,7 @@ class Interrupts : public BasicPioDevice, IntDevice
     bool
     getRegArrayBit(ApicRegIndex base, uint8_t vector)
     {
-        return bits(regs[base + (vector / 32)], vector % 5);
+        return bits(regs[base + (vector / 32)], vector % 32);
     }
 
     void requestInterrupt(uint8_t vector, uint8_t deliveryMode, bool level);
@@ -281,6 +281,12 @@ class Interrupts : public BasicPioDevice, IntDevice
      * @return true if there are interrupts pending.
      */
     bool checkInterruptsRaw() const;
+    /**
+     * Check if there are pending unmaskable interrupts.
+     *
+     * @return true there are unmaskable interrupts pending.
+     */
+    bool hasPendingUnmaskable() const { return pendingUnmaskableInt; }
     Fault getInterrupt(ThreadContext *tc);
     void updateIntrInfo(ThreadContext *tc);
 

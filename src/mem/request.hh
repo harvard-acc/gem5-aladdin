@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012-2013 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -101,18 +101,35 @@ class Request
     static const FlagsType INST_FETCH                  = 0x00000100;
     /** The virtual address is also the physical address. */
     static const FlagsType PHYSICAL                    = 0x00000200;
-    /** The request is an ALPHA VPTE pal access (hw_ld). */
-    static const FlagsType VPTE                        = 0x00000400;
-    /** Use the alternate mode bits in ALPHA. */
-    static const FlagsType ALTMODE                     = 0x00000800;
-    /** The request is to an uncacheable address. */
-    static const FlagsType UNCACHEABLE                 = 0x00001000;
+    /**
+     * The request is to an uncacheable address.
+     *
+     * @note Uncacheable accesses may be reordered by CPU models. The
+     * STRICT_ORDER flag should be set if such reordering is
+     * undesirable.
+     */
+    static const FlagsType UNCACHEABLE                = 0x00000400;
+    /**
+     * The request is required to be strictly ordered by <i>CPU
+     * models</i> and is non-speculative.
+     *
+     * A strictly ordered request is guaranteed to never be re-ordered
+     * or executed speculatively by a CPU model. The memory system may
+     * still reorder requests in caches unless the UNCACHEABLE flag is
+     * set as well.
+     */
+    static const FlagsType STRICT_ORDER                = 0x00000800;
     /** This request is to a memory mapped register. */
-    static const FlagsType MMAPPED_IPR                  = 0x00002000;
+    static const FlagsType MMAPPED_IPR                 = 0x00002000;
     /** This request is a clear exclusive. */
     static const FlagsType CLEAR_LL                    = 0x00004000;
     /** This request is made in privileged mode. */
-    static const FlagsType PRIVILEGED                   = 0x00008000;
+    static const FlagsType PRIVILEGED                  = 0x00008000;
+
+    /** This is a write that is targeted and zeroing an entire cache block.
+     * There is no need for a read/modify/write
+     */
+    static const FlagsType CACHE_BLOCK_ZERO            = 0x00010000;
 
     /** The request should not cause a memory access. */
     static const FlagsType NO_ACCESS                   = 0x00080000;
@@ -122,7 +139,7 @@ class Request
      * made up of a locked load, some operation on the data, and then a locked
      * store.
      */
-    static const FlagsType LOCKED                      = 0x00100000;
+    static const FlagsType LOCKED_RMW                  = 0x00100000;
     /** The request is a Load locked/store conditional. */
     static const FlagsType LLSC                        = 0x00200000;
     /** This request is for a memory swap. */
@@ -139,6 +156,11 @@ class Request
     /** The request should be handled by the generic IPR code (only
      * valid together with MMAPPED_IPR) */
     static const FlagsType GENERIC_IPR                 = 0x08000000;
+
+    /** The request targets the secure memory space. */
+    static const FlagsType SECURE                      = 0x10000000;
+    /** The request is a page table walk */
+    static const FlagsType PT_WALK                     = 0x20000000;
 
     /** These flags are *not* cleared when a Request object is reused
        (assigned a new address). */
@@ -157,12 +179,12 @@ class Request
     /** Invalid request id for assertion checking only. It is invalid behavior
      * to ever send this id as part of a request.
      * @todo C++1x replace with numeric_limits when constexpr is added  */
-    static const MasterID invldMasterId = USHRT_MAX;
+    static const MasterID invldMasterId = std::numeric_limits<MasterID>::max();
     /** @} */
 
     /** Invalid or unknown Pid. Possible when operating system is not present
      *  or has not assigned a pid yet */
-    static const uint32_t invldPid = UINT_MAX;
+    static const uint32_t invldPid = std::numeric_limits<uint32_t>::max();
 
   private:
     typedef uint8_t PrivateFlagsType;
@@ -188,6 +210,28 @@ class Request
         VALID_CONTEXT_ID | VALID_THREAD_ID;
 
   private:
+
+    /**
+     * Set up a physical (e.g. device) request in a previously
+     * allocated Request object.
+     */
+    void
+    setPhys(Addr paddr, unsigned size, Flags flags, MasterID mid, Tick time)
+    {
+        assert(size >= 0);
+        _paddr = paddr;
+        _size = size;
+        _time = time;
+        _masterId = mid;
+        _flags.clear(~STICKY_FLAGS);
+        _flags.set(flags);
+        privateFlags.clear(~STICKY_PRIVATE_FLAGS);
+        privateFlags.set(VALID_PADDR|VALID_SIZE);
+        depth = 0;
+        accessDelta = 0;
+        //translateDelta = 0;
+    }
+
     /**
      * The physical address of the request. Valid only if validPaddr
      * is set.
@@ -199,7 +243,7 @@ class Request
      * paddr is written via setVirt() or setPhys(), so it is always
      * valid as long as one of the address fields is valid.
      */
-    int _size;
+    unsigned _size;
 
     /** The requestor ID which is unique in the system for all ports
      * that are capable of issuing a transaction
@@ -219,6 +263,11 @@ class Request
      */
     Tick _time;
 
+    /**
+     * The task id associated with this request
+     */
+    uint32_t _taskId;
+
     /** The address space ID. */
     int _asid;
 
@@ -233,43 +282,66 @@ class Request
     /** The context ID (for statistics, typically). */
     int _contextId;
     /** The thread ID (id within this CPU) */
-    int _threadId;
+    ThreadID _threadId;
 
     /** program counter of initiating access; for tracing/debugging */
     Addr _pc;
 
   public:
-    /** Minimal constructor.  No fields are initialized. 
-     *  (Note that _flags and privateFlags are cleared by Flags
-     *  default constructor.)
+
+    /**
+     * Minimal constructor. No fields are initialized. (Note that
+     *  _flags and privateFlags are cleared by Flags default
+     *  constructor.)
      */
     Request()
+        : _paddr(0), _size(0), _masterId(invldMasterId), _time(0),
+          _taskId(ContextSwitchTaskId::Unknown), _asid(0), _vaddr(0),
+          _extraData(0), _contextId(0), _threadId(0), _pc(0),
+          translateDelta(0), accessDelta(0), depth(0)
     {}
 
     /**
      * Constructor for physical (e.g. device) requests.  Initializes
      * just physical address, size, flags, and timestamp (to curTick()).
-     * These fields are adequate to perform a request. 
+     * These fields are adequate to perform a request.
      */
-    Request(Addr paddr, int size, Flags flags, MasterID mid)
+    Request(Addr paddr, unsigned size, Flags flags, MasterID mid)
+        : _paddr(0), _size(0), _masterId(invldMasterId), _time(0),
+          _taskId(ContextSwitchTaskId::Unknown), _asid(0), _vaddr(0),
+          _extraData(0), _contextId(0), _threadId(0), _pc(0),
+          translateDelta(0), accessDelta(0), depth(0)
     {
-        setPhys(paddr, size, flags, mid);
+        setPhys(paddr, size, flags, mid, curTick());
     }
 
-    Request(Addr paddr, int size, Flags flags, MasterID mid, Tick time)
+    Request(Addr paddr, unsigned size, Flags flags, MasterID mid, Tick time)
+        : _paddr(0), _size(0), _masterId(invldMasterId), _time(0),
+          _taskId(ContextSwitchTaskId::Unknown), _asid(0), _vaddr(0),
+          _extraData(0), _contextId(0), _threadId(0), _pc(0),
+          translateDelta(0), accessDelta(0), depth(0)
     {
         setPhys(paddr, size, flags, mid, time);
     }
 
-    Request(Addr paddr, int size, Flags flags, MasterID mid, Tick time, Addr pc)
+    Request(Addr paddr, unsigned size, Flags flags, MasterID mid, Tick time,
+            Addr pc)
+        : _paddr(0), _size(0), _masterId(invldMasterId), _time(0),
+          _taskId(ContextSwitchTaskId::Unknown), _asid(0), _vaddr(0),
+          _extraData(0), _contextId(0), _threadId(0), _pc(0),
+          translateDelta(0), accessDelta(0), depth(0)
     {
         setPhys(paddr, size, flags, mid, time);
         privateFlags.set(VALID_PC);
         _pc = pc;
     }
 
-    Request(int asid, Addr vaddr, int size, Flags flags, MasterID mid, Addr pc,
-            int cid, ThreadID tid)
+    Request(int asid, Addr vaddr, unsigned size, Flags flags, MasterID mid,
+            Addr pc, int cid, ThreadID tid)
+        : _paddr(0), _size(0), _masterId(invldMasterId), _time(0),
+          _taskId(ContextSwitchTaskId::Unknown), _asid(0), _vaddr(0),
+          _extraData(0), _contextId(0), _threadId(0), _pc(0),
+          translateDelta(0), accessDelta(0), depth(0)
     {
         setVirt(asid, vaddr, size, flags, mid, pc);
         setThreadContext(cid, tid);
@@ -289,37 +361,13 @@ class Request
     }
 
     /**
-     * Set up a physical (e.g. device) request in a previously
-     * allocated Request object.
-     */
-    void
-    setPhys(Addr paddr, int size, Flags flags, MasterID mid, Tick time)
-    {
-        assert(size >= 0);
-        _paddr = paddr;
-        _size = size;
-        _time = time;
-        _masterId = mid;
-        _flags.clear(~STICKY_FLAGS);
-        _flags.set(flags);
-        privateFlags.clear(~STICKY_PRIVATE_FLAGS);
-        privateFlags.set(VALID_PADDR|VALID_SIZE);
-    }
-
-    void
-    setPhys(Addr paddr, int size, Flags flags, MasterID mid)
-    {
-        setPhys(paddr, size, flags, mid, curTick());
-    }
-
-    /**
      * Set up a virtual (e.g., CPU) request in a previously
      * allocated Request object.
      */
     void
-    setVirt(int asid, Addr vaddr, int size, Flags flags, MasterID mid, Addr pc)
+    setVirt(int asid, Addr vaddr, unsigned size, Flags flags, MasterID mid,
+            Addr pc)
     {
-        assert(size >= 0);
         _asid = asid;
         _vaddr = vaddr;
         _size = size;
@@ -331,6 +379,9 @@ class Request
         _flags.set(flags);
         privateFlags.clear(~STICKY_PRIVATE_FLAGS);
         privateFlags.set(VALID_VADDR|VALID_SIZE|VALID_PC);
+        depth = 0;
+        accessDelta = 0;
+        translateDelta = 0;
     }
 
     /**
@@ -356,10 +407,8 @@ class Request
         assert(privateFlags.isSet(VALID_VADDR));
         assert(privateFlags.noneSet(VALID_PADDR));
         assert(split_addr > _vaddr && split_addr < _vaddr + _size);
-        req1 = new Request;
-        *req1 = *this;
-        req2 = new Request;
-        *req2 = *this;
+        req1 = new Request(*this);
+        req2 = new Request(*this);
         req1->_size = split_addr - _vaddr;
         req2->_vaddr = split_addr;
         req2->_size = _size - req1->_size;
@@ -369,29 +418,46 @@ class Request
      * Accessor for paddr.
      */
     bool
-    hasPaddr()
+    hasPaddr() const
     {
         return privateFlags.isSet(VALID_PADDR);
     }
 
     Addr
-    getPaddr()
+    getPaddr() const
     {
         assert(privateFlags.isSet(VALID_PADDR));
         return _paddr;
     }
 
     /**
+     * Time for the TLB/table walker to successfully translate this request.
+     */
+    Tick translateDelta;
+
+    /**
+     * Access latency to complete this memory transaction not including
+     * translation time.
+     */
+    Tick accessDelta;
+
+    /**
+     * Level of the cache hierachy where this request was responded to
+     * (e.g. 0 = L1; 1 = L2).
+     */
+    mutable int depth;
+
+    /**
      *  Accessor for size.
      */
     bool
-    hasSize()
+    hasSize() const
     {
         return privateFlags.isSet(VALID_SIZE);
     }
 
-    int
-    getSize()
+    unsigned
+    getSize() const
     {
         assert(privateFlags.isSet(VALID_SIZE));
         return _size;
@@ -403,13 +469,6 @@ class Request
     {
         assert(privateFlags.isSet(VALID_PADDR|VALID_VADDR));
         return _time;
-    }
-
-    void
-    time(Tick time)
-    {
-        assert(privateFlags.isSet(VALID_PADDR|VALID_VADDR));
-        _time = time;
     }
 
     /** Accessor for flags. */
@@ -431,16 +490,15 @@ class Request
         _flags.set(flags);
     }
 
-    void
-    setArchFlags(Flags flags)
+    /** Accessor function for vaddr.*/
+    bool
+    hasVaddr() const
     {
-        assert(privateFlags.isSet(VALID_PADDR|VALID_VADDR));
-        _flags.set(flags & ARCH_BITS);
+        return privateFlags.isSet(VALID_VADDR);
     }
 
-    /** Accessor function for vaddr.*/
     Addr
-    getVaddr()
+    getVaddr() const
     {
         assert(privateFlags.isSet(VALID_VADDR));
         return _vaddr;
@@ -448,14 +506,25 @@ class Request
 
     /** Accesssor for the requestor id. */
     MasterID
-    masterId()
+    masterId() const
     {
         return _masterId;
     }
 
+    uint32_t
+    taskId() const
+    {
+        return _taskId;
+    }
+
+    void
+    taskId(uint32_t id) {
+        _taskId = id;
+    }
+
     /** Accessor function for asid.*/
     int
-    getAsid()
+    getAsid() const
     {
         assert(privateFlags.isSet(VALID_VADDR));
         return _asid;
@@ -470,7 +539,7 @@ class Request
 
     /** Accessor function for architecture-specific flags.*/
     ArchFlagsType
-    getArchFlags()
+    getArchFlags() const
     {
         assert(privateFlags.isSet(VALID_PADDR|VALID_VADDR));
         return _flags & ARCH_BITS;
@@ -478,7 +547,7 @@ class Request
 
     /** Accessor function to check if sc result is valid. */
     bool
-    extraDataValid()
+    extraDataValid() const
     {
         return privateFlags.isSet(VALID_EXTRA_DATA);
     }
@@ -514,11 +583,18 @@ class Request
     }
 
     /** Accessor function for thread ID. */
-    int
+    ThreadID
     threadId() const
     {
         assert(privateFlags.isSet(VALID_THREAD_ID));
         return _threadId;
+    }
+
+    void
+    setPC(Addr pc)
+    {
+        privateFlags.set(VALID_PC);
+        _pc = pc;
     }
 
     bool
@@ -535,18 +611,41 @@ class Request
         return _pc;
     }
 
+    /**
+     * Increment/Get the depth at which this request is responded to.
+     * This currently happens when the request misses in any cache level.
+     */
+    void incAccessDepth() const { depth++; }
+    int getAccessDepth() const { return depth; }
+
+    /**
+     * Set/Get the time taken for this request to be successfully translated.
+     */
+    void setTranslateLatency() { translateDelta = curTick() - _time; }
+    Tick getTranslateLatency() const { return translateDelta; }
+
+    /**
+     * Set/Get the time taken to complete this request's access, not including
+     *  the time to successfully translate the request.
+     */
+    void setAccessLatency() { accessDelta = curTick() - _time - translateDelta; }
+    Tick getAccessLatency() const { return accessDelta; }
+
     /** Accessor functions for flags.  Note that these are for testing
        only; setting flags should be done via setFlags(). */
     bool isUncacheable() const { return _flags.isSet(UNCACHEABLE); }
+    bool isStrictlyOrdered() const { return _flags.isSet(STRICT_ORDER); }
     bool isInstFetch() const { return _flags.isSet(INST_FETCH); }
     bool isPrefetch() const { return _flags.isSet(PREFETCH); }
     bool isLLSC() const { return _flags.isSet(LLSC); }
     bool isPriv() const { return _flags.isSet(PRIVILEGED); }
-    bool isLocked() const { return _flags.isSet(LOCKED); }
+    bool isLockedRMW() const { return _flags.isSet(LOCKED_RMW); }
     bool isSwap() const { return _flags.isSet(MEM_SWAP|MEM_SWAP_COND); }
     bool isCondSwap() const { return _flags.isSet(MEM_SWAP_COND); }
     bool isMmappedIpr() const { return _flags.isSet(MMAPPED_IPR); }
     bool isClearLL() const { return _flags.isSet(CLEAR_LL); }
+    bool isSecure() const { return _flags.isSet(SECURE); }
+    bool isPTWalk() const { return _flags.isSet(PT_WALK); }
 };
 
 #endif // __MEM_REQUEST_HH__
