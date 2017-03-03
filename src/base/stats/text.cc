@@ -141,9 +141,11 @@ Text::valid() const
 }
 
 void
-Text::begin()
+Text::begin(std::string desc)
 {
     ccprintf(*stream, "\n---------- Begin Simulation Statistics ----------\n");
+    if (desc.compare("") != 0)
+        ccprintf(*stream, "# Stats desc: %s\n", desc);
 }
 
 void

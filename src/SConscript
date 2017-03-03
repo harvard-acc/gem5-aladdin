@@ -161,7 +161,8 @@ class SourceFile(object):
 
 class Source(SourceFile):
     '''Add a c/c++ source file to the build'''
-    def __init__(self, source, Werror=True, swig=False, **guards):
+    def __init__(self, source, Werror=False, swig=False, **guards):
+    #def __init__(self, source, Werror=True, swig=False, **guards):
         '''specify the source file, and any guards'''
         super(Source, self).__init__(source, **guards)
 
@@ -1133,6 +1134,7 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
     werror_env.Append(CCFLAGS=['-Werror',
                                '-Wno-error=deprecated-declarations',
                                '-Wno-error=deprecated',
+                               '-Wno-unused-local-typedefs'
                                ])
 
     def make_obj(source, static, extra_deps = None):

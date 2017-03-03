@@ -58,6 +58,9 @@
 #include "sim/drain.hh"
 #include "sim/eventq.hh"
 
+//Modification of DMA for Aladdin simulation
+#define MAX_DMA_REQUEST 64
+
 class CopyEngine : public PciDevice
 {
     class CopyEngineChannel : public Drainable, public Serializable

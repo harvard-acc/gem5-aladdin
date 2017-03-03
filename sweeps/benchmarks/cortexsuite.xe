@@ -1,0 +1,17 @@
+use benchmarks.designsweeptypes.Gem5DesignSweep
+
+# I call this 'nosweep' because I don't sweep anything.
+begin Gem5DesignSweep nosweep
+
+use benchmarks.cortexsuite.*
+
+generate configs
+generate trace
+generate gem5_binary
+
+set output_dir "cortexsuite_sweep"
+set source_dir "/set/path/to/cortexsuite"
+set simulator "gem5-cpu"
+set memory_type "cache"
+
+end nosweep

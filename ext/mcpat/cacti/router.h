@@ -2,7 +2,6 @@
  *                                McPAT/CACTI
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
- *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +25,7 @@
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
  *
  ***************************************************************************/
 
@@ -36,20 +35,21 @@
 #define __ROUTER_H__
 
 #include <assert.h>
-
 #include <iostream>
-
-#include "arbiter.h"
 #include "basic_circuit.h"
 #include "cacti_interface.h"
 #include "component.h"
-#include "crossbar.h"
 #include "mat.h"
 #include "parameter.h"
 #include "wire.h"
+#include "crossbar.h"
+#include "arbiter.h"
 
-class Router : public Component {
-public:
+
+
+class Router : public Component
+{
+  public:
     Router(
         double flit_size_,
         double vc_buf, /* vc size = vc_buffer_size * flit_size */
@@ -70,9 +70,9 @@ public:
     double vc_count;
     double vc_buffer_size; /* vc size = vc_buffer_size * flit_size */
 
-private:
-    TechnologyParameter::DeviceType *deviceType;
-    double FREQUENCY; // move this to config file --TODO
+  private:
+	TechnologyParameter::DeviceType *deviceType;
+	double FREQUENCY; // move this to config file --TODO
     double Cw3(double len);
     double gate_cap(double w);
     double diff_cap(double w, int type /*0 for n-mos and 1 for p-mos*/, double stack);

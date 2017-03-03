@@ -2,7 +2,6 @@
  *                                McPAT/CACTI
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
- *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +25,7 @@
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
  *
  ***************************************************************************/
 
@@ -35,17 +34,17 @@
 #ifndef __WIRE_H__
 #define __WIRE_H__
 
+#include "basic_circuit.h"
+#include "component.h"
+#include "parameter.h"
+#include "assert.h"
+#include "cacti_interface.h"
 #include <iostream>
 #include <list>
 
-#include "assert.h"
-#include "basic_circuit.h"
-#include "cacti_interface.h"
-#include "component.h"
-#include "parameter.h"
-
-class Wire : public Component {
-public:
+class Wire : public Component
+{
+  public:
     Wire(enum Wire_type wire_model, double len /* in u*/,
          int nsense = 1/* no. of sense amps connected to the low-swing wire */,
          double width_scaling = 1,
@@ -56,16 +55,17 @@ public:
     ~Wire();
 
     Wire( double width_scaling = 1,
-          double spacing_scaling = 1,
-          enum Wire_placement wire_placement = outside_mat,
-          double resistivity = CU_RESISTIVITY,
-          TechnologyParameter::DeviceType *dt = &(g_tp.peri_global)
-        ); // should be used only once for initializing static members
-    void init_wire();
+         double spacing_scaling = 1,
+//         bool reset_repeater_sizing = true,
+         enum Wire_placement wire_placement = outside_mat,
+         double resistivity = CU_RESISTIVITY,
+         TechnologyParameter::DeviceType *dt = &(g_tp.peri_global)
+    ); // should be used only once for initializing static members
+    void init_wire(/*bool reset_repeater_sizing = true*/);
 
     void calculate_wire_stats();
-    void delay_optimal_wire();
-    double wire_cap(double len, bool call_from_outside = false);
+    void delay_optimal_wire(/*bool reset_repeater_sizing = true*/);
+    double wire_cap(double len, bool call_from_outside=false);
     double wire_res(double len);
     void low_swing_model();
     double signal_fall_time();
@@ -78,11 +78,14 @@ public:
     enum Wire_placement wire_placement;
     double repeater_size;
     double repeater_spacing;
+    static double repeater_size_init; // value used in initialization should not be reused in final output
+    static double repeater_spacing_init;
     double wire_length;
     double in_rise_time, out_rise_time;
 
-    void set_in_rise_time(double rt) {
-        in_rise_time = rt;
+    void set_in_rise_time(double rt)
+    {
+      in_rise_time = rt;
     }
     static Component global;
     static Component global_5;
@@ -92,12 +95,13 @@ public:
     static Component low_swing;
     static double wire_width_init;
     static double wire_spacing_init;
-    void print_wire();
+    static void print_wire();
+    void wire_dvs_update();
 
-private:
+  private:
 
     int nsense; // no. of sense amps connected to a low-swing wire if it
-    // is broadcasting data to multiple destinations
+                // is broadcasting data to multiple destinations
     // width and spacing scaling factor can be used
     // to model low level wires or special
     // fat wires

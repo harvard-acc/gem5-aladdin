@@ -79,7 +79,7 @@ CopyEngine::CopyEngine(const Params *p)
 
 
 CopyEngine::CopyEngineChannel::CopyEngineChannel(CopyEngine *_ce, int cid)
-    : cePort(_ce, _ce->sys),
+    : cePort(_ce, _ce->sys, MAX_DMA_REQUEST),
       ce(_ce), channelId(cid), busy(false), underReset(false),
     refreshNext(false), latBeforeBegin(ce->params()->latBeforeBegin),
     latAfterCompletion(ce->params()->latAfterCompletion),

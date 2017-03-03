@@ -1,10 +1,10 @@
 -----------------------------------------------------------
-          ____    _    ____ _____ ___    __    ____  
-         / ___|  / \  / ___|_   _|_ _|  / /_  | ___| 
-        | |     / _ \| |     | |  | |  | '_ \ |___ \ 
-        | |___ / ___ \ |___  | |  | |  | (_) | ___) |
-         \____/_/   \_\____| |_| |___|  \___(_)____/ 
-
+   ____    _    ____ _____ ___      ____  
+  / ___|  / \  / ___|_   _|_ _|    |  _ \ 
+ | |     / _ \| |     | |  | |_____| |_) |
+ | |___ / ___ \ |___  | |  | |_____|  __/ 
+  \____/_/   \_\____| |_| |___|    |_|   
+                                                         
 
              A Tool to Model Caches/Memories
 -----------------------------------------------------------
@@ -15,6 +15,43 @@ time, and area.
 CACTI was originally developed by Dr. Jouppi and Dr. Wilton
 in 1993 and since then it has undergone five major 
 revisions.
+
+About Cacti-P (contact: sheng.sli@gmail.com)
+===================
+This is a special version of Cacti based on Cacti6.5 release for McPAT. The major 
+changes of this special Cacti, called Cacti-P in this distro, 
+(compared to cacti6.5) includes the following new features. 
+The inclosed Cacti-P can run stand-alone if users want to use these features.
+ 
+ * CAM and fully associative cache modeling
+ * Improved leakage power modeling with consideration of device/gate topology
+ * long channel device for reduce sub-threshold leakage power 
+ * Sleep transistor based power-gating modeling
+ * gate leakage power
+ * Support user defined voltage supply (Vdd)
+ * Dynamic voltage scaling (DVS)
+ 
+In the output results, either ITRS default or user defined vdd is used as baseline supply vdd. 
+When DVS is enabled, this vdd is denoted as @DVS_Level0. The user defined DVS voltage levels are
+denoted as @DVS_Level1~@DVS_Leveln. 
+
+Power-gating and DVS cannot happen at the same time. Because power-gating happens when circuit is idle,
+while DVS happens when circuit is active.
+When waking up from power-gating status, it is assumed that the system will first wakeup to DVS0 (full speed) state, 
+if DVS is enabled in the system.
+ 
+For complete documentation of Cacti-P, please refer to the following paper,
+"CACTI-P: Architecture-Level Modeling for SRAM-based Structures with Advanced Leakage Reduction Techniques", 
+that appeared in ICCAD2011. Please cite the paper, if you use
+Cacti-P in your work. The bibtex entry is provided below for your convenience.
+
+@inproceedings{cacti-p:iccad,
+  author = {Sheng Li and Ke Chen and Jung Ho Ahn and Jay B. Brockman and Norman P. Jouppi},
+  title = {CACTI-P: Architecture-level modeling for SRAM-based structures with advanced leakage reduction techniques},
+  booktitle = {ICCAD: International Conference on Computer-Aided Design},
+  year = {2011},
+  pages = {694-701},
+}
 
 List of features (version 1-6.5):
 ===============================

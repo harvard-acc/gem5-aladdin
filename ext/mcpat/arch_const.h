@@ -33,9 +33,9 @@
 #define ARCH_CONST_H_
 
 typedef struct{
-        unsigned int capacity;
-        unsigned int assoc;//fully
-        unsigned int blocksize;
+	unsigned int capacity;
+	unsigned int assoc;//fully
+	unsigned int blocksize;
 } array_inputs;
 
 //Do Not change, unless you want to bypass the XML interface and do not care about the default values.

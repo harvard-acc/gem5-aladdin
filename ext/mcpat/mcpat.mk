@@ -22,23 +22,20 @@ endif
 
 #CXXFLAGS = -Wall -Wno-unknown-pragmas -Winline $(DBG) $(OPT) 
 CXXFLAGS = -Wno-unknown-pragmas $(DBG) $(OPT) 
-CXX = g++
-CC  = gcc
+CXX = g++ -m32
+CC  = gcc -m32
 
 VPATH = cacti
 
 SRCS  = \
   Ucache.cc \
+  XML_Parse.cc \
   arbiter.cc \
   area.cc \
   array.cc \
   bank.cc \
   basic_circuit.cc \
   basic_components.cc \
-  bus_interconnect.cc \
-  cachearray.cc \
-  cachecontroller.cc \
-  cacheunit.cc \
   cacti_interface.cc \
   component.cc \
   core.cc \
@@ -55,26 +52,31 @@ SRCS  = \
   noc.cc \
   nuca.cc \
   parameter.cc \
+  processor.cc \
   router.cc \
+  sharedcache.cc \
   subarray.cc \
-  system.cc \
   technology.cc \
   uca.cc \
   wire.cc \
-  xmlParser.cc
+  xmlParser.cc \
+  powergating.cc
 
-OBJS = $(patsubst %.cc,$(ODIR)/obj_$(TAG)/%.o,$(SRCS))
+OBJS = $(patsubst %.cc,obj_$(TAG)/%.o,$(SRCS))
 
-all: $(ODIR)/obj_$(TAG)/$(TARGET)
-	cp -f $< $(ODIR)/$(TARGET)
+all: obj_$(TAG)/$(TARGET)
+	cp -f obj_$(TAG)/$(TARGET) $(TARGET)
 
-$(ODIR)/obj_$(TAG)/$(TARGET) : $(OBJS)
-	$(CXX) $^ -o $@ $(INCS) $(CXXFLAGS) $(LIBS) -pthread
+obj_$(TAG)/$(TARGET) : $(OBJS)
+	$(CXX) $(OBJS) -o $@ $(INCS) $(CXXFLAGS) $(LIBS) -pthread
 
-$(ODIR)/obj_$(TAG)/%.o : %.cc
+#obj_$(TAG)/%.o : %.cc
+#	$(CXX) -c $(CXXFLAGS) $(INCS) -o $@ $<
+
+obj_$(TAG)/%.o : %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	-rm -f *.o $(ODIR)/$(TARGET)
+	-rm -f *.o $(TARGET)
 
 

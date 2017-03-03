@@ -47,12 +47,19 @@
 
 #include <deque>
 #include <memory>
+#include <vector>
 
 #include "base/circlebuf.hh"
 #include "dev/io_device.hh"
 #include "params/DmaDevice.hh"
 #include "sim/drain.hh"
 #include "sim/system.hh"
+
+//Modification of DMA for Aladdin simulation
+#define MAX_DMA_REQUEST 64
+
+/* Maximum of DMA channels*/
+#define MAX_CHANNELS 20
 
 class DmaPort : public MasterPort, public Drainable
 {
@@ -99,17 +106,22 @@ class DmaPort : public MasterPort, public Drainable
         /** Number of bytes that have been acked for this transaction. */
         Addr numBytes;
 
+        /** DMA request address for this transaction. */
+        Addr addr;
+
         /** Amount to delay completion of dma by */
         const Tick delay;
 
-        DmaReqState(Event *ce, Addr tb, Tick _delay)
-            : completionEvent(ce), totBytes(tb), numBytes(0), delay(_delay)
+        DmaReqState(Event *ce, Addr tb, Addr _addr, Tick _delay)
+            : completionEvent(ce), totBytes(tb),
+              numBytes(0), addr(_addr), delay(_delay)
         {}
+
     };
 
   public:
     /** The device that owns this port. */
-    MemObject *const device;
+    MemObject *device;
 
     /** The system that device/port are in. This is used to select which mode
      * we are currently operating in. */
@@ -119,8 +131,10 @@ class DmaPort : public MasterPort, public Drainable
     const MasterID masterId;
 
   protected:
-    /** Use a deque as we never do any insertion or removal in the middle */
-    std::deque<PacketPtr> transmitList;
+    /** Each deque represents a memory channel that never does any insertion or
+     * removal in the middle. A vector of deques are used to represent
+     * multi-chanel DMAs that requests across channels can be interleaved. */
+    std::vector< std::deque<PacketPtr> > transmitList;
 
     /** Event used to schedule a future sending from the transmit list. */
     EventWrapper<DmaPort, &DmaPort::sendDma> sendEvent;
@@ -131,17 +145,47 @@ class DmaPort : public MasterPort, public Drainable
     /** If the port is currently waiting for a retry before it can
      * send whatever it is that it's sending. */
     bool inRetry;
+    /** Max number of outstanding requests*/
+    unsigned maxRequests;
 
+    /** Number of outstanding requests*/
+    unsigned numOutstandingRequests;
+
+    /** Keep track of the current channel index to send DMA request. */
+    int currChannelIdx;
+
+    /** DMA transaction chunk size. */
+    unsigned chunkSize;
+
+    /** True if we want to interleave DMA requests from different channels.*/
+    bool multiChannel;
+
+    /** True if we should send invalidation packets before writes.
+     *
+     * This would invalidate every cache line touched by a dmaAction call that
+     * updates memory before issuing the write request.
+     */
+    bool invalidateOnWrite;
   protected:
 
     bool recvTimingResp(PacketPtr pkt) override;
     void recvReqRetry() override;
 
-    void queueDma(PacketPtr pkt);
+    void queueDma(unsigned channel_index, PacketPtr pkt);
+
+    Addr getPacketAddr(PacketPtr pkt);
+
+    Event* getPacketCompletionEvent(PacketPtr pkt);
 
   public:
 
     DmaPort(MemObject *dev, System *s);
+
+    DmaPort(MemObject *dev, System *s, unsigned max_req);
+
+    DmaPort(MemObject *dev, System *s, unsigned max_req,
+            unsigned _chunkSize, bool _multiChannel = false,
+            bool _invalidateOnWrite = false);
 
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                          uint8_t *data, Tick delay, Request::Flags flag = 0);

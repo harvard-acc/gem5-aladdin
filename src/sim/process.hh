@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "arch/registers.hh"
+#include "base/loader/object_file.hh"
 #include "base/statistics.hh"
 #include "base/types.hh"
 #include "config/the_isa.hh"

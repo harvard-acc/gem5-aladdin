@@ -39,6 +39,7 @@
 
 #include "arch/utility.hh"
 #include "base/chunk_generator.hh"
+#include "base/loader/object_file.hh"
 #include "base/trace.hh"
 #include "config/the_isa.hh"
 #include "cpu/thread_context.hh"
@@ -267,16 +268,6 @@ _llseekFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     BufferArg result_buf(result_ptr, sizeof(result));
     memcpy(result_buf.bufferPtr(), &result, sizeof(result));
     result_buf.copyOut(tc->getMemProxy());
-    return 0;
-}
-
-
-SyscallReturn
-munmapFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
-{
-    // With mmap more fully implemented, it might be worthwhile to bite
-    // the bullet and implement munmap. Should allow us to reuse simulated
-    // memory.
     return 0;
 }
 
@@ -620,6 +611,66 @@ dupFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     return (result == -1) ? -local_errno : p->fds->allocFD(new_fdep);
 }
 
+void
+fcntlAladdinHandler(Process *process, ThreadContext *tc)
+{
+    int index = 2;
+    Addr mapping_ptr = (Addr) process->getSyscallArg(tc, index);
+    SETranslatingPortProxy& memProxy = tc->getMemProxy();
+
+    // Deserialize the mapping struct bytes.
+    size_t word_size = 4;
+    if (process->objFile->getArch() == ObjectFile::X86_64) {
+      word_size = 8;
+    }
+    uint8_t* mapping_buf = new uint8_t[sizeof(aladdin_map_t)];
+    memProxy.readBlob(mapping_ptr, mapping_buf, sizeof(aladdin_map_t));
+    aladdin_map_t mapping;
+    // Initialize all values to 0 so we avoid garbage from 32-bit to 64-bit
+    // conversions and only keep what we copy.
+    mapping.addr = nullptr;
+    void* array_name_addr = nullptr;
+    mapping.request_code = 0;
+    mapping.size = 0;
+    memcpy(&array_name_addr, &(mapping_buf[0]), word_size);
+    memcpy(&(mapping.addr), &(mapping_buf[word_size]), word_size);
+    memcpy(&(mapping.request_code), &(mapping_buf[2*word_size]), word_size);
+    memcpy(&(mapping.size), &(mapping_buf[3*word_size]), word_size);
+
+    // Extract the array name. Assume the variable name is at most 100 chars.
+    Addr string_addr = (Addr) array_name_addr;
+    uint8_t* string_buf = new uint8_t[100];
+    memProxy.readBlob(string_addr, string_buf, 100);
+    mapping.array_name = (const char*) string_buf;
+
+    inform("Received mapping for array %s at vaddr %x of length %d.\n",
+           mapping.array_name, mapping.addr, mapping.size);
+    Addr sim_base_addr = reinterpret_cast<Addr>(mapping.addr);
+
+    // TODO: Do we need to delete past mappings of the same array? Would it
+    // cause issues if we don't?
+    process->system->insertArrayLabelMapping(
+          mapping.request_code,
+          mapping.array_name, sim_base_addr);
+
+    // Set up all mappings, taking into account straddling page boundaries.
+    Addr starting_page_offset = sim_base_addr & (TheISA::PageBytes - 1);
+    int num_pages = ceil(
+        ((float)mapping.size + starting_page_offset) / TheISA::PageBytes);
+    for (int i = 0; i < num_pages; i++) {
+      Addr paddr;
+      process->pTable->translate(
+          sim_base_addr + i*TheISA::PageBytes, paddr);
+      process->system->insertAddressTranslationMapping(
+          mapping.request_code,
+          sim_base_addr + i*TheISA::PageBytes,  // Simulated vaddr.
+          paddr);  // Simulated paddr.
+    }
+
+    delete mapping_buf;
+    delete string_buf;
+}
+
 SyscallReturn
 fcntlFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
@@ -628,11 +679,15 @@ fcntlFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     int tgt_fd = p->getSyscallArg(tc, index);
     int cmd = p->getSyscallArg(tc, index);
 
+    if (cmd == ALADDIN_MAP_ARRAY) {
+        fcntlAladdinHandler(p, tc);
+        return 0;
+    }
+
     auto hbfdp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[tgt_fd]);
     if (!hbfdp)
         return -EBADF;
     int sim_fd = hbfdp->getSimFD();
-
     int coe = hbfdp->getCOE();
 
     switch (cmd) {
@@ -669,13 +724,17 @@ fcntl64Func(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
     int index = 0;
     int tgt_fd = p->getSyscallArg(tc, index);
+    int cmd = p->getSyscallArg(tc, index);
+    if (cmd == ALADDIN_MAP_ARRAY) {
+        fcntlAladdinHandler(p, tc);
+        return 0;
+    }
 
     auto hbfdp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[tgt_fd]);
     if (!hbfdp)
         return -EBADF;
     int sim_fd = hbfdp->getSimFD();
 
-    int cmd = p->getSyscallArg(tc, index);
     switch (cmd) {
       case 33: //F_GETLK64
         warn("fcntl64(%d, F_GETLK64) not supported, error returned\n", tgt_fd);

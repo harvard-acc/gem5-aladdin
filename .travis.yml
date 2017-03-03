@@ -1,0 +1,34 @@
+sudo: required
+dist: trusty
+
+before_install:
+  - sudo apt-get update -qq
+  # These are gem5 dependencies.
+  - sudo apt-get install -y swig
+  - sudo apt-get install -y m4
+  - sudo apt-get install -y libz-dev
+  - sudo apt-get install -y libprotobuf-dev
+  - sudo apt-get install -y protobuf-compiler
+  # These are Aladdin dependencies.
+  - sudo apt-get install -y libboost-graph-dev
+  - sudo apt-get install -y libboost-regex-dev
+  - sudo apt-get install -y libpthread-stubs0-dev
+  - git submodule update --init --recursive
+
+env:
+  - ALADDIN_HOME=$PWD/src/aladdin BOOST_ROOT=/usr/include/boost
+
+language: c++
+compiler:
+  - g++
+
+script:
+  - scons build/X86/gem5.opt -j2
+  - cd src/aladdin/integration-test/common && python run_cpu_tests.py
+
+notifications:
+  email:
+    on_success: never
+    on_failure: always
+    recipients:
+      - samxi@seas.harvard.edu

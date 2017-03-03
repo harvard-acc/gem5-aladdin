@@ -33,14 +33,12 @@
 #define __ARBITER__
 
 #include <assert.h>
-
 #include <iostream>
-
 #include "basic_circuit.h"
 #include "cacti_interface.h"
 #include "component.h"
-#include "mat.h"
 #include "parameter.h"
+#include "mat.h"
 #include "wire.h"
 
 class Arbiter : public Component

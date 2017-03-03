@@ -31,15 +31,14 @@
 
 
 
-#include <cassert>
-#include <cmath>
-#include <iostream>
-
 #include "area.h"
-#include "basic_circuit.h"
 #include "component.h"
 #include "decoder.h"
 #include "parameter.h"
+#include "basic_circuit.h"
+#include <iostream>
+#include <math.h>
+#include <assert.h>
 
 using namespace std;
 

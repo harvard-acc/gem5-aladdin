@@ -187,6 +187,10 @@ AddLocalOption('--update-ref', dest='update_ref', action='store_true',
                help='Update test reference outputs')
 AddLocalOption('--verbose', dest='verbose', action='store_true',
                help='Print full tool command lines')
+AddLocalOption('--use_db', dest='use_db', action='store_true',
+               help='Compile with support for writing to MySQL DB.')
+AddLocalOption('--debug_aladdin', dest='debug_aladdin', action='store_true',
+               help='Compile with Aladdin debugging output.')
 AddLocalOption('--without-python', dest='without_python',
                action='store_true',
                help='Build without Python configuration support')
@@ -209,7 +213,8 @@ termcap = get_termcap(GetOption('use_colors'))
 # export TERM so that clang reports errors in color
 use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
                  'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PROTOC',
-                 'PYTHONPATH', 'RANLIB', 'SWIG', 'TERM' ])
+                 'PYTHONPATH', 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT',
+                 'MYSQL_HOME' ])
 
 use_prefixes = [
     "ASAN_",           # address sanitizer symbolizer path and settings
@@ -233,7 +238,19 @@ main = Environment(ENV=use_env, IMPLICIT_COMMAND_DEPENDENCIES=0)
 main.Decider('MD5-timestamp')
 main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
+#boost
+main.Append(CPPPATH=[use_env['BOOST_ROOT']])
+main.Append(LINKFLAGS='-lboost_graph -lboost_regex')
 
+if GetOption('use_db'):
+  main.Append(CPPPATH=[use_env['MYSQL_HOME']])
+  main.Append(CXXFLAGS='-DUSE_DB')
+  main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
+
+if GetOption('debug_aladdin'):
+  main.Append(CCFLAGS = '-DDEBUG')
+
+#FIXME
 main_dict_keys = main.Dictionary().keys()
 
 # Check that we have a C/C++ compiler
@@ -652,9 +669,14 @@ if main['GCC'] or main['CLANG']:
     # Enable -Wall and -Wextra and then disable the few warnings that
     # we consistently violate
     main.Append(CCFLAGS=['-Wall', '-Wundef', '-Wextra',
-                         '-Wno-sign-compare', '-Wno-unused-parameter'])
+                         '-Wno-sign-compare', '-Wno-unused-parameter',
+                         '-Wmissing-field-initializers',
+                         '-Woverloaded-virtual',
+                         '-Wno-unused-local-typedefs',
+                         '-Wunused-but-set-variable'])
     # We always compile using C++11
     main.Append(CXXFLAGS=['-std=c++11'])
+    main.Append(CXXFLAGS=['-DNTHREADS=8'])
     if sys.platform.startswith('freebsd'):
         main.Append(CCFLAGS=['-I/usr/local/include'])
         main.Append(CXXFLAGS=['-I/usr/local/include'])

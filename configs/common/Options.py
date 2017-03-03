@@ -43,9 +43,11 @@ from m5.defines import buildEnv
 from m5.objects import *
 from common.Benchmarks import *
 
-from common import CpuConfig
-from common import MemConfig
-from common import PlatformConfig
+import CpuConfig
+import CacheConfig
+import MemConfig
+
+from FSConfig import os_types
 
 def _listCpuTypes(option, opt, value, parser):
     CpuConfig.print_cpu_list()
@@ -85,7 +87,7 @@ def addNoISAOptions(parser):
     parser.add_option("--mem-ranks", type="int", default=None,
                       help = "number of memory ranks per channel")
     parser.add_option("--mem-size", action="store", type="string",
-                      default="512MB",
+                      default="128MB",
                       help="Specify the physical memory size (single memory)")
 
 
@@ -98,6 +100,10 @@ def addNoISAOptions(parser):
                       help="use external port for SystemC TLM cosimulation")
     parser.add_option("--caches", action="store_true")
     parser.add_option("--l2cache", action="store_true")
+    parser.add_option("--enable_prefetchers", action="store_true")
+    parser.add_option("--prefetcher-type", type="choice", default="tagged",
+                      choices=CacheConfig.prefetcher_names(),
+                      help = "type of cache prefetcher to use")
     parser.add_option("--num-dirs", type="int", default=1)
     parser.add_option("--num-l2caches", type="int", default=1)
     parser.add_option("--num-l3caches", type="int", default=1)
@@ -109,8 +115,17 @@ def addNoISAOptions(parser):
     parser.add_option("--l1i_assoc", type="int", default=2)
     parser.add_option("--l2_assoc", type="int", default=8)
     parser.add_option("--l3_assoc", type="int", default=16)
+    parser.add_option("--l1d_hit_latency", type="int", default="2")
+    parser.add_option("--l1i_hit_latency", type="int", default="2")
+    parser.add_option("--l2_hit_latency", type="int", default="20")
     parser.add_option("--cacheline_size", type="int", default=64)
+    parser.add_option("--xbar_width", type="int", default=8)
+    parser.add_option("--record-dram-traffic", action="store_true",
+        help="Record DRAM memory traffic packets to file (requires protobuf).")
 
+    # Aladdin Options
+    parser.add_option("--accel_cfg_file", default=None,
+                      help="Aladdin accelerator configuration file.")
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 
@@ -292,6 +307,10 @@ def addCommonOptions(parser):
                       choices=["arm", "thumb", "aarch64"],
                       help="ARM instruction set.")
 
+
+    # Stats options.
+    parser.add_option("--enable-stats-dump", action="store_true", default=False,
+        help="Dump stats if sim loop exits with cause \"dump statistics\".")
 
 def addSEOptions(parser):
     # Benchmark options

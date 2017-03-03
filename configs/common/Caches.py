@@ -52,7 +52,7 @@ class L1Cache(Cache):
     tag_latency = 2
     data_latency = 2
     response_latency = 2
-    mshrs = 4
+    mshrs = 16  # originally 4; Cortex-A15 has 16.
     tgts_per_mshr = 20
 
 class L1_ICache(L1Cache):
@@ -97,3 +97,19 @@ class PageTableWalkerCache(Cache):
         is_read_only = True
         # Writeback clean lines as well
         writeback_clean = True
+
+class L1TaggedPrefetchCache(L1Cache):
+    prefetch_on_access = 'true'
+    prefetcher = TaggedPrefetcher(degree=8, latency=1)
+
+class L2TaggedPrefetchCache(L2Cache):
+    prefetch_on_access = 'true'
+    prefetcher = TaggedPrefetcher(degree=8, latency=1)
+
+class L1StridePrefetchCache(L1Cache):
+    prefetch_on_access = 'true'
+    prefetcher = StridePrefetcher(degree=8, latency=1)
+
+class L2StridePrefetchCache(L2Cache):
+    prefetch_on_access = 'true'
+    prefetcher = StridePrefetcher(degree=8, latency=1)

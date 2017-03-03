@@ -1,30 +1,28 @@
 TAR = mcpat
-BUILD_DIR ?= ../../build
-ODIR = $(BUILD_DIR)/mcpat
 
-.PHONY: all dbg opt clean clean_dbg clean_opt
+.PHONY: dbg opt depend clean clean_dbg clean_opt
 
 all: opt
 
-dbg: $(TAR).mk $(ODIR)/obj_dbg
-	@$(MAKE) TAG=dbg ODIR=$(ODIR) -C . -f $(TAR).mk
+dbg: $(TAR).mk obj_dbg
+	@$(MAKE) TAG=dbg -C . -f $(TAR).mk
 
-opt: $(TAR).mk $(ODIR)/obj_opt
-	@$(MAKE) TAG=opt ODIR=$(ODIR) -C . -f $(TAR).mk
+opt: $(TAR).mk obj_opt
+	@$(MAKE) TAG=opt -C . -f $(TAR).mk
 
-$(ODIR)/obj_dbg:
-	mkdir -p $@
+obj_dbg:
+	mkdir $@
 
-$(ODIR)/obj_opt:
-	mkdir -p $@
+obj_opt:
+	mkdir $@
 
 clean: clean_dbg clean_opt
 
-clean_dbg: $(ODIR)/obj_dbg
-	@$(MAKE) TAG=dbg ODIR=$(ODIR) -C . -f $(TAR).mk clean
+clean_dbg: obj_dbg
+	@$(MAKE) TAG=dbg -C . -f $(TAR).mk clean
 	rm -rf $<
 
-clean_opt: $(ODIR)/obj_opt
-	@$(MAKE) TAG=opt ODIR=$(ODIR) -C . -f $(TAR).mk clean
+clean_opt: obj_opt
+	@$(MAKE) TAG=opt -C . -f $(TAR).mk clean
 	rm -rf $<
 

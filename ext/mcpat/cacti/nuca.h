@@ -2,7 +2,6 @@
  *                                McPAT/CACTI
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
- *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,7 +25,7 @@
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
  *
  ***************************************************************************/
 
@@ -34,21 +33,22 @@
 #ifndef __NUCA_H__
 #define __NUCA_H__
 
+#include "basic_circuit.h"
+#include "component.h"
+#include "parameter.h"
+#include "assert.h"
+#include "cacti_interface.h"
+#include "wire.h"
+#include "mat.h"
+#include "io.h"
+#include "router.h"
 #include <iostream>
 
-#include "assert.h"
-#include "basic_circuit.h"
-#include "cacti_interface.h"
-#include "component.h"
-#include "io.h"
-#include "mat.h"
-#include "parameter.h"
-#include "router.h"
-#include "wire.h"
+
 
 class nuca_org_t {
-public:
-    ~nuca_org_t();
+  public:
+  ~nuca_org_t();
 //    int size;
     /* area, power, access time, and cycle time stats */
     Component nuca_pda;
@@ -72,8 +72,9 @@ public:
 
 
 
-class Nuca : public Component {
-public:
+class Nuca : public Component
+{
+  public:
     Nuca(
         TechnologyParameter::DeviceType *dt);
     void print_router();
@@ -87,12 +88,12 @@ public:
     void print_nuca(nuca_org_t *n);
     void print_cont_stats();
 
-private:
+  private:
 
     TechnologyParameter::DeviceType *deviceType;
     int wt_min, wt_max;
     Wire *wire_vertical[WIRE_TYPES],
-    *wire_horizontal[WIRE_TYPES];
+         *wire_horizontal[WIRE_TYPES];
 
 };
 

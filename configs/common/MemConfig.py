@@ -36,7 +36,11 @@
 # Authors: Andreas Sandberg
 #          Andreas Hansson
 
+import m5
+from m5.defines import buildEnv
 import m5.objects
+from m5.objects import CommMonitor
+from m5.util import addToPath, fatal
 import inspect
 import sys
 import HMC
@@ -186,6 +190,7 @@ def config_mem(options, system):
         fatal("Number of memory channels must be a power of 2")
 
     cls = get(options.mem_type)
+    
     mem_ctrls = []
 
     if options.elastic_trace_en and not issubclass(cls, \
@@ -202,7 +207,9 @@ def config_mem(options, system):
     # For every range (most systems will only have one), create an
     # array of controllers and set their parameters to match their
     # address mapping in the case of a DRAM
+    #for r in [m5.objects.AddrRange(0x00000000, size='32MB')]:
     for r in system.mem_ranges:
+        print "mem ctrl"
         for i in xrange(nbr_mem_ctrls):
             mem_ctrl = create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits,
                                        intlv_size)
@@ -226,4 +233,12 @@ def config_mem(options, system):
         if (options.mem_type == "HMC_2500_1x32"):
             subsystem.mem_ctrls[i].port = xbar[i/4].master
         else:
-            subsystem.mem_ctrls[i].port = xbar.master
+            if options.record_dram_traffic:
+                monitor = CommMonitor(
+                    trace_enable=True, trace_file="dram_%d.trc.gz" % i)
+                xbar.master = monitor.slave
+                monitor.master = subsystem.mem_ctrls[i].port
+                monitor_name = "dram_%d_monitor" % i
+                setattr(subsystem, monitor_name, monitor)
+            else:
+                subsystem.mem_ctrls[i].port = xbar.master

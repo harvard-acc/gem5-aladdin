@@ -2,7 +2,6 @@
  *                                McPAT
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
- *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,52 +25,62 @@
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
  *
  ***************************************************************************/
 #ifndef IOCONTROLLERS_H_
 #define IOCONTROLLERS_H_
 
-#include <vector>
 
-#include "array.h"
-#include "basic_components.h"
+#endif /* IOCONTROLLERS_H_ */
+
+#include "XML_Parse.h"
 #include "parameter.h"
+//#include "io.h"
+#include "array.h"
+//#include "Undifferentiated_Core_Area.h"
+#include <vector>
+#include "basic_components.h"
 
-class NIUController : public McPATComponent {
+class NIUController : public Component {
   public:
-    NIUParameters niup;
-    NIUStatistics nius;
-
-    NIUController(XMLNode* _xml_data, InputParameter* interface_ip_);
+	ParseXML *XML;
+	InputParameter interface_ip;
+    NIUParam  niup;
+    powerDef power_t;
+    uca_org_t local_result;
+    NIUController(ParseXML *XML_interface,InputParameter* interface_ip_);
     void set_niu_param();
-    void computeArea();
-    void computeEnergy();
+    void computeEnergy(bool is_tdp=true);
+    void displayEnergy(uint32_t indent = 0,int plevel = 100, bool is_tdp=true);
     ~NIUController(){};
 };
 
-class PCIeController : public McPATComponent {
+class PCIeController : public Component {
   public:
-    PCIeParameters pciep;
-    PCIeStatistics pcies;
-
-    PCIeController(XMLNode* _xml_data, InputParameter* interface_ip_);
+	ParseXML *XML;
+	InputParameter interface_ip;
+    PCIeParam  pciep;
+    powerDef power_t;
+    uca_org_t local_result;
+    PCIeController(ParseXML *XML_interface,InputParameter* interface_ip_);
     void set_pcie_param();
-    void computeArea();
-    void computeEnergy();
+    void computeEnergy(bool is_tdp=true);
+    void displayEnergy(uint32_t indent = 0,int plevel = 100, bool is_tdp=true);
     ~PCIeController(){};
 };
 
-class FlashController : public McPATComponent {
+class FlashController : public Component {
   public:
-    MCParameters fcp;
-    MCStatistics fcs;
-
-    FlashController(XMLNode* _xml_data, InputParameter* interface_ip_);
+	ParseXML *XML;
+	InputParameter interface_ip;
+    MCParam  fcp;
+    powerDef power_t;
+    uca_org_t local_result;
+    FlashController(ParseXML *XML_interface,InputParameter* interface_ip_);
     void set_fc_param();
-    void computeArea();
-    void computeEnergy();
+    void computeEnergy(bool is_tdp=true);
+    void displayEnergy(uint32_t indent = 0,int plevel = 100, bool is_tdp=true);
     ~FlashController(){};
 };
 
-#endif /* IOCONTROLLERS_H_ */

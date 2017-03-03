@@ -95,6 +95,11 @@
 #include "sim/syscall_debug_macros.hh"
 #include "sim/syscall_emul_buf.hh"
 #include "sim/syscall_return.hh"
+#include "sim/sim_exit.hh"
+#include "sim/system.hh"
+
+#include "aladdin/gem5/aladdin_sys_connection.h"
+#include "aladdin/gem5/aladdin_sys_constants.h"
 
 class SyscallDesc;
 
@@ -157,10 +162,6 @@ SyscallReturn lseekFunc(SyscallDesc *desc, int num,
 /// Target _llseek() handler.
 SyscallReturn _llseekFunc(SyscallDesc *desc, int num,
                           Process *p, ThreadContext *tc);
-
-/// Target munmap() handler.
-SyscallReturn munmapFunc(SyscallDesc *desc, int num,
-                         Process *p, ThreadContext *tc);
 
 /// Target gethostname() handler.
 SyscallReturn gethostnameFunc(SyscallDesc *desc, int num,
@@ -237,6 +238,9 @@ SyscallReturn fcntlFunc(SyscallDesc *desc, int num,
 /// Target fcntl64() handler.
 SyscallReturn fcntl64Func(SyscallDesc *desc, int num,
                           Process *process, ThreadContext *tc);
+
+// Aladdin handler function shared between 32-bit and 64-bit fcntl emulations.
+void fcntlAladdinHandler(Process *process, ThreadContext *tc);
 
 /// Target setuid() handler.
 SyscallReturn setuidFunc(SyscallDesc *desc, int num,
@@ -578,6 +582,45 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
     unsigned req = p->getSyscallArg(tc, index);
 
     DPRINTF(SyscallVerbose, "ioctl(%d, 0x%x, ...)\n", tgt_fd, req);
+
+    if (tgt_fd == ALADDIN_FD) {
+      if (req == DUMP_STATS || req == RESET_STATS) {
+        size_t max_desc_len = 100;
+
+        // Read the description string out of simulated memory.  We make the
+        // char buffer one character longer than the max length so that we can
+        // set the last character to the terminating character in case the
+        // string actually exceeds the max length allowed.
+        Addr desc_addr = (Addr) p->getSyscallArg(tc, index);
+        std::string stat_final_desc;
+        if (desc_addr != 0) {
+          SETranslatingPortProxy& memProxy = tc->getMemProxy();
+          uint8_t* desc_buf = new uint8_t[max_desc_len+2];
+          memProxy.readBlob(desc_addr, desc_buf, max_desc_len);
+          desc_buf[max_desc_len] = static_cast<uint8_t>(0);
+
+          char* stats_desc = (char*) desc_buf;
+          stat_final_desc = stats_desc;
+        }
+
+        // Create the final string to pass to exitSimLoop.
+        std::string exit_sim_loop_reason = (req == DUMP_STATS) ?
+            DUMP_STATS_EXIT_SIM_SIGNAL + stat_final_desc :
+            RESET_STATS_EXIT_SIM_SIGNAL + stat_final_desc;
+
+        exitSimLoop(exit_sim_loop_reason);
+      } else {
+        // Translate the finish flag pointer to a physical address that Aladdin
+        // will write to when execution is completed.
+        Addr paddr;
+        Addr finish_flag = (Addr) p->getSyscallArg(tc, index);
+        p->pTable->translate(finish_flag, paddr);
+        // We need the context and thread id of the calling thread.
+        p->system->activateAccelerator(
+            req, paddr, tc->contextId(), tc->threadId());
+      }
+      return -ENOTTY;
+    }
 
     if (OS::isTtyReq(req))
         return -ENOTTY;
@@ -1452,6 +1495,31 @@ mmap2Func(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     return mmapImpl<OS>(desc, num, p, tc, true);
 }
 
+/// Target munmap() handler.
+template <class OS>
+SyscallReturn
+munmapFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
+{
+    int index = 0;
+    Addr addr = p->getSyscallArg(tc, index);
+    size_t len = p->getSyscallArg(tc, index);
+
+    if (addr % TheISA::PageBytes != 0 ||
+        len % TheISA::PageBytes != 0) {
+        warn("mmap failing: arguments not page-aligned: "
+             "start 0x%x length 0x%x", addr, len);
+        return -EINVAL;
+    }
+    DPRINTF(SyscallVerbose, "munmap region from %#x-%#x.\n", addr, addr+len);
+
+    // Remove entries from the page table.
+    p->pTable->unmap(addr, len);
+
+    // TODO: With mmap more fully implemented, we might actually be able to
+    // reclaim the memory.
+    return 0;
+}
+
 /// Target getrlimit() handler.
 template <class OS>
 SyscallReturn
@@ -1676,5 +1744,23 @@ timeFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
     return sec;
 }
 
+template <class OS>
+SyscallReturn
+clockGetResFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+{
+  typename OS::time_t sec;
+  int index = 1;
+  Addr timespec_addr = (Addr) p->getSyscallArg(tc, index);
+  if (timespec_addr != 0) {
+    SETranslatingPortProxy &proxy = tc->getMemProxy();
+    /* Use a fixed clock precision. */
+    sec = 0;
+    long nsec = 1;
+    proxy.writeBlob(timespec_addr, (uint8_t*)&sec, (int) sizeof(typename OS::time_t));
+    proxy.writeBlob(timespec_addr + sizeof(typename OS::time_t),
+                    (uint8_t *)&nsec, (int)sizeof(long));
+  }
+  return 0;
+}
 
 #endif // __SIM_SYSCALL_EMUL_HH__

@@ -231,7 +231,7 @@ static SyscallDesc syscallDescs64[] = {
     /*   8 */ SyscallDesc("lseek", lseekFunc),
     /*   9 */ SyscallDesc("mmap", mmapFunc<X86Linux64>),
     /*  10 */ SyscallDesc("mprotect", ignoreFunc),
-    /*  11 */ SyscallDesc("munmap", munmapFunc),
+    /*  11 */ SyscallDesc("munmap", munmapFunc<X86Linux64>),
     /*  12 */ SyscallDesc("brk", brkFunc),
     /*  13 */ SyscallDesc("rt_sigaction", ignoreFunc, SyscallDesc::WarnOnce),
     /*  14 */ SyscallDesc("rt_sigprocmask", ignoreFunc, SyscallDesc::WarnOnce),
@@ -621,7 +621,7 @@ static SyscallDesc syscallDescs32[] = {
     /*  75 */ SyscallDesc("setrlimit", ignoreFunc),
     /*  76 */ SyscallDesc("getrlimit", getrlimitFunc<X86Linux32>),
     /*  77 */ SyscallDesc("getrusage", getrusageFunc<X86Linux32>),
-    /*  78 */ SyscallDesc("gettimeofday", unimplementedFunc),
+    /*  78 */ SyscallDesc("gettimeofday", gettimeofdayFunc<X86Linux32>),
     /*  79 */ SyscallDesc("settimeofday", unimplementedFunc),
     /*  80 */ SyscallDesc("getgroups", unimplementedFunc),
     /*  81 */ SyscallDesc("setgroups", unimplementedFunc),
@@ -634,7 +634,7 @@ static SyscallDesc syscallDescs32[] = {
     /*  88 */ SyscallDesc("reboot", unimplementedFunc),
     /*  89 */ SyscallDesc("readdir", unimplementedFunc),
     /*  90 */ SyscallDesc("mmap", unimplementedFunc),
-    /*  91 */ SyscallDesc("munmap", munmapFunc),
+    /*  91 */ SyscallDesc("munmap", munmapFunc<X86Linux32>),
     /*  92 */ SyscallDesc("truncate", truncateFunc),
     /*  93 */ SyscallDesc("ftruncate", ftruncateFunc),
     /*  94 */ SyscallDesc("fchmod", unimplementedFunc),
@@ -764,8 +764,8 @@ static SyscallDesc syscallDescs32[] = {
     /* 218 */ SyscallDesc("mincore", unimplementedFunc),
     /* 219 */ SyscallDesc("madvise", unimplementedFunc),
     /* 220 */ SyscallDesc("madvise1", unimplementedFunc),
-    /* 221 */ SyscallDesc("getdents64", unimplementedFunc),
-    /* 222 */ SyscallDesc("fcntl64", unimplementedFunc),
+    /* 221 */ SyscallDesc("getdents64", ignoreFunc),
+    /* 222 */ SyscallDesc("fcntl64", fcntl64Func),
     /* 223 */ SyscallDesc("unused", unimplementedFunc),
     /* 224 */ SyscallDesc("gettid", unimplementedFunc),
     /* 225 */ SyscallDesc("readahead", unimplementedFunc),
@@ -866,8 +866,7 @@ static SyscallDesc syscallDescs32[] = {
     /* 320 */ SyscallDesc("utimensat", unimplementedFunc),
     /* 321 */ SyscallDesc("signalfd", unimplementedFunc),
     /* 322 */ SyscallDesc("timerfd", unimplementedFunc),
-    /* 323 */ SyscallDesc("eventfd", unimplementedFunc)
-};
+    /* 323 */ SyscallDesc("eventfd", unimplementedFunc)};
 
 I386LinuxProcess::I386LinuxProcess(ProcessParams * params, ObjectFile *objFile)
     : I386Process(params, objFile, syscallDescs32,

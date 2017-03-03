@@ -2,7 +2,6 @@
  *                                McPAT
  *                      SOFTWARE LICENSE AGREEMENT
  *            Copyright 2012 Hewlett-Packard Development Company, L.P.
- *            Copyright (c) 2010-2013 Advanced Micro Devices, Inc.
  *                          All Rights Reserved
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,60 +25,76 @@
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
  *
  ***************************************************************************/
 
 #ifndef ARRAY_H_
 #define ARRAY_H_
 
+#include "basic_components.h"
+#include "const.h"
+#include "cacti_interface.h"
+#include "parameter.h"
+#include "component.h"
 #include <iostream>
 #include <string>
 
-#include "basic_components.h"
-#include "cacti_interface.h"
-#include "component.h"
-#include "const.h"
-#include "parameter.h"
-
 using namespace std;
 
-class ArrayST : public McPATComponent {
-public:
-    static double area_efficiency_threshold;
+class ArrayST :public Component{
+ public:
+  ArrayST(){};
+  ArrayST(const InputParameter *configure_interface, string _name, enum Device_ty device_ty_, bool opt_local_=true, enum Core_type core_ty_=Inorder,  bool _is_default=true);
 
-    // These are used for the CACTI interface.
-    static int ed;
-    static int delay_wt;
-    static int cycle_time_wt;
-    static int area_wt;
-    static int dynamic_power_wt;
-    static int leakage_power_wt;
-    static int delay_dev;
-    static int cycle_time_dev;
-    static int area_dev;
-    static int dynamic_power_dev;
-    static int leakage_power_dev;
-    static int cycle_time_dev_threshold;
+  InputParameter l_ip;
+  string         name;
+  enum Device_ty device_ty;
+  bool opt_local;
+  enum Core_type core_ty;
+  bool           is_default;
+  uca_org_t      local_result;
 
-    InputParameter l_ip;
-    enum Device_ty device_ty;
-    bool opt_local;
-    enum Core_type core_ty;
-    bool is_default;
-    uca_org_t local_result;
-    statsDef stats_t;
+  statsDef       tdp_stats;
+  statsDef       rtp_stats;
+  statsDef       stats_t;
+  powerDef       power_t;
 
-    ArrayST(XMLNode* _xml_data, const InputParameter *configure_interface,
-            string _name, enum Device_ty device_ty_, double _clockRate = 0.0f,
-            bool opt_local_ = true,
-            enum Core_type core_ty_ = Inorder, bool _is_default = true);
-    void computeArea();
-    void computeEnergy();
-    void compute_base_power();
-    ~ArrayST();
-
-    void leakage_feedback(double temperature);
+  virtual void optimize_array();
+  virtual void compute_base_power();
+  virtual ~ArrayST();
+  
+  void leakage_feedback(double temperature);
 };
 
-#endif /* ARRAY_H_ */
+class InstCache :public Component{
+public:
+  ArrayST* caches;
+  ArrayST* missb;
+  ArrayST* ifb;
+  ArrayST* prefetchb;
+  powerDef power_t;//temp value holder for both (max) power and runtime power
+  InstCache(){caches=0;missb=0;ifb=0;prefetchb=0;};
+  ~InstCache(){
+	  if (caches)    {//caches->local_result.cleanup();
+					  delete caches; caches=0;}
+	  if (missb)     {//missb->local_result.cleanup();
+					  delete missb; missb=0;}
+	  if (ifb)       {//ifb->local_result.cleanup();
+					  delete ifb; ifb=0;}
+	  if (prefetchb) {//prefetchb->local_result.cleanup();
+					  delete prefetchb; prefetchb=0;}
+   };
+};
+
+class DataCache :public InstCache{
+public:
+  ArrayST* wbb;
+  DataCache(){wbb=0;};
+  ~DataCache(){
+	  if (wbb) {//wbb->local_result.cleanup();
+				delete wbb; wbb=0;}
+   };
+};
+
+#endif /* TLB_H_ */
