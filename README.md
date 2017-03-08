@@ -1,7 +1,7 @@
 gem5-Aladdin SoC Simulator
 ==============================
 
-[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=master)](https://travis-ci.org/harvard-acc/gem5-aladdin)
+[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=stable-old)](https://travis-ci.org/harvard-acc/gem5-aladdin)
 
 Welcome to the gem5-Aladdin SoC simulator!
 
@@ -20,6 +20,19 @@ Yakun Sophia Shao, Sam (Likun) Xi, Vijayalakashmi Srinvisan, Gu-Yeon Wei, and Da
 International Symposium on Microarchitecture (MICRO), June 2016.
 [PDF](http://www.eecs.harvard.edu/~shao/papers/shao2016-micro.pdf)
 
+## Notices ##
+
+#### March 7th, 2017 ####
+
+This branch of gem5-Aladdin is based upon gem5's stable branch, which has been
+deprecated. All future gem5 development is taking place on its development
+branch instead, and there will be no new commits to gem5-stable. Therefore,
+gem5-Aladdin has now been merged with that development branch. This branch will
+remain but will no longer be actively maintained, apart from critical bug
+fixes.
+
+To remain up to date with gem5-Aladdin, please see the `devel` branch
+[here](https://github.com/harvard-acc/gem5-aladdin/tree/devel).
 
 ## Requirements: ##
 
