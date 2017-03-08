@@ -1,7 +1,7 @@
 gem5-Aladdin SoC Simulator
 ==============================
 
-[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=master)](https://travis-ci.org/harvard-acc/gem5-aladdin)
+[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=devel)](https://travis-ci.org/harvard-acc/gem5-aladdin)
 
 Welcome to the gem5-Aladdin SoC simulator!
 
@@ -15,11 +15,31 @@ system-level effects impact overall application performance and speedup.
 
 If you use gem5-Aladdin in your research, we would appreciate a citation to:
 
-Co-Designing Accelerators and SoC Interfaces using gem5-Aladdin.  
-Yakun Sophia Shao, Sam (Likun) Xi, Vijayalakashmi Srinvisan, Gu-Yeon Wei, and David Brooks.  
+Co-Designing Accelerators and SoC Interfaces using gem5-Aladdin.
+Yakun Sophia Shao, Sam (Likun) Xi, Vijayalakashmi Srinvisan, Gu-Yeon Wei, and David Brooks.
 International Symposium on Microarchitecture (MICRO), June 2016.
 [PDF](http://www.eecs.harvard.edu/~shao/papers/shao2016-micro.pdf)
 
+
+## Notices ##
+
+#### March 7th, 2017 ####
+
+This branch of gem5-Aladdin is based on gem5's *development* branch.  The
+original release of gem5-Aladdin (still accessible via this repository's
+`stable-old` branch) was based on gem5's stable branch, which has
+been deprecated. The development branch and the stable branch have *entirely
+separate histories*. If you are a current user and you want to stay up to date
+with gem5-Aladdin, you *must* check out a completely fresh branch. You cannot
+simply merge the old branch with this new one!
+
+We recommend that you clone a new local repository from this branch, rather
+than trying to bring this into your current local repository. To do so:
+
+    git clone -b devel https://github.com/harvard-acc/gem5-aladdin
+
+The devel branch will soon be made the default branch, at which point you can
+drop the `-b devel` argument.
 
 ## Requirements: ##
 

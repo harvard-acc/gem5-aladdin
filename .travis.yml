@@ -23,7 +23,7 @@ compiler:
   - g++
 
 script:
-  - scons build/X86/gem5.opt -j2
+  - scons build/X86/gem5.opt -j2 --ignore-style
   - cd src/aladdin/integration-test/common && python run_cpu_tests.py
 
 notifications:
