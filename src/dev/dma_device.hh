@@ -58,9 +58,6 @@
 //Modification of DMA for Aladdin simulation
 #define MAX_DMA_REQUEST 64
 
-/* Maximum of DMA channels*/
-#define MAX_CHANNELS 20
-
 class DmaPort : public MasterPort, public Drainable
 {
   private:
@@ -152,13 +149,13 @@ class DmaPort : public MasterPort, public Drainable
     unsigned numOutstandingRequests;
 
     /** Keep track of the current channel index to send DMA request. */
-    int currChannelIdx;
+    unsigned currChannel;
 
     /** DMA transaction chunk size. */
     unsigned chunkSize;
 
-    /** True if we want to interleave DMA requests from different channels.*/
-    bool multiChannel;
+    /** Number of virtual DMA channels. */
+    unsigned numChannels;
 
     /** True if we should send invalidation packets before writes.
      *
@@ -173,6 +170,9 @@ class DmaPort : public MasterPort, public Drainable
 
     void queueDma(unsigned channel_index, PacketPtr pkt);
 
+    unsigned findNextEmptyChannel();
+    unsigned findNextNonEmptyChannel();
+
     Addr getPacketAddr(PacketPtr pkt);
 
     Event* getPacketCompletionEvent(PacketPtr pkt);
@@ -184,7 +184,7 @@ class DmaPort : public MasterPort, public Drainable
     DmaPort(MemObject *dev, System *s, unsigned max_req);
 
     DmaPort(MemObject *dev, System *s, unsigned max_req,
-            unsigned _chunkSize, bool _multiChannel = false,
+            unsigned _chunkSize, unsigned _numChannels = 1,
             bool _invalidateOnWrite = false);
 
     RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,

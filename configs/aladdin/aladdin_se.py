@@ -231,7 +231,7 @@ if options.accel_cfg_file:
         executeStandalone = (np == 0))
     datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
     datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
-    datapath.multiChannelDMA = config.getboolean(accel, "dma_multi_channel")
+    datapath.numDmaChannels = config.getint(accel, "num_dma_channels")
     datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
     datapath.pipelinedDma = config.getboolean(accel, "pipelined_dma")
     datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
