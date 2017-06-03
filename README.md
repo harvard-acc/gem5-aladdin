@@ -1,7 +1,7 @@
 gem5-Aladdin SoC Simulator
 ==============================
 
-[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=devel)](https://travis-ci.org/harvard-acc/gem5-aladdin)
+[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=master)](https://travis-ci.org/harvard-acc/gem5-aladdin)
 
 Welcome to the gem5-Aladdin SoC simulator!
 
@@ -22,6 +22,11 @@ International Symposium on Microarchitecture (MICRO), June 2016.
 
 
 ## Notices ##
+
+#### June 3rd, 2017 ####
+
+This branch has been renamed from `devel` to `master` and is now the default
+branch of this repository.
 
 #### March 7th, 2017 ####
 
