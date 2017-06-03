@@ -22,6 +22,11 @@ International Symposium on Microarchitecture (MICRO), June 2016.
 
 ## Notices ##
 
+#### June 3rd, 2017 ####
+
+The `devel` branch has been renamed to the `master` branch, which is now the
+current default branch.
+
 #### March 7th, 2017 ####
 
 This branch of gem5-Aladdin is based upon gem5's stable branch, which has been
@@ -31,8 +36,8 @@ gem5-Aladdin has now been merged with that development branch. This branch will
 remain but will no longer be actively maintained, apart from critical bug
 fixes.
 
-To remain up to date with gem5-Aladdin, please see the `devel` branch
-[here](https://github.com/harvard-acc/gem5-aladdin/tree/devel).
+To remain up to date with gem5-Aladdin, please see the `master` branch
+[here](https://github.com/harvard-acc/gem5-aladdin).
 
 ## Requirements: ##
 
