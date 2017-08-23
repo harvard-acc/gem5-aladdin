@@ -40,6 +40,8 @@
 #ifndef __ARCH_NULL_REGISTERS_HH__
 #define __ARCH_NULL_REGISTERS_HH__
 
+#include "arch/generic/vec_reg.hh"
+#include "arch/types.hh"
 #include "base/types.hh"
 
 namespace NullISA {
@@ -49,6 +51,16 @@ typedef uint32_t FloatRegBits;
 typedef float FloatReg;
 typedef uint8_t CCReg;
 typedef uint64_t MiscReg;
+const RegIndex ZeroReg = 0;
+
+// dummy typedefs since we don't have vector regs
+constexpr unsigned NumVecElemPerVecReg = 2;
+using VecElem = uint32_t;
+using VecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, false>;
+using ConstVecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, true>;
+using VecRegContainer = VecReg::Container;
+// This has to be one to prevent warnings that are treated as errors
+constexpr unsigned NumVecRegs = 1;
 
 }
 

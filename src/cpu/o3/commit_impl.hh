@@ -71,26 +71,12 @@
 using namespace std;
 
 template <class Impl>
-DefaultCommit<Impl>::TrapEvent::TrapEvent(DefaultCommit<Impl> *_commit,
-                                          ThreadID _tid)
-    : Event(CPU_Tick_Pri, AutoDelete), commit(_commit), tid(_tid)
-{
-}
-
-template <class Impl>
 void
-DefaultCommit<Impl>::TrapEvent::process()
+DefaultCommit<Impl>::processTrapEvent(ThreadID tid)
 {
     // This will get reset by commit if it was switched out at the
     // time of this event processing.
-    commit->trapSquash[tid] = true;
-}
-
-template <class Impl>
-const char *
-DefaultCommit<Impl>::TrapEvent::description() const
-{
-    return "Trap";
+    trapSquash[tid] = true;
 }
 
 template <class Impl>
@@ -257,6 +243,13 @@ DefaultCommit<Impl>::regStats()
         .init(cpu->numThreads)
         .name(name() + ".fp_insts")
         .desc("Number of committed floating point instructions.")
+        .flags(total)
+        ;
+
+    statComVector
+        .init(cpu->numThreads)
+        .name(name() + ".vec_insts")
+        .desc("Number of committed Vector instructions.")
         .flags(total)
         ;
 
@@ -530,7 +523,9 @@ DefaultCommit<Impl>::generateTrapEvent(ThreadID tid, Fault inst_fault)
 {
     DPRINTF(Commit, "Generating trap event for [tid:%i]\n", tid);
 
-    TrapEvent *trap = new TrapEvent(this, tid);
+    EventFunctionWrapper *trap = new EventFunctionWrapper(
+        [this, tid]{ processTrapEvent(tid); },
+        "Trap", true, Event::CPU_Tick_Pri);
 
     Cycles latency = dynamic_pointer_cast<SyscallRetryFault>(inst_fault) ?
                      cpu->syscallRetryLatency : trapLatency;
@@ -1404,6 +1399,9 @@ DefaultCommit<Impl>::updateComInstStats(DynInstPtr &inst)
     // Floating Point Instruction
     if (inst->isFloating())
         statComFloating[tid]++;
+    // Vector Instruction
+    if (inst->isVector())
+        statComVector[tid]++;
 
     // Function Calls
     if (inst->isCall())

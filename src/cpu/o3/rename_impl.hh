@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012, 2014-2015 ARM Limited
+ * Copyright (c) 2010-2012, 2014-2016 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved.
  *
@@ -67,9 +67,7 @@ DefaultRename<Impl>::DefaultRename(O3CPU *_cpu, DerivO3CPUParams *params)
       commitToRenameDelay(params->commitToRenameDelay),
       renameWidth(params->renameWidth),
       commitWidth(params->commitWidth),
-      numThreads(params->numThreads),
-      maxPhysicalRegs(params->numPhysIntRegs + params->numPhysFloatRegs
-                      + params->numPhysCCRegs)
+      numThreads(params->numThreads)
 {
     if (renameWidth > Impl::MaxWidth)
         fatal("renameWidth (%d) is larger than compiled limit (%d),\n"
@@ -182,6 +180,10 @@ DefaultRename<Impl>::regStats()
         .name(name() + ".fp_rename_lookups")
         .desc("Number of floating rename lookups")
         .prereq(fpRenameLookups);
+    vecRenameLookups
+        .name(name() + ".vec_rename_lookups")
+        .desc("Number of vector rename lookups")
+        .prereq(vecRenameLookups);
 }
 
 template <class Impl>
@@ -645,6 +647,8 @@ DefaultRename<Impl>::renameInsts(ThreadID tid)
         // to rename to.  Otherwise block.
         if (!renameMap[tid]->canRename(inst->numIntDestRegs(),
                                        inst->numFPDestRegs(),
+                                       inst->numVecDestRegs(),
+                                       inst->numVecElemDestRegs(),
                                        inst->numCCDestRegs())) {
             DPRINTF(Rename, "Blocking due to lack of free "
                     "physical registers to rename to.\n");
@@ -983,9 +987,11 @@ DefaultRename<Impl>::removeFromHistory(InstSeqNum inst_seq_num, ThreadID tid)
            hb_it != historyBuffer[tid].end() &&
            hb_it->instSeqNum <= inst_seq_num) {
 
-        DPRINTF(Rename, "[tid:%u]: Freeing up older rename of reg %i, "
+        DPRINTF(Rename, "[tid:%u]: Freeing up older rename of reg %i (%s), "
                 "[sn:%lli].\n",
-                tid, hb_it->prevPhysReg, hb_it->instSeqNum);
+                tid, hb_it->prevPhysReg->index(),
+                hb_it->prevPhysReg->className(),
+                hb_it->instSeqNum);
 
         // Don't free special phys regs like misc and zero regs, which
         // can be recognized because the new mapping is the same as
@@ -1011,54 +1017,49 @@ DefaultRename<Impl>::renameSrcRegs(DynInstPtr &inst, ThreadID tid)
     // Get the architectual register numbers from the source and
     // operands, and redirect them to the right physical register.
     for (int src_idx = 0; src_idx < num_src_regs; src_idx++) {
-        RegIndex src_reg = inst->srcRegIdx(src_idx);
-        RegIndex rel_src_reg;
-        RegIndex flat_rel_src_reg;
-        PhysRegIndex renamed_reg;
+        const RegId& src_reg = inst->srcRegIdx(src_idx);
+        PhysRegIdPtr renamed_reg;
 
-        switch (regIdxToClass(src_reg, &rel_src_reg)) {
+        renamed_reg = map->lookup(tc->flattenRegId(src_reg));
+        switch (src_reg.classValue()) {
           case IntRegClass:
-            flat_rel_src_reg = tc->flattenIntIndex(rel_src_reg);
-            renamed_reg = map->lookupInt(flat_rel_src_reg);
             intRenameLookups++;
             break;
-
           case FloatRegClass:
-            flat_rel_src_reg = tc->flattenFloatIndex(rel_src_reg);
-            renamed_reg = map->lookupFloat(flat_rel_src_reg);
             fpRenameLookups++;
             break;
-
-          case CCRegClass:
-            flat_rel_src_reg = tc->flattenCCIndex(rel_src_reg);
-            renamed_reg = map->lookupCC(flat_rel_src_reg);
+          case VecRegClass:
+            vecRenameLookups++;
             break;
-
+          case CCRegClass:
           case MiscRegClass:
-            // misc regs don't get flattened
-            flat_rel_src_reg = rel_src_reg;
-            renamed_reg = map->lookupMisc(flat_rel_src_reg);
             break;
 
           default:
-            panic("Reg index is out of bound: %d.", src_reg);
+            panic("Invalid register class: %d.", src_reg.classValue());
         }
 
-        DPRINTF(Rename, "[tid:%u]: Looking up %s arch reg %i (flattened %i), "
-                "got phys reg %i\n", tid, RegClassStrings[regIdxToClass(src_reg)],
-                (int)src_reg, (int)flat_rel_src_reg, (int)renamed_reg);
+        DPRINTF(Rename, "[tid:%u]: Looking up %s arch reg %i"
+                ", got phys reg %i (%s)\n", tid,
+                src_reg.className(), src_reg.index(),
+                renamed_reg->index(),
+                renamed_reg->className());
 
         inst->renameSrcReg(src_idx, renamed_reg);
 
         // See if the register is ready or not.
         if (scoreboard->getReg(renamed_reg)) {
-            DPRINTF(Rename, "[tid:%u]: Register %d is ready.\n",
-                    tid, renamed_reg);
+            DPRINTF(Rename, "[tid:%u]: Register %d (flat: %d) (%s)"
+                    " is ready.\n", tid, renamed_reg->index(),
+                    renamed_reg->flatIndex(),
+                    renamed_reg->className());
 
             inst->markSrcRegReady(src_idx);
         } else {
-            DPRINTF(Rename, "[tid:%u]: Register %d is not ready.\n",
-                    tid, renamed_reg);
+            DPRINTF(Rename, "[tid:%u]: Register %d (flat: %d) (%s)"
+                    " is not ready.\n", tid, renamed_reg->index(),
+                    renamed_reg->flatIndex(),
+                    renamed_reg->className());
         }
 
         ++renameRenameLookups;
@@ -1075,53 +1076,26 @@ DefaultRename<Impl>::renameDestRegs(DynInstPtr &inst, ThreadID tid)
 
     // Rename the destination registers.
     for (int dest_idx = 0; dest_idx < num_dest_regs; dest_idx++) {
-        RegIndex dest_reg = inst->destRegIdx(dest_idx);
-        RegIndex rel_dest_reg;
-        RegIndex flat_rel_dest_reg;
-        RegIndex flat_uni_dest_reg;
+        const RegId& dest_reg = inst->destRegIdx(dest_idx);
         typename RenameMap::RenameInfo rename_result;
 
-        switch (regIdxToClass(dest_reg, &rel_dest_reg)) {
-          case IntRegClass:
-            flat_rel_dest_reg = tc->flattenIntIndex(rel_dest_reg);
-            rename_result = map->renameInt(flat_rel_dest_reg);
-            flat_uni_dest_reg = flat_rel_dest_reg;  // 1:1 mapping
-            break;
+        RegId flat_dest_regid = tc->flattenRegId(dest_reg);
 
-          case FloatRegClass:
-            flat_rel_dest_reg = tc->flattenFloatIndex(rel_dest_reg);
-            rename_result = map->renameFloat(flat_rel_dest_reg);
-            flat_uni_dest_reg = flat_rel_dest_reg + TheISA::FP_Reg_Base;
-            break;
+        rename_result = map->rename(flat_dest_regid);
 
-          case CCRegClass:
-            flat_rel_dest_reg = tc->flattenCCIndex(rel_dest_reg);
-            rename_result = map->renameCC(flat_rel_dest_reg);
-            flat_uni_dest_reg = flat_rel_dest_reg + TheISA::CC_Reg_Base;
-            break;
-
-          case MiscRegClass:
-            // misc regs don't get flattened
-            flat_rel_dest_reg = rel_dest_reg;
-            rename_result = map->renameMisc(flat_rel_dest_reg);
-            flat_uni_dest_reg = flat_rel_dest_reg + TheISA::Misc_Reg_Base;
-            break;
-
-          default:
-            panic("Reg index is out of bound: %d.", dest_reg);
-        }
-
-        inst->flattenDestReg(dest_idx, flat_uni_dest_reg);
+        inst->flattenDestReg(dest_idx, flat_dest_regid);
 
         // Mark Scoreboard entry as not ready
         scoreboard->unsetReg(rename_result.first);
 
-        DPRINTF(Rename, "[tid:%u]: Renaming arch reg %i to physical "
-                "reg %i.\n", tid, (int)flat_rel_dest_reg,
-                (int)rename_result.first);
+        DPRINTF(Rename, "[tid:%u]: Renaming arch reg %i (%s) to physical "
+                "reg %i (%i).\n", tid, dest_reg.index(),
+                dest_reg.className(),
+                rename_result.first->index(),
+                rename_result.first->flatIndex());
 
         // Record the rename information so that a history can be kept.
-        RenameHistory hb_entry(inst->seqNum, flat_uni_dest_reg,
+        RenameHistory hb_entry(inst->seqNum, flat_dest_regid,
                                rename_result.first,
                                rename_result.second);
 
@@ -1272,12 +1246,17 @@ DefaultRename<Impl>::readFreeEntries(ThreadID tid)
     }
 
     DPRINTF(Rename, "[tid:%i]: Free IQ: %i, Free ROB: %i, "
-                    "Free LQ: %i, Free SQ: %i\n",
+                    "Free LQ: %i, Free SQ: %i, FreeRM %i(%i %i %i %i)\n",
             tid,
             freeEntries[tid].iqEntries,
             freeEntries[tid].robEntries,
             freeEntries[tid].lqEntries,
-            freeEntries[tid].sqEntries);
+            freeEntries[tid].sqEntries,
+            renameMap[tid]->numFreeEntries(),
+            renameMap[tid]->numFreeIntEntries(),
+            renameMap[tid]->numFreeFloatEntries(),
+            renameMap[tid]->numFreeVecEntries(),
+            renameMap[tid]->numFreeCCEntries());
 
     DPRINTF(Rename, "[tid:%i]: %i instructions not yet in ROB\n",
             tid, instsInProgress[tid]);
@@ -1431,9 +1410,15 @@ DefaultRename<Impl>::dumpHistory()
         buf_it = historyBuffer[tid].begin();
 
         while (buf_it != historyBuffer[tid].end()) {
-            cprintf("Seq num: %i\nArch reg: %i New phys reg: %i Old phys "
-                    "reg: %i\n", (*buf_it).instSeqNum, (int)(*buf_it).archReg,
-                    (int)(*buf_it).newPhysReg, (int)(*buf_it).prevPhysReg);
+            cprintf("Seq num: %i\nArch reg[%s]: %i New phys reg:"
+                    " %i[%s] Old phys reg: %i[%s]\n",
+                    (*buf_it).instSeqNum,
+                    (*buf_it).archReg.className(),
+                    (*buf_it).archReg.index(),
+                    (*buf_it).newPhysReg->index(),
+                    (*buf_it).newPhysReg->className(),
+                    (*buf_it).prevPhysReg->index(),
+                    (*buf_it).prevPhysReg->className());
 
             buf_it++;
         }

@@ -49,7 +49,7 @@
 #include "mem/request.hh"
 #include "mem/ruby/common/Address.hh"
 #include "mem/ruby/common/Consumer.hh"
-#include "mem/ruby/system/RubyPort.hh"
+#include "mem/ruby/system/Sequencer.hh"
 
 class DataBlock;
 class CacheMsg;
@@ -255,21 +255,7 @@ class GPUCoalescer : public RubyPort
 
     bool handleLlsc(Addr address, GPUCoalescerRequest* request);
 
-    // Private copy constructor and assignment operator
-    GPUCoalescer(const GPUCoalescer& obj);
-    GPUCoalescer& operator=(const GPUCoalescer& obj);
-
-    class IssueEvent : public Event
-    {
-      private:
-        GPUCoalescer *seq;
-      public:
-        IssueEvent(GPUCoalescer *_seq);
-        void process();
-        const char *description() const;
-    };
-
-    IssueEvent issueEvent;
+    EventFunctionWrapper issueEvent;
 
 
   // Changed to protected to enable inheritance by VIPER Coalescer
@@ -309,22 +295,7 @@ class GPUCoalescer : public RubyPort
 
     bool m_runningGarnetStandalone;
 
-    class GPUCoalescerWakeupEvent : public Event
-    {
-      private:
-        GPUCoalescer *m_GPUCoalescer_ptr;
-
-      public:
-        GPUCoalescerWakeupEvent(GPUCoalescer *_seq) :
-            m_GPUCoalescer_ptr(_seq) {}
-        void process() { m_GPUCoalescer_ptr->wakeup(); }
-        const char *description() const
-        {
-            return "GPUCoalescer deadlock check";
-        }
-    };
-
-    GPUCoalescerWakeupEvent deadlockCheckEvent;
+    EventFunctionWrapper deadlockCheckEvent;
     bool assumingRfOCoherence;
 
     // m5 style stats for TCP hit/miss counts
@@ -370,6 +341,11 @@ class GPUCoalescer : public RubyPort
     std::vector<Stats::Histogram *> m_InitialToForwardDelayHist;
     std::vector<Stats::Histogram *> m_ForwardToFirstResponseDelayHist;
     std::vector<Stats::Histogram *> m_FirstResponseToCompletionDelayHist;
+
+private:
+    // Private copy constructor and assignment operator
+    GPUCoalescer(const GPUCoalescer& obj);
+    GPUCoalescer& operator=(const GPUCoalescer& obj);
 };
 
 inline std::ostream&
@@ -381,4 +357,3 @@ operator<<(std::ostream& out, const GPUCoalescer& obj)
 }
 
 #endif // __MEM_RUBY_SYSTEM_GPU_COALESCER_HH__
-

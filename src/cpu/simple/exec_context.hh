@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 ARM Limited
+ * Copyright (c) 2014-2016 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -50,6 +50,7 @@
 #include "config/the_isa.hh"
 #include "cpu/base.hh"
 #include "cpu/exec_context.hh"
+#include "cpu/reg_class.hh"
 #include "cpu/simple/base.hh"
 #include "cpu/static_inst_fwd.hh"
 #include "cpu/translation.hh"
@@ -63,6 +64,8 @@ class SimpleExecContext : public ExecContext {
     typedef TheISA::FloatReg FloatReg;
     typedef TheISA::FloatRegBits FloatRegBits;
     typedef TheISA::CCReg CCReg;
+    using VecRegContainer = TheISA::VecRegContainer;
+    using VecElem = TheISA::VecElem;
 
   public:
     BaseSimpleCPU *cpu;
@@ -91,6 +94,9 @@ class SimpleExecContext : public ExecContext {
     // Number of float alu accesses
     Stats::Scalar numFpAluAccesses;
 
+    // Number of vector alu accesses
+    Stats::Scalar numVecAluAccesses;
+
     // Number of function calls/returns
     Stats::Scalar numCallsReturns;
 
@@ -103,6 +109,9 @@ class SimpleExecContext : public ExecContext {
     // Number of float instructions
     Stats::Scalar numFpInsts;
 
+    // Number of vector instructions
+    Stats::Scalar numVecInsts;
+
     // Number of integer register file accesses
     Stats::Scalar numIntRegReads;
     Stats::Scalar numIntRegWrites;
@@ -110,6 +119,10 @@ class SimpleExecContext : public ExecContext {
     // Number of float register file accesses
     Stats::Scalar numFpRegReads;
     Stats::Scalar numFpRegWrites;
+
+    // Number of vector register file accesses
+    mutable Stats::Scalar numVecRegReads;
+    Stats::Scalar numVecRegWrites;
 
     // Number of condition code register file accesses
     Stats::Scalar numCCRegReads;
@@ -164,22 +177,27 @@ class SimpleExecContext : public ExecContext {
     IntReg readIntRegOperand(const StaticInst *si, int idx) override
     {
         numIntRegReads++;
-        return thread->readIntReg(si->srcRegIdx(idx));
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isIntReg());
+        return thread->readIntReg(reg.index());
     }
 
     /** Sets an integer register to a value. */
     void setIntRegOperand(const StaticInst *si, int idx, IntReg val) override
     {
         numIntRegWrites++;
-        thread->setIntReg(si->destRegIdx(idx), val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isIntReg());
+        thread->setIntReg(reg.index(), val);
     }
 
     /** Reads a floating point register of single register width. */
     FloatReg readFloatRegOperand(const StaticInst *si, int idx) override
     {
         numFpRegReads++;
-        int reg_idx = si->srcRegIdx(idx) - TheISA::FP_Reg_Base;
-        return thread->readFloatReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isFloatReg());
+        return thread->readFloatReg(reg.index());
     }
 
     /** Reads a floating point register in its binary format, instead
@@ -187,8 +205,9 @@ class SimpleExecContext : public ExecContext {
     FloatRegBits readFloatRegOperandBits(const StaticInst *si, int idx) override
     {
         numFpRegReads++;
-        int reg_idx = si->srcRegIdx(idx) - TheISA::FP_Reg_Base;
-        return thread->readFloatRegBits(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isFloatReg());
+        return thread->readFloatRegBits(reg.index());
     }
 
     /** Sets a floating point register of single width to a value. */
@@ -196,8 +215,9 @@ class SimpleExecContext : public ExecContext {
                             FloatReg val) override
     {
         numFpRegWrites++;
-        int reg_idx = si->destRegIdx(idx) - TheISA::FP_Reg_Base;
-        thread->setFloatReg(reg_idx, val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isFloatReg());
+        thread->setFloatReg(reg.index(), val);
     }
 
     /** Sets the bits of a floating point register of single width
@@ -206,37 +226,160 @@ class SimpleExecContext : public ExecContext {
                                 FloatRegBits val) override
     {
         numFpRegWrites++;
-        int reg_idx = si->destRegIdx(idx) - TheISA::FP_Reg_Base;
-        thread->setFloatRegBits(reg_idx, val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isFloatReg());
+        thread->setFloatRegBits(reg.index(), val);
+    }
+
+    /** Reads a vector register. */
+    const VecRegContainer&
+    readVecRegOperand(const StaticInst *si, int idx) const override
+    {
+        numVecRegReads++;
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVecReg(reg);
+    }
+
+    /** Reads a vector register for modification. */
+    VecRegContainer&
+    getWritableVecRegOperand(const StaticInst *si, int idx) override
+    {
+        numVecRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->getWritableVecReg(reg);
+    }
+
+    /** Sets a vector register to a value. */
+    void setVecRegOperand(const StaticInst *si, int idx,
+                          const VecRegContainer& val) override
+    {
+        numVecRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        thread->setVecReg(reg, val);
+    }
+
+    /** Vector Register Lane Interfaces. */
+    /** @{ */
+    /** Reads source vector lane. */
+    template <typename VecElem>
+    VecLaneT<VecElem, true>
+    readVecLaneOperand(const StaticInst *si, int idx) const
+    {
+        numVecRegReads++;
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVecLane<VecElem>(reg);
+    }
+    /** Reads source vector 8bit operand. */
+    virtual ConstVecLane8
+    readVec8BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    { return readVecLaneOperand<uint8_t>(si, idx); }
+
+    /** Reads source vector 16bit operand. */
+    virtual ConstVecLane16
+    readVec16BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    { return readVecLaneOperand<uint16_t>(si, idx); }
+
+    /** Reads source vector 32bit operand. */
+    virtual ConstVecLane32
+    readVec32BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    { return readVecLaneOperand<uint32_t>(si, idx); }
+
+    /** Reads source vector 64bit operand. */
+    virtual ConstVecLane64
+    readVec64BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    { return readVecLaneOperand<uint64_t>(si, idx); }
+
+    /** Write a lane of the destination vector operand. */
+    template <typename LD>
+    void
+    setVecLaneOperandT(const StaticInst *si, int idx,
+            const LD& val)
+    {
+        numVecRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->setVecLane(reg, val);
+    }
+    /** Write a lane of the destination vector operand. */
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::Byte>& val) override
+    { return setVecLaneOperandT(si, idx, val); }
+    /** Write a lane of the destination vector operand. */
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::TwoByte>& val) override
+    { return setVecLaneOperandT(si, idx, val); }
+    /** Write a lane of the destination vector operand. */
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::FourByte>& val) override
+    { return setVecLaneOperandT(si, idx, val); }
+    /** Write a lane of the destination vector operand. */
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::EightByte>& val) override
+    { return setVecLaneOperandT(si, idx, val); }
+    /** @} */
+
+    /** Reads an element of a vector register. */
+    VecElem readVecElemOperand(const StaticInst *si, int idx) const override
+    {
+        numVecRegReads++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecElem());
+        return thread->readVecElem(reg);
+    }
+
+    /** Sets an element of a vector register to a value. */
+    void setVecElemOperand(const StaticInst *si, int idx,
+                           const VecElem val) override
+    {
+        numVecRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecElem());
+        thread->setVecElem(reg, val);
     }
 
     CCReg readCCRegOperand(const StaticInst *si, int idx) override
     {
         numCCRegReads++;
-        int reg_idx = si->srcRegIdx(idx) - TheISA::CC_Reg_Base;
-        return thread->readCCReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isCCReg());
+        return thread->readCCReg(reg.index());
     }
 
     void setCCRegOperand(const StaticInst *si, int idx, CCReg val) override
     {
         numCCRegWrites++;
-        int reg_idx = si->destRegIdx(idx) - TheISA::CC_Reg_Base;
-        thread->setCCReg(reg_idx, val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isCCReg());
+        thread->setCCReg(reg.index(), val);
     }
 
     MiscReg readMiscRegOperand(const StaticInst *si, int idx) override
     {
         numIntRegReads++;
-        int reg_idx = si->srcRegIdx(idx) - TheISA::Misc_Reg_Base;
-        return thread->readMiscReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isMiscReg());
+        return thread->readMiscReg(reg.index());
     }
 
     void setMiscRegOperand(const StaticInst *si, int idx,
                            const MiscReg &val) override
     {
         numIntRegWrites++;
-        int reg_idx = si->destRegIdx(idx) - TheISA::Misc_Reg_Base;
-        thread->setMiscReg(reg_idx, val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isMiscReg());
+        thread->setMiscReg(reg.index(), val);
     }
 
     /**
@@ -398,14 +541,15 @@ class SimpleExecContext : public ExecContext {
     }
 
 #if THE_ISA == MIPS_ISA
-    MiscReg readRegOtherThread(int regIdx, ThreadID tid = InvalidThreadID)
+    MiscReg readRegOtherThread(const RegId& reg,
+                               ThreadID tid = InvalidThreadID)
         override
     {
         panic("Simple CPU models do not support multithreaded "
               "register access.");
     }
 
-    void setRegOtherThread(int regIdx, MiscReg val,
+    void setRegOtherThread(const RegId& reg, MiscReg val,
                            ThreadID tid = InvalidThreadID) override
     {
         panic("Simple CPU models do not support multithreaded "

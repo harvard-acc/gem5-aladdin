@@ -1,4 +1,4 @@
-# Copyright (c) 2012 ARM Limited
+# Copyright (c) 2012, 2017 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -35,30 +35,14 @@
 #
 # Authors: Andreas Sandberg
 
+from m5 import fatal
 import m5.objects
 import inspect
 import sys
-from textwrap import  TextWrapper
+from textwrap import TextWrapper
 
 # Dictionary of mapping names of real CPU models to classes.
 _cpu_classes = {}
-
-# CPU aliases. The CPUs listed here might not be compiled, we make
-# sure they exist before we add them to the CPU list. A target may be
-# specified as a tuple, in which case the first available CPU model in
-# the tuple will be used as the target.
-_cpu_aliases_all = [
-    ("timing", "TimingSimpleCPU"),
-    ("atomic", "AtomicSimpleCPU"),
-    ("minor", "MinorCPU"),
-    ("detailed", "DerivO3CPU"),
-    ("kvm", ("ArmKvmCPU", "ArmV8KvmCPU", "X86KvmCPU")),
-    ("trace", "TraceCPU"),
-    ]
-
-# Filtered list of aliases. Only aliases for existing CPUs exist in
-# this list.
-_cpu_aliases = {}
 
 
 def is_cpu_class(cls):
@@ -76,10 +60,8 @@ def is_cpu_class(cls):
 def get(name):
     """Get a CPU class from a user provided class name or alias."""
 
-    real_name = _cpu_aliases.get(name, name)
-
     try:
-        cpu_class = _cpu_classes[real_name]
+        cpu_class = _cpu_classes[name]
         return cpu_class
     except KeyError:
         print "%s is not a valid CPU model." % (name,)
@@ -100,14 +82,9 @@ def print_cpu_list():
             for line in doc_wrapper.wrap(doc):
                 print line
 
-    if _cpu_aliases:
-        print "\nCPU aliases:"
-        for alias, target in _cpu_aliases.items():
-            print "\t%s => %s" % (alias, target)
-
 def cpu_names():
     """Return a list of valid CPU names."""
-    return _cpu_classes.keys() + _cpu_aliases.keys()
+    return _cpu_classes.keys()
 
 def config_etrace(cpu_cls, cpu_list, options):
     if issubclass(cpu_cls, m5.objects.DerivO3CPU):
@@ -133,26 +110,20 @@ def config_etrace(cpu_cls, cpu_list, options):
         fatal("%s does not support data dependency tracing. Use a CPU model of"
               " type or inherited from DerivO3CPU.", cpu_cls)
 
-# The ARM detailed CPU is special in the sense that it doesn't exist
-# in the normal object hierarchy, so we have to add it manually.
-try:
-    from O3_ARM_v7a import O3_ARM_v7a_3
-    _cpu_classes["arm_detailed"] = O3_ARM_v7a_3
-except:
-    pass
-
 # Add all CPUs in the object hierarchy.
 for name, cls in inspect.getmembers(m5.objects, is_cpu_class):
     _cpu_classes[name] = cls
 
-for alias, target in _cpu_aliases_all:
-    if isinstance(target, tuple):
-        # Some aliases contain a list of CPU model sorted in priority
-        # order. Use the first target that's available.
-        for t in target:
-            if t in _cpu_classes:
-                _cpu_aliases[alias] = t
-                break
-    elif target in _cpu_classes:
-        # Normal alias
-        _cpu_aliases[alias] = target
+
+from m5.defines import buildEnv
+from importlib import import_module
+for package in [ "generic", buildEnv['TARGET_ISA']]:
+    try:
+        package = import_module(".cores." + package, package=__package__)
+    except ImportError:
+        # No timing models for this ISA
+        continue
+
+    for mod_name, module in inspect.getmembers(package, inspect.ismodule):
+        for name, cls in inspect.getmembers(module, is_cpu_class):
+            _cpu_classes[name] = cls

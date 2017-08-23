@@ -1,7 +1,7 @@
 /*
  * Copyright 2015 LabWare
  * Copyright 2014 Google Inc.
- * Copyright (c) 2010, 2013 ARM Limited
+ * Copyright (c) 2010, 2013, 2016 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -165,7 +165,7 @@ using namespace std;
 using namespace ArmISA;
 
 RemoteGDB::RemoteGDB(System *_system, ThreadContext *tc)
-    : BaseRemoteGDB(_system, tc)
+    : BaseRemoteGDB(_system, tc), regCache32(this), regCache64(this)
 {
 }
 
@@ -212,6 +212,10 @@ RemoteGDB::AArch64GdbRegCache::getRegs(ThreadContext *context)
         r.v[i + 2] = context->readFloatRegBits(i + 0);
         r.v[i + 3] = context->readFloatRegBits(i + 1);
     }
+
+    for (int i = 0; i < 32; i ++) {
+        r.vec[i] = context->readVecReg(RegId(VecRegClass,i));
+    }
 }
 
 void
@@ -233,6 +237,10 @@ RemoteGDB::AArch64GdbRegCache::setRegs(ThreadContext *context) const
         context->setFloatRegBits(i + 3, r.v[i + 1]);
         context->setFloatRegBits(i + 0, r.v[i + 2]);
         context->setFloatRegBits(i + 1, r.v[i + 3]);
+    }
+
+    for (int i = 0; i < 32; i ++) {
+        context->setVecReg(RegId(VecRegClass, i), r.vec[i]);
     }
 }
 
@@ -297,7 +305,7 @@ RemoteGDB::BaseGdbRegCache*
 RemoteGDB::gdbRegs()
 {
     if (inAArch64(context))
-        return new AArch64GdbRegCache(this);
+        return &regCache32;
     else
-        return new AArch32GdbRegCache(this);
+        return &regCache64;
 }

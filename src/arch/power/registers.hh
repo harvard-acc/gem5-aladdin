@@ -31,6 +31,7 @@
 #ifndef __ARCH_POWER_REGISTERS_HH__
 #define __ARCH_POWER_REGISTERS_HH__
 
+#include "arch/generic/vec_reg.hh"
 #include "arch/power/generated/max_inst_regs.hh"
 #include "arch/power/miscregs.hh"
 
@@ -43,8 +44,6 @@ using PowerISAInst::MaxInstDestRegs;
 // be detected by it. Manually add it here.
 const int MaxMiscDestRegs = PowerISAInst::MaxMiscDestRegs + 1;
 
-typedef uint8_t RegIndex;
-
 typedef uint64_t IntReg;
 
 // Floating point register file entry type
@@ -54,6 +53,15 @@ typedef uint64_t MiscReg;
 
 // dummy typedef since we don't have CC regs
 typedef uint8_t CCReg;
+
+// dummy typedefs since we don't have vector regs
+constexpr unsigned NumVecElemPerVecReg = 2;
+using VecElem = uint32_t;
+using VecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, false>;
+using ConstVecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, true>;
+using VecRegContainer = VecReg::Container;
+// This has to be one to prevent warnings that are treated as errors
+constexpr unsigned NumVecRegs = 1;
 
 // Constants Related to the number of registers
 const int NumIntArchRegs = 32;
@@ -86,12 +94,6 @@ const int ZeroReg = NumIntRegs - 1;
 const int SyscallNumReg = 0;
 const int SyscallPseudoReturnReg = 3;
 const int SyscallSuccessReg = 3;
-
-// These help enumerate all the registers for dependence tracking.
-const int FP_Reg_Base = NumIntRegs;
-const int CC_Reg_Base = FP_Reg_Base + NumFloatRegs;
-const int Misc_Reg_Base = CC_Reg_Base + NumCCRegs; // NumCCRegs == 0
-const int Max_Reg_Index = Misc_Reg_Base + NumMiscRegs;
 
 typedef union {
     IntReg   intreg;

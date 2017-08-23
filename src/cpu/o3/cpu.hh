@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013 ARM Limited
+ * Copyright (c) 2011-2013, 2016 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -53,6 +53,7 @@
 #include <set>
 #include <vector>
 
+#include "arch/generic/types.hh"
 #include "arch/types.hh"
 #include "base/statistics.hh"
 #include "config/the_isa.hh"
@@ -102,6 +103,9 @@ class FullO3CPU : public BaseO3CPU
     typedef typename Impl::CPUPol CPUPolicy;
     typedef typename Impl::DynInstPtr DynInstPtr;
     typedef typename Impl::O3CPU O3CPU;
+
+    using VecElem =  TheISA::VecElem;
+    using VecRegContainer =  TheISA::VecRegContainer;
 
     typedef O3ThreadState<Impl> ImplState;
     typedef O3ThreadState<Impl> Thread;
@@ -195,24 +199,8 @@ class FullO3CPU : public BaseO3CPU
         virtual bool isSnooping() const { return true; }
     };
 
-    class TickEvent : public Event
-    {
-      private:
-        /** Pointer to the CPU. */
-        FullO3CPU<Impl> *cpu;
-
-      public:
-        /** Constructs a tick event. */
-        TickEvent(FullO3CPU<Impl> *c);
-
-        /** Processes a tick event, calling tick() on the CPU. */
-        void process();
-        /** Returns the description of the tick event. */
-        const char *description() const;
-    };
-
     /** The tick event used for scheduling CPU ticks. */
-    TickEvent tickEvent;
+    EventFunctionWrapper tickEvent;
 
     /** Schedule tick event, regardless of its current state. */
     void scheduleTickEvent(Cycles delay)
@@ -411,27 +399,99 @@ class FullO3CPU : public BaseO3CPU
     void setMiscReg(int misc_reg, const TheISA::MiscReg &val,
             ThreadID tid);
 
-    uint64_t readIntReg(int reg_idx);
+    uint64_t readIntReg(PhysRegIdPtr phys_reg);
 
-    TheISA::FloatReg readFloatReg(int reg_idx);
+    TheISA::FloatReg readFloatReg(PhysRegIdPtr phys_reg);
 
-    TheISA::FloatRegBits readFloatRegBits(int reg_idx);
+    TheISA::FloatRegBits readFloatRegBits(PhysRegIdPtr phys_reg);
 
-    TheISA::CCReg readCCReg(int reg_idx);
+    const VecRegContainer& readVecReg(PhysRegIdPtr reg_idx) const;
 
-    void setIntReg(int reg_idx, uint64_t val);
+    /**
+     * Read physical vector register for modification.
+     */
+    VecRegContainer& getWritableVecReg(PhysRegIdPtr reg_idx);
 
-    void setFloatReg(int reg_idx, TheISA::FloatReg val);
+    /**
+     * Read physical vector register lane
+     */
+    template<typename VecElem, int LaneIdx>
+    VecLaneT<VecElem, true>
+    readVecLane(PhysRegIdPtr phys_reg) const
+    {
+        vecRegfileReads++;
+        return regFile.readVecLane<VecElem, LaneIdx>(phys_reg);
+    }
 
-    void setFloatRegBits(int reg_idx, TheISA::FloatRegBits val);
+    /**
+     * Read physical vector register lane
+     */
+    template<typename VecElem>
+    VecLaneT<VecElem, true>
+    readVecLane(PhysRegIdPtr phys_reg) const
+    {
+        vecRegfileReads++;
+        return regFile.readVecLane<VecElem>(phys_reg);
+    }
 
-    void setCCReg(int reg_idx, TheISA::CCReg val);
+    /** Write a lane of the destination vector register. */
+    template<typename LD>
+    void
+    setVecLane(PhysRegIdPtr phys_reg, const LD& val)
+    {
+        vecRegfileWrites++;
+        return regFile.setVecLane(phys_reg, val);
+    }
+
+    const VecElem& readVecElem(PhysRegIdPtr reg_idx) const;
+
+    TheISA::CCReg readCCReg(PhysRegIdPtr phys_reg);
+
+    void setIntReg(PhysRegIdPtr phys_reg, uint64_t val);
+
+    void setFloatReg(PhysRegIdPtr phys_reg, TheISA::FloatReg val);
+
+    void setFloatRegBits(PhysRegIdPtr phys_reg, TheISA::FloatRegBits val);
+
+    void setVecReg(PhysRegIdPtr reg_idx, const VecRegContainer& val);
+
+    void setVecElem(PhysRegIdPtr reg_idx, const VecElem& val);
+
+    void setCCReg(PhysRegIdPtr phys_reg, TheISA::CCReg val);
 
     uint64_t readArchIntReg(int reg_idx, ThreadID tid);
 
     float readArchFloatReg(int reg_idx, ThreadID tid);
 
     uint64_t readArchFloatRegInt(int reg_idx, ThreadID tid);
+
+    const VecRegContainer& readArchVecReg(int reg_idx, ThreadID tid) const;
+    /** Read architectural vector register for modification. */
+    VecRegContainer& getWritableArchVecReg(int reg_idx, ThreadID tid);
+
+    /** Read architectural vector register lane. */
+    template<typename VecElem>
+    VecLaneT<VecElem, true>
+    readArchVecLane(int reg_idx, int lId, ThreadID tid) const
+    {
+        PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                    RegId(VecRegClass, reg_idx));
+        return readVecLane<VecElem>(phys_reg);
+    }
+
+
+    /** Write a lane of the destination vector register. */
+    template<typename LD>
+    void
+    setArchVecLane(int reg_idx, int lId, ThreadID tid, const LD& val)
+    {
+        PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                    RegId(VecRegClass, reg_idx));
+        setVecLane(phys_reg, val);
+    }
+
+    const VecElem& readArchVecElem(const RegIndex& reg_idx,
+                                   const ElemIndex& ldx, ThreadID tid) const;
 
     TheISA::CCReg readArchCCReg(int reg_idx, ThreadID tid);
 
@@ -445,6 +505,11 @@ class FullO3CPU : public BaseO3CPU
     void setArchFloatReg(int reg_idx, float val, ThreadID tid);
 
     void setArchFloatRegInt(int reg_idx, uint64_t val, ThreadID tid);
+
+    void setArchVecReg(int reg_idx, const VecRegContainer& val, ThreadID tid);
+
+    void setArchVecElem(const RegIndex& reg_idx, const ElemIndex& ldx,
+                        const VecElem& val, ThreadID tid);
 
     void setArchCCReg(int reg_idx, TheISA::CCReg val, ThreadID tid);
 
@@ -539,6 +604,9 @@ class FullO3CPU : public BaseO3CPU
 
     /** The commit stage. */
     typename CPUPolicy::Commit commit;
+
+    /** The rename mode of the vector registers */
+    Enums::VecRegRenameMode vecMode;
 
     /** The register file. */
     PhysRegFile regFile;
@@ -722,6 +790,9 @@ class FullO3CPU : public BaseO3CPU
     //number of float register file accesses
     Stats::Scalar fpRegfileReads;
     Stats::Scalar fpRegfileWrites;
+    //number of vector register file accesses
+    mutable Stats::Scalar vecRegfileReads;
+    Stats::Scalar vecRegfileWrites;
     //number of CC register file accesses
     Stats::Scalar ccRegfileReads;
     Stats::Scalar ccRegfileWrites;

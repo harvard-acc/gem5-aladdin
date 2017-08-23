@@ -36,6 +36,7 @@
 #include "arch/power/registers.hh"
 #include "arch/power/types.hh"
 #include "base/misc.hh"
+#include "cpu/reg_class.hh"
 #include "sim/sim_object.hh"
 
 struct PowerISAParams;
@@ -86,6 +87,8 @@ class ISA : public SimObject
         fatal("Power does not currently have any misc regs defined\n");
     }
 
+    RegId flattenRegId(const RegId& regId) const { return regId; }
+
     int
     flattenIntIndex(int reg) const
     {
@@ -94,6 +97,18 @@ class ISA : public SimObject
 
     int
     flattenFloatIndex(int reg) const
+    {
+        return reg;
+    }
+
+    int
+    flattenVecIndex(int reg) const
+    {
+        return reg;
+    }
+
+    int
+    flattenVecElemIndex(int reg) const
     {
         return reg;
     }

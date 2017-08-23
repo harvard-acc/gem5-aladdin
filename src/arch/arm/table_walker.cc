@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2012-2016 ARM Limited
+ * Copyright (c) 2010, 2012-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -64,12 +64,15 @@ TableWalker::TableWalker(const Params *p)
       numSquashable(p->num_squash_per_cycle),
       pendingReqs(0),
       pendingChangeTick(curTick()),
-      doL1DescEvent(this), doL2DescEvent(this),
-      doL0LongDescEvent(this), doL1LongDescEvent(this),
-      doL2LongDescEvent(this), doL3LongDescEvent(this),
+      doL1DescEvent([this]{ doL1DescriptorWrapper(); }, name()),
+      doL2DescEvent([this]{ doL2DescriptorWrapper(); }, name()),
+      doL0LongDescEvent([this]{ doL0LongDescriptorWrapper(); }, name()),
+      doL1LongDescEvent([this]{ doL1LongDescriptorWrapper(); }, name()),
+      doL2LongDescEvent([this]{ doL2LongDescriptorWrapper(); }, name()),
+      doL3LongDescEvent([this]{ doL3LongDescriptorWrapper(); }, name()),
       LongDescEventByLevel { &doL0LongDescEvent, &doL1LongDescEvent,
                              &doL2LongDescEvent, &doL3LongDescEvent },
-      doProcessEvent(this)
+      doProcessEvent([this]{ processWalkWrapper(); }, name())
 {
     sctlr = 0;
 
@@ -1342,7 +1345,10 @@ TableWalker::memAttrsAArch64(ThreadContext *tc, TlbEntry &te,
                               attr_hi == 2 ? 2 : 1;
             te.innerAttrs   = attr_lo == 1 ? 0 :
                               attr_lo == 2 ? 6 : 5;
-            te.nonCacheable = (attr_hi == 1) || (attr_lo == 1);
+            // Treat write-through memory as uncacheable, this is safe
+            // but for performance reasons not optimal.
+            te.nonCacheable = (attr_hi == 1) || (attr_hi == 2) ||
+                (attr_lo == 1) || (attr_lo == 2);
         }
     } else {
         uint8_t attrIndx = lDescriptor.attrIndx();
@@ -1377,9 +1383,25 @@ TableWalker::memAttrsAArch64(ThreadContext *tc, TlbEntry &te,
 
         // Cacheability
         te.nonCacheable = false;
-        if (te.mtype == TlbEntry::MemoryType::Device ||  // Device memory
-            attr_hi == 0x8 ||  // Normal memory, Outer Non-cacheable
-            attr_lo == 0x8) {  // Normal memory, Inner Non-cacheable
+        if (te.mtype == TlbEntry::MemoryType::Device) {  // Device memory
+            te.nonCacheable = true;
+        }
+        // Treat write-through memory as uncacheable, this is safe
+        // but for performance reasons not optimal.
+        switch (attr_hi) {
+          case 0x1 ... 0x3: // Normal Memory, Outer Write-through transient
+          case 0x4:         // Normal memory, Outer Non-cacheable
+          case 0x8 ... 0xb: // Normal Memory, Outer Write-through non-transient
+            te.nonCacheable = true;
+        }
+        switch (attr_lo) {
+          case 0x1 ... 0x3: // Normal Memory, Inner Write-through transient
+          case 0x9 ... 0xb: // Normal Memory, Inner Write-through non-transient
+            warn_if(!attr_hi, "Unpredictable behavior");
+          case 0x4:         // Device-nGnRE memory or
+                            // Normal memory, Inner Non-cacheable
+          case 0x8:         // Device-nGRE memory or
+                            // Normal memory, Inner Write-through non-transient
             te.nonCacheable = true;
         }
 

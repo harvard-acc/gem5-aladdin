@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2016 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *.
@@ -26,6 +38,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Steve Reinhardt
+ *          Nathanael Premillieu
+ *          Rekai Gonzalez
  */
 
 #ifndef __CPU__REG_CLASS_HH__
@@ -34,66 +48,138 @@
 #include <cassert>
 #include <cstddef>
 
+#include "arch/generic/types.hh"
 #include "arch/registers.hh"
 #include "config/the_isa.hh"
 
-/// Enumerate the classes of registers.
+/** Enumerate the classes of registers. */
 enum RegClass {
     IntRegClass,        ///< Integer register
     FloatRegClass,      ///< Floating-point register
+    /** Vector Register. */
+    VecRegClass,
+    /** Vector Register Native Elem lane. */
+    VecElemClass,
     CCRegClass,         ///< Condition-code register
     MiscRegClass        ///< Control (misc) register
 };
 
-/// Number of register classes.  This value is not part of the enum,
-/// because putting it there makes the compiler complain about
-/// unhandled cases in some switch statements.
+/** Number of register classes.
+ * This value is not part of the enum, because putting it there makes the
+ * compiler complain about unhandled cases in some switch statements.
+ */
 const int NumRegClasses = MiscRegClass + 1;
 
-/**
- * Map a 'unified' architectural register index to its register class.
- * The unified architectural register index space is used to represent
- * all architectural register identifiers in a single contiguous
- * index space.  See http://gem5.org/Register_Indexing.
- *
- * @param reg_idx Unified-space register index
- * @param rel_reg_idx Optional output param pointer; if non-NULL, location
- *        will be written with the relative register index for reg_idx
- *
- * @return Register class of reg_idx
+/** Register ID: describe an architectural register with its class and index.
+ * This structure is used instead of just the register index to disambiguate
+ * between different classes of registers. For example, a integer register with
+ * index 3 is represented by Regid(IntRegClass, 3).
  */
-inline
-RegClass regIdxToClass(TheISA::RegIndex reg_idx,
-                       TheISA::RegIndex *rel_reg_idx = NULL)
-{
-    assert(reg_idx < TheISA::Max_Reg_Index);
-    RegClass cl;
-    int offset;
-
-    if (reg_idx < TheISA::FP_Reg_Base) {
-        cl = IntRegClass;
-        offset = 0;
-    } else if (reg_idx < TheISA::CC_Reg_Base) {
-        cl = FloatRegClass;
-        offset = TheISA::FP_Reg_Base;
-    } else if (reg_idx < TheISA::Misc_Reg_Base) {
-        // if there are no CC regs, the ISA should set
-        // CC_Reg_Base == Misc_Reg_Base so the if above
-        // never succeeds
-        cl = CCRegClass;
-        offset = TheISA::CC_Reg_Base;
-    } else {
-        cl = MiscRegClass;
-        offset = TheISA::Misc_Reg_Base;
+class RegId {
+  private:
+    static const char* regClassStrings[];
+    RegClass regClass;
+    RegIndex regIdx;
+    ElemIndex elemIdx;
+    static constexpr size_t Scale = TheISA::NumVecElemPerVecReg;
+  public:
+    RegId() {};
+    RegId(RegClass reg_class, RegIndex reg_idx)
+        : regClass(reg_class), regIdx(reg_idx), elemIdx(-1)
+    {
+        panic_if(regClass == VecElemClass,
+                "Creating vector physical index w/o element index");
     }
 
-    if (rel_reg_idx)
-        *rel_reg_idx = reg_idx - offset;
-    return cl;
-}
+    explicit RegId(RegClass reg_class, RegIndex reg_idx, ElemIndex elem_idx)
+        : regClass(reg_class), regIdx(reg_idx), elemIdx(elem_idx)
+    {
+        panic_if(regClass != VecElemClass,
+                "Creating non-vector physical index w/ element index");
+    }
 
-/// Map enum values to strings for debugging
-extern const char *RegClassStrings[];
+    bool operator==(const RegId& that) const {
+        return regClass == that.classValue() && regIdx == that.index()
+                                             && elemIdx == that.elemIndex();
+    }
 
+    bool operator!=(const RegId& that) const {
+        return !(*this==that);
+    }
 
+    /** Order operator.
+     * The order is required to implement maps with key type RegId
+     */
+    bool operator<(const RegId& that) const {
+        return regClass < that.classValue() ||
+            (regClass == that.classValue() && (
+                   regIdx < that.index() ||
+                   (regIdx == that.index() && elemIdx < that.elemIndex())));
+    }
+
+    /**
+     * Return true if this register can be renamed
+     */
+    bool isRenameable() const
+    {
+        return regClass != MiscRegClass;
+    }
+
+    /**
+     * Check if this is the zero register.
+     * Returns true if this register is a zero register (needs to have a
+     * constant zero value throughout the execution).
+     */
+
+    inline bool isZeroReg() const;
+
+    /** @return true if it is an integer physical register. */
+    bool isIntReg() const { return regClass == IntRegClass; }
+
+    /** @return true if it is a floating-point physical register. */
+    bool isFloatReg() const { return regClass == FloatRegClass; }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isVecReg() const { return regClass == VecRegClass; }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isVecElem() const { return regClass == VecElemClass; }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isCCReg() const { return regClass == CCRegClass; }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isMiscReg() const { return regClass == MiscRegClass; }
+
+    /**
+     * Return true if this register can be renamed
+     */
+    bool isRenameable()
+    {
+        return regClass != MiscRegClass;
+    }
+
+    /** Index accessors */
+    /** @{ */
+    const RegIndex& index() const { return regIdx; }
+    RegIndex& index() { return regIdx; }
+
+    /** Index flattening.
+     * Required to be able to use a vector for the register mapping.
+     */
+    inline RegIndex flatIndex() const;
+    /** @} */
+
+    /** Elem accessor */
+    const RegIndex& elemIndex() const { return elemIdx; }
+    /** Class accessor */
+    const RegClass& classValue() const { return regClass; }
+    /** Return a const char* with the register class name. */
+    const char* className() const { return regClassStrings[regClass]; }
+
+    friend std::ostream&
+    operator<<(std::ostream& os, const RegId& rid) {
+        return os << rid.className() << "{" << rid.index() << "}";
+    }
+};
 #endif // __CPU__REG_CLASS_HH__

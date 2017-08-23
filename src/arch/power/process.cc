@@ -51,17 +51,23 @@ using namespace PowerISA;
 PowerProcess::PowerProcess(ProcessParams *params, ObjectFile *objFile)
     : Process(params, objFile)
 {
-    stack_base = 0xbf000000L;
-
-    // Set pointer for next thread stack.  Reserve 8M for main stack.
-    next_thread_stack_base = stack_base - (8 * 1024 * 1024);
-
     // Set up break point (Top of Heap)
-    brk_point = objFile->dataBase() + objFile->dataSize() + objFile->bssSize();
+    Addr brk_point = objFile->dataBase() + objFile->dataSize() +
+                     objFile->bssSize();
     brk_point = roundUp(brk_point, PageBytes);
 
+    Addr stack_base = 0xbf000000L;
+
+    Addr max_stack_size = 8 * 1024 * 1024;
+
+    // Set pointer for next thread stack.  Reserve 8M for main stack.
+    Addr next_thread_stack_base = stack_base - max_stack_size;
+
     // Set up region for mmaps. For now, start at bottom of kuseg space.
-    mmap_end = 0x70000000L;
+    Addr mmap_end = 0x70000000L;
+
+    memState = make_shared<MemState>(brk_point, stack_base, max_stack_size,
+                                     next_thread_stack_base, mmap_end);
 }
 
 void
@@ -185,15 +191,17 @@ PowerProcess::argsInit(int intSize, int pageSize)
 
     int space_needed = frame_size + aux_padding;
 
-    stack_min = stack_base - space_needed;
+    Addr stack_min = memState->getStackBase() - space_needed;
     stack_min = roundDown(stack_min, align);
-    stack_size = stack_base - stack_min;
+
+    memState->setStackSize(memState->getStackBase() - stack_min);
 
     // map memory
-    allocateMem(roundDown(stack_min, pageSize), roundUp(stack_size, pageSize));
+    allocateMem(roundDown(stack_min, pageSize),
+                roundUp(memState->getStackSize(), pageSize));
 
     // map out initial stack contents
-    uint32_t sentry_base = stack_base - sentry_size;
+    uint32_t sentry_base = memState->getStackBase() - sentry_size;
     uint32_t aux_data_base = sentry_base - aux_data_size;
     uint32_t env_data_base = aux_data_base - env_data_size;
     uint32_t arg_data_base = env_data_base - arg_data_size;
@@ -262,7 +270,7 @@ PowerProcess::argsInit(int intSize, int pageSize)
     tc->pcState(getStartPC());
 
     //Align the "stack_min" to a page boundary.
-    stack_min = roundDown(stack_min, pageSize);
+    memState->setStackMin(roundDown(stack_min, pageSize));
 }
 
 PowerISA::IntReg

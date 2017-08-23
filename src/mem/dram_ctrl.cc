@@ -63,7 +63,8 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     retryRdReq(false), retryWrReq(false),
     busState(READ),
     busStateNext(READ),
-    nextReqEvent(this), respondEvent(this),
+    nextReqEvent([this]{ processNextReqEvent(); }, name()),
+    respondEvent([this]{ processRespondEvent(); }, name()),
     deviceSize(p->device_size),
     deviceBusWidth(p->device_bus_width), burstLength(p->burst_length),
     deviceRowBufferSize(p->device_rowbuffer_size),
@@ -104,32 +105,8 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
              "must be a power of two\n", burstSize);
 
     for (int i = 0; i < ranksPerChannel; i++) {
-        Rank* rank = new Rank(*this, p);
+        Rank* rank = new Rank(*this, p, i);
         ranks.push_back(rank);
-
-        rank->actTicks.resize(activationLimit, 0);
-        rank->banks.resize(banksPerRank);
-        rank->rank = i;
-
-        for (int b = 0; b < banksPerRank; b++) {
-            rank->banks[b].bank = b;
-            // GDDR addressing of banks to BG is linear.
-            // Here we assume that all DRAM generations address bank groups as
-            // follows:
-            if (bankGroupArch) {
-                // Simply assign lower bits to bank group in order to
-                // rotate across bank groups as banks are incremented
-                // e.g. with 4 banks per bank group and 16 banks total:
-                //    banks 0,4,8,12  are in bank group 0
-                //    banks 1,5,9,13  are in bank group 1
-                //    banks 2,6,10,14 are in bank group 2
-                //    banks 3,7,11,15 are in bank group 3
-                rank->banks[b].bankgr = b % bankGroupsPerRank;
-            } else {
-                // No bank groups; simply assign to bank number
-                rank->banks[b].bankgr = b;
-            }
-        }
     }
 
     // perform a basic check of the write thresholds
@@ -1626,16 +1603,41 @@ DRAMCtrl::minBankPrep(const deque<DRAMPacket*>& queue,
     return make_pair(bank_mask, hidden_bank_prep);
 }
 
-DRAMCtrl::Rank::Rank(DRAMCtrl& _memory, const DRAMCtrlParams* _p)
+DRAMCtrl::Rank::Rank(DRAMCtrl& _memory, const DRAMCtrlParams* _p, int rank)
     : EventManager(&_memory), memory(_memory),
       pwrStateTrans(PWR_IDLE), pwrStatePostRefresh(PWR_IDLE),
       pwrStateTick(0), refreshDueAt(0), pwrState(PWR_IDLE),
-      refreshState(REF_IDLE), inLowPowerState(false), rank(0),
+      refreshState(REF_IDLE), inLowPowerState(false), rank(rank),
       readEntries(0), writeEntries(0), outstandingEvents(0),
-      wakeUpAllowedAt(0), power(_p, false), numBanksActive(0),
-      writeDoneEvent(*this), activateEvent(*this), prechargeEvent(*this),
-      refreshEvent(*this), powerEvent(*this), wakeUpEvent(*this)
-{ }
+      wakeUpAllowedAt(0), power(_p, false), banks(_p->banks_per_rank),
+      numBanksActive(0), actTicks(_p->activation_limit, 0),
+      writeDoneEvent([this]{ processWriteDoneEvent(); }, name()),
+      activateEvent([this]{ processActivateEvent(); }, name()),
+      prechargeEvent([this]{ processPrechargeEvent(); }, name()),
+      refreshEvent([this]{ processRefreshEvent(); }, name()),
+      powerEvent([this]{ processPowerEvent(); }, name()),
+      wakeUpEvent([this]{ processWakeUpEvent(); }, name())
+{
+    for (int b = 0; b < _p->banks_per_rank; b++) {
+        banks[b].bank = b;
+        // GDDR addressing of banks to BG is linear.
+        // Here we assume that all DRAM generations address bank groups as
+        // follows:
+        if (_p->bank_groups_per_rank > 0) {
+            // Simply assign lower bits to bank group in order to
+            // rotate across bank groups as banks are incremented
+            // e.g. with 4 banks per bank group and 16 banks total:
+            //    banks 0,4,8,12  are in bank group 0
+            //    banks 1,5,9,13  are in bank group 1
+            //    banks 2,6,10,14 are in bank group 2
+            //    banks 3,7,11,15 are in bank group 3
+            banks[b].bankgr = b % _p->bank_groups_per_rank;
+        } else {
+            // No bank groups; simply assign to bank number
+            banks[b].bankgr = b;
+        }
+    }
+}
 
 void
 DRAMCtrl::Rank::startup(Tick ref_tick)

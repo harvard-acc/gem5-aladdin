@@ -733,8 +733,8 @@ UFSHostDevice::UFSHostDevice(const UFSHostDeviceParams* p) :
     transferTrack(0),
     taskCommandTrack(0),
     idlePhaseStart(0),
-    SCSIResumeEvent(this),
-    UTPEvent(this)
+    SCSIResumeEvent([this]{ SCSIStart(); }, name()),
+    UTPEvent([this]{ finalUTP(); }, name())
 {
     DPRINTF(UFSHostDevice, "The hostcontroller hosts %d Logic units\n",
             lunAvail);
@@ -1280,7 +1280,8 @@ UFSHostDevice::requestHandler()
             task_info.size = size;
             task_info.done = UFSHCIMem.TMUTMRLDBR;
             taskInfo.push_back(task_info);
-            taskEventQueue.push_back(this);
+            taskEventQueue.push_back(
+                EventFunctionWrapper([this]{ taskStart(); }, name()));
             writeDevice(&taskEventQueue.back(), false, address, size,
                         reinterpret_cast<uint8_t*>
                         (&taskInfo.back().destination), 0, 0);
@@ -1328,7 +1329,8 @@ UFSHostDevice::requestHandler()
                 UTPTransferReqDesc;
             DPRINTF(UFSHostDevice, "Initial transfer start: 0x%8x\n",
                     transferstart_info.done);
-            transferEventQueue.push_back(this);
+            transferEventQueue.push_back(
+                EventFunctionWrapper([this]{ transferStart(); }, name()));
 
             if (transferEventQueue.size() < 2) {
                 writeDevice(&transferEventQueue.front(), false,
@@ -1890,7 +1892,9 @@ UFSHostDevice::writeDevice(Event* additional_action, bool toDisk, Addr
                                           < curTick()))
             writeDoneEvent.pop_front();
 
-        writeDoneEvent.push_back(this);
+        writeDoneEvent.push_back(
+            EventFunctionWrapper([this]{ writeDone(); },
+                                 name()));
         assert(!writeDoneEvent.back().scheduled());
 
         /**destination is an offset here since we are writing to a disk*/
@@ -2089,7 +2093,9 @@ UFSHostDevice::readDevice(bool lastTransfer, Addr start, uint32_t size,
     /** check wether interrupt is needed */
     if (lastTransfer) {
         ++readPendingNum;
-        readDoneEvent.push_back(this);
+        readDoneEvent.push_back(
+            EventFunctionWrapper([this]{ readDone(); },
+                                 name()));
         assert(!readDoneEvent.back().scheduled());
         dmaPort.dmaAction(MemCmd::WriteReq, start, size,
                           &readDoneEvent.back(), destination, 0);
@@ -2256,7 +2262,8 @@ UFSHostDevice::readCallback()
         UFSDevice[this_lun]->clearReadSignal();
         SSDReadPending.push_back(UFSDevice[this_lun]->SSDReadInfo.front());
         UFSDevice[this_lun]->SSDReadInfo.pop_front();
-        readGarbageEventQueue.push_back(this);
+        readGarbageEventQueue.push_back(
+            EventFunctionWrapper([this]{ readGarbage(); }, name()));
 
         //make sure the queue is popped a the end of the dma transaction
         readDevice(false, SSDReadPending.front().offset,

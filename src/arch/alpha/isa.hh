@@ -38,6 +38,7 @@
 #include "arch/alpha/registers.hh"
 #include "arch/alpha/types.hh"
 #include "base/types.hh"
+#include "cpu/reg_class.hh"
 #include "sim/sim_object.hh"
 #include "sim/system.hh"
 
@@ -95,6 +96,8 @@ namespace AlphaISA
         void serialize(CheckpointOut &cp) const override;
         void unserialize(CheckpointIn &cp) override;
 
+        RegId flattenRegId(const RegId& regId) const { return regId; }
+
         int
         flattenIntIndex(int reg) const
         {
@@ -103,6 +106,18 @@ namespace AlphaISA
 
         int
         flattenFloatIndex(int reg) const
+        {
+            return reg;
+        }
+
+        int
+        flattenVecIndex(int reg) const
+        {
+            return reg;
+        }
+
+        int
+        flattenVecElemIndex(int reg) const
         {
             return reg;
         }

@@ -42,6 +42,8 @@
 #include "base/types.hh"
 #include "config/the_isa.hh"
 #include "cpu/op_class.hh"
+#include "cpu/reg_class.hh"
+#include "cpu/reg_class_impl.hh"
 #include "cpu/static_inst_fwd.hh"
 #include "cpu/thread_context.hh"
 #include "enums/StaticInstFlags.hh"
@@ -70,8 +72,6 @@ class StaticInst : public RefCounted, public StaticInstFlags
   public:
     /// Binary extended machine instruction type.
     typedef TheISA::ExtMachInst ExtMachInst;
-    /// Logical register index type.
-    typedef TheISA::RegIndex RegIndex;
 
     enum {
         MaxInstSrcRegs = TheISA::MaxInstSrcRegs,        //< Max source regs
@@ -100,13 +100,20 @@ class StaticInst : public RefCounted, public StaticInstFlags
     int8_t _numCCDestRegs;
     //@}
 
+    /** To use in architectures with vector register file. */
+    /** @{ */
+    int8_t _numVecDestRegs;
+    int8_t _numVecElemDestRegs;
+    /** @} */
+
   public:
 
     /// @name Register information.
-    /// The sum of numFPDestRegs() and numIntDestRegs() equals
-    /// numDestRegs().  The former two functions are used to track
-    /// physical register usage for machines with separate int & FP
-    /// reg files.
+    /// The sum of numFPDestRegs(), numIntDestRegs(), numVecDestRegs() and
+    /// numVecelemDestRegs() equals numDestRegs().  The former two functions
+    /// are used to track physical register usage for machines with separate
+    /// int & FP reg files, the next two is for machines with vector register
+    /// file.
     //@{
     /// Number of source registers.
     int8_t numSrcRegs()  const { return _numSrcRegs; }
@@ -116,7 +123,10 @@ class StaticInst : public RefCounted, public StaticInstFlags
     int8_t numFPDestRegs()  const { return _numFPDestRegs; }
     /// Number of integer destination regs.
     int8_t numIntDestRegs() const { return _numIntDestRegs; }
-    //@}
+    /// Number of vector destination regs.
+    int8_t numVecDestRegs() const { return _numVecDestRegs; }
+    /// Number of vector element destination regs.
+    int8_t numVecElemDestRegs() const { return _numVecElemDestRegs; }
     /// Number of coprocesor destination regs.
     int8_t numCCDestRegs() const { return _numCCDestRegs; }
     //@}
@@ -140,6 +150,7 @@ class StaticInst : public RefCounted, public StaticInstFlags
 
     bool isInteger()      const { return flags[IsInteger]; }
     bool isFloating()     const { return flags[IsFloating]; }
+    bool isVector()       const { return flags[IsVector]; }
     bool isCC()           const { return flags[IsCC]; }
 
     bool isControl()      const { return flags[IsControl]; }
@@ -185,11 +196,11 @@ class StaticInst : public RefCounted, public StaticInstFlags
 
     /// Return logical index (architectural reg num) of i'th destination reg.
     /// Only the entries from 0 through numDestRegs()-1 are valid.
-    RegIndex destRegIdx(int i) const { return _destRegIdx[i]; }
+    const RegId& destRegIdx(int i) const { return _destRegIdx[i]; }
 
     /// Return logical index (architectural reg num) of i'th source reg.
     /// Only the entries from 0 through numSrcRegs()-1 are valid.
-    RegIndex srcRegIdx(int i)  const { return _srcRegIdx[i]; }
+    const RegId& srcRegIdx(int i)  const { return _srcRegIdx[i]; }
 
     /// Pointer to a statically allocated "null" instruction object.
     /// Used to give eaCompInst() and memAccInst() something to return
@@ -220,9 +231,9 @@ class StaticInst : public RefCounted, public StaticInstFlags
   protected:
 
     /// See destRegIdx().
-    RegIndex _destRegIdx[MaxInstDestRegs];
+    RegId _destRegIdx[MaxInstDestRegs];
     /// See srcRegIdx().
-    RegIndex _srcRegIdx[MaxInstSrcRegs];
+    RegId _srcRegIdx[MaxInstSrcRegs];
 
     /**
      * Base mnemonic (e.g., "add").  Used by generateDisassembly()
@@ -252,7 +263,8 @@ class StaticInst : public RefCounted, public StaticInstFlags
     StaticInst(const char *_mnemonic, ExtMachInst _machInst, OpClass __opClass)
         : _opClass(__opClass), _numSrcRegs(0), _numDestRegs(0),
           _numFPDestRegs(0), _numIntDestRegs(0), _numCCDestRegs(0),
-          machInst(_machInst), mnemonic(_mnemonic), cachedDisassembly(0)
+          _numVecDestRegs(0), _numVecElemDestRegs(0), machInst(_machInst),
+          mnemonic(_mnemonic), cachedDisassembly(0)
     { }
 
   public:

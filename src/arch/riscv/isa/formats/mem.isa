@@ -46,11 +46,8 @@ output header {{
 
         /// Constructor
         Load(const char *mnem, ExtMachInst _machInst, OpClass __opClass)
-            : RiscvStaticInst(mnem, _machInst, __opClass), ldisp(IMM12)
-        {
-            if (IMMSIGN > 0)
-                ldisp |= ~((uint64_t)0xFFF);
-        }
+            : RiscvStaticInst(mnem, _machInst, __opClass), ldisp(0)
+        {}
 
         std::string
         generateDisassembly(Addr pc, const SymbolTable *symtab) const;
@@ -68,9 +65,9 @@ output header {{
 
         /// Constructor
         Store(const char *mnem, ExtMachInst _machInst, OpClass __opClass)
-            : RiscvStaticInst(mnem, _machInst, __opClass), sdisp(IMM5)
+            : RiscvStaticInst(mnem, _machInst, __opClass), sdisp(0)
         {
-            sdisp |= IMM7 << 5;
+            sdisp = IMM5 | (IMM7 << 5);
             if (IMMSIGN > 0)
                 sdisp |= ~((uint64_t)0xFFF);
         }
@@ -87,8 +84,8 @@ output decoder {{
     Load::generateDisassembly(Addr pc, const SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << regName(_destRegIdx[0]) << ", " << ldisp <<
-            '(' << regName(_srcRegIdx[0]) << ')';
+        ss << mnemonic << ' ' << registerName(_destRegIdx[0]) << ", " <<
+            ldisp << '(' << registerName(_srcRegIdx[0]) << ')';
         return ss.str();
     }
 
@@ -96,8 +93,8 @@ output decoder {{
     Store::generateDisassembly(Addr pc, const SymbolTable *symtab) const
     {
         std::stringstream ss;
-        ss << mnemonic << ' ' << regName(_srcRegIdx[1]) << ", " << sdisp <<
-            '(' << regName(_srcRegIdx[0]) << ')';
+        ss << mnemonic << ' ' << registerName(_srcRegIdx[1]) << ", " <<
+            sdisp << '(' << registerName(_srcRegIdx[0]) << ')';
         return ss.str();
     }
 }};
@@ -143,6 +140,7 @@ def template LoadStoreConstructor {{
         %(base_class)s("%(mnemonic)s", machInst, %(op_class)s)
     {
         %(constructor)s;
+        %(offset_code)s;
     }
 }};
 
@@ -168,16 +166,17 @@ def template EACompExecute {{
 }};
 
 let {{
-def LoadStoreBase(name, Name, ea_code, memacc_code, mem_flags, inst_flags,
-        base_class, postacc_code='', decode_template=BasicDecode,
+def LoadStoreBase(name, Name, offset_code, ea_code, memacc_code, mem_flags,
+        inst_flags, base_class, postacc_code='', decode_template=BasicDecode,
         exec_template_base=''):
     # Make sure flags are in lists (convert to lists if not).
     mem_flags = makeList(mem_flags)
-    inst_flags = makeList(inst_flags) # + ['IsNonSpeculative']
+    inst_flags = makeList(inst_flags)
 
     iop = InstObjParams(name, Name, base_class,
-        { 'ea_code':ea_code, 'memacc_code':memacc_code,
-        'postacc_code':postacc_code }, inst_flags)
+        {'offset_code': offset_code, 'ea_code': ea_code,
+         'memacc_code': memacc_code, 'postacc_code': postacc_code },
+        inst_flags)
 
     if mem_flags:
         mem_flags = [ 'Request::%s' % flag for flag in mem_flags ]
@@ -185,10 +184,6 @@ def LoadStoreBase(name, Name, ea_code, memacc_code, mem_flags, inst_flags,
         iop.constructor += s
 
     # select templates
-
-    # The InitiateAcc template is the same for StoreCond templates as the
-    # corresponding Store template..
-    StoreCondInitiateAcc = StoreInitiateAcc
 
     fullExecTemplate = eval(exec_template_base + 'Execute')
     initiateAccTemplate = eval(exec_template_base + 'InitiateAcc')
@@ -344,98 +339,26 @@ def template StoreCompleteAcc {{
     }
 }};
 
-def template StoreCondExecute {{
-    Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
-        Trace::InstRecord *traceData) const
-    {
-        Addr EA;
-        Fault fault = NoFault;
-        uint64_t result;
-
-        %(op_decl)s;
-        %(op_rd)s;
-        %(ea_code)s;
-
-        if (fault == NoFault) {
-            %(memacc_code)s;
-        }
-
-        if (fault == NoFault) {
-            fault = writeMemAtomic(xc, traceData, Mem, EA, memAccessFlags,
-                &result);
-            // RISC-V has the opposite convention gem5 has for success flags,
-            // so we invert the result here.
-            result = !result;
-        }
-
-        if (fault == NoFault) {
-            %(postacc_code)s;
-        }
-
-        if (fault == NoFault) {
-            %(op_wb)s;
-        }
-
-        return fault;
-    }
-}};
-
-def template StoreCondCompleteAcc {{
-    Fault %(class_name)s::completeAcc(Packet *pkt, CPU_EXEC_CONTEXT *xc,
-        Trace::InstRecord *traceData) const
-    {
-        Fault fault = NoFault;
-
-        %(op_dest_decl)s;
-
-        // RISC-V has the opposite convention gem5 has for success flags,
-        // so we invert the result here.
-        uint64_t result = !pkt->req->getExtraData();
-
-        if (fault == NoFault) {
-            %(postacc_code)s;
-        }
-
-        if (fault == NoFault) {
-            %(op_wb)s;
-        }
-
-        return fault;
-    }
-}};
-
 def format Load(memacc_code, ea_code = {{EA = Rs1 + ldisp;}}, mem_flags=[],
         inst_flags=[]) {{
+    offset_code = """
+                    ldisp = IMM12;
+                    if (IMMSIGN > 0)
+                        ldisp |= ~((uint64_t)0xFFF);
+                  """
     (header_output, decoder_output, decode_block, exec_output) = \
-        LoadStoreBase(name, Name, ea_code, memacc_code, mem_flags, inst_flags,
-        'Load', exec_template_base='Load')
+        LoadStoreBase(name, Name, offset_code, ea_code, memacc_code, mem_flags,
+        inst_flags, 'Load', exec_template_base='Load')
 }};
 
 def format Store(memacc_code, ea_code={{EA = Rs1 + sdisp;}}, mem_flags=[],
         inst_flags=[]) {{
+    offset_code = """
+                    sdisp = IMM5 | (IMM7 << 5);
+                    if (IMMSIGN > 0)
+                        sdisp |= ~((uint64_t)0xFFF);
+                  """
     (header_output, decoder_output, decode_block, exec_output) = \
-        LoadStoreBase(name, Name, ea_code, memacc_code, mem_flags, inst_flags,
-        'Store', exec_template_base='Store')
-}};
-
-def format StoreCond(memacc_code, postacc_code, ea_code={{EA = Rs1;}},
-        mem_flags=[], inst_flags=[], aq=0, rl=0) {{
-    if aq:
-        mem_flags = makeList(mem_flags) + ["ACQUIRE"]
-    if rl:
-        mem_flags = makeList(mem_flags) + ["RELEASE"]
-    (header_output, decoder_output, decode_block, exec_output) = LoadStoreBase(
-            name, Name, ea_code, memacc_code, mem_flags, inst_flags, 'Store',
-            postacc_code, exec_template_base='StoreCond')
-}};
-
-def format LoadReserved(memacc_code, ea_code={{EA = Rs1;}}, mem_flags=[],
-        inst_flags=[], aq=0, rl=0) {{
-    if aq:
-        mem_flags = makeList(mem_flags) + ["ACQUIRE"]
-    if rl:
-        mem_flags = makeList(mem_flags) + ["RELEASE"]
-    (header_output, decoder_output, decode_block, exec_output) = LoadStoreBase(
-            name, Name, ea_code, memacc_code, mem_flags, inst_flags, 'Load',
-            exec_template_base='Load')
+        LoadStoreBase(name, Name, offset_code, ea_code, memacc_code, mem_flags,
+        inst_flags, 'Store', exec_template_base='Store')
 }};

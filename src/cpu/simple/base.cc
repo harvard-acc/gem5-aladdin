@@ -252,6 +252,11 @@ BaseSimpleCPU::regStats()
             .desc("Number of float alu accesses")
             ;
 
+        t_info.numVecAluAccesses
+            .name(thread_str + ".num_vec_alu_accesses")
+            .desc("Number of vector alu accesses")
+            ;
+
         t_info.numCallsReturns
             .name(thread_str + ".num_func_calls")
             .desc("number of times a function call or return occured")
@@ -272,6 +277,11 @@ BaseSimpleCPU::regStats()
             .desc("number of float instructions")
             ;
 
+        t_info.numVecInsts
+            .name(thread_str + ".num_vec_insts")
+            .desc("number of vector instructions")
+            ;
+
         t_info.numIntRegReads
             .name(thread_str + ".num_int_register_reads")
             .desc("number of times the integer registers were read")
@@ -290,6 +300,16 @@ BaseSimpleCPU::regStats()
         t_info.numFpRegWrites
             .name(thread_str + ".num_fp_register_writes")
             .desc("number of times the floating registers were written")
+            ;
+
+        t_info.numVecRegReads
+            .name(thread_str + ".num_vec_register_reads")
+            .desc("number of times the vector registers were read")
+            ;
+
+        t_info.numVecRegWrites
+            .name(thread_str + ".num_vec_register_writes")
+            .desc("number of times the vector registers were written")
             ;
 
         t_info.numCCRegReads
@@ -601,6 +621,12 @@ BaseSimpleCPU::postExecute()
     if (curStaticInst->isFloating()){
         t_info.numFpAluAccesses++;
         t_info.numFpInsts++;
+    }
+
+    //vector alu accesses
+    if (curStaticInst->isVector()){
+        t_info.numVecAluAccesses++;
+        t_info.numVecInsts++;
     }
 
     //number of function calls/returns to get window accesses

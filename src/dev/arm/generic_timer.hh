@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015 ARM Limited
+ * Copyright (c) 2013, 2015, 2017 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -42,6 +42,7 @@
 #define __DEV_ARM_GENERIC_TIMER_HH__
 
 #include "arch/arm/isa_device.hh"
+#include "arch/arm/system.hh"
 #include "base/bitunion.hh"
 #include "dev/arm/base_gic.hh"
 #include "sim/core.hh"
@@ -102,7 +103,7 @@ class SystemCounter : public Serializable
 };
 
 /// Per-CPU architected timer.
-class ArchTimer : public Serializable
+class ArchTimer : public Serializable, public Drainable
 {
   public:
     class Interrupt
@@ -157,8 +158,9 @@ class ArchTimer : public Serializable
 
     /// Called when the upcounter reaches the programmed value.
     void counterLimitReached();
-    EventWrapper<ArchTimer, &ArchTimer::counterLimitReached>
-    _counterLimitReachedEvent;
+    EventFunctionWrapper _counterLimitReachedEvent;
+
+    virtual bool scheduleEvents() { return true; }
 
   public:
     ArchTimer(const std::string &name,
@@ -189,12 +191,39 @@ class ArchTimer : public Serializable
     /// Returns the value of the counter which this timer relies on.
     uint64_t value() const;
 
+    // Serializable
     void serialize(CheckpointOut &cp) const override;
     void unserialize(CheckpointIn &cp) override;
+
+    // Drainable
+    DrainState drain() override;
+    void drainResume() override;
 
   private:
     // Disable copying
     ArchTimer(const ArchTimer &t);
+};
+
+class ArchTimerKvm : public ArchTimer
+{
+  private:
+    ArmSystem &system;
+
+  public:
+    ArchTimerKvm(const std::string &name,
+                 ArmSystem &system,
+                 SimObject &parent,
+                 SystemCounter &sysctr,
+                 const Interrupt &interrupt)
+      : ArchTimer(name, parent, sysctr, interrupt), system(system) {}
+
+  protected:
+    // For ArchTimer's in a GenericTimerISA with Kvm execution about
+    // to begin, skip rescheduling the event.
+    // Otherwise, we should reschedule the event (if necessary).
+    bool scheduleEvents() override {
+        return !system.validKvmEnvironment();
+    }
 };
 
 class GenericTimer : public SimObject
@@ -211,25 +240,25 @@ class GenericTimer : public SimObject
 
   protected:
     struct CoreTimers {
-        CoreTimers(GenericTimer &parent, unsigned cpu,
+        CoreTimers(GenericTimer &parent, ArmSystem &system, unsigned cpu,
                    unsigned _irqPhys, unsigned _irqVirt)
             : irqPhys(*parent.gic, _irqPhys, cpu),
               irqVirt(*parent.gic, _irqVirt, cpu),
               // This should really be phys_timerN, but we are stuck with
               // arch_timer for backwards compatibility.
               phys(csprintf("%s.arch_timer%d", parent.name(), cpu),
-                   parent, parent.systemCounter,
+                   system, parent, parent.systemCounter,
                    irqPhys),
               virt(csprintf("%s.virt_timer%d", parent.name(), cpu),
-                   parent, parent.systemCounter,
+                   system, parent, parent.systemCounter,
                    irqVirt)
         {}
 
         ArchTimer::Interrupt irqPhys;
         ArchTimer::Interrupt irqVirt;
 
-        ArchTimer phys;
-        ArchTimer virt;
+        ArchTimerKvm phys;
+        ArchTimerKvm virt;
 
       private:
         // Disable copying
@@ -246,6 +275,9 @@ class GenericTimer : public SimObject
     std::vector<std::unique_ptr<CoreTimers>> timers;
 
   protected: // Configuration
+    /// ARM system containing this timer
+    ArmSystem &system;
+
     /// Pointer to the GIC, needed to trigger timer interrupts.
     BaseGic *const gic;
 

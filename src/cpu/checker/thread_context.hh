@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012 ARM Limited
+ * Copyright (c) 2011-2012, 2016 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -130,6 +130,8 @@ class CheckerThreadContext : public ThreadContext
 
     Process *getProcessPtr() { return actualTC->getProcessPtr(); }
 
+    void setProcessPtr(Process *p) { actualTC->setProcessPtr(p); }
+
     PortProxy &getPhysProxy() { return actualTC->getPhysProxy(); }
 
     FSTranslatingPortProxy &getVirtProxy()
@@ -213,6 +215,55 @@ class CheckerThreadContext : public ThreadContext
     FloatRegBits readFloatRegBits(int reg_idx)
     { return actualTC->readFloatRegBits(reg_idx); }
 
+    const VecRegContainer& readVecReg(const RegId& reg) const
+    { return actualTC->readVecReg(reg); }
+
+    /**
+     * Read vector register for modification, hierarchical indexing.
+     */
+    VecRegContainer& getWritableVecReg(const RegId& reg)
+    { return actualTC->getWritableVecReg(reg); }
+
+    /** Vector Register Lane Interfaces. */
+    /** @{ */
+    /** Reads source vector 8bit operand. */
+    ConstVecLane8
+    readVec8BitLaneReg(const RegId& reg) const
+    { return actualTC->readVec8BitLaneReg(reg); }
+
+    /** Reads source vector 16bit operand. */
+    ConstVecLane16
+    readVec16BitLaneReg(const RegId& reg) const
+    { return actualTC->readVec16BitLaneReg(reg); }
+
+    /** Reads source vector 32bit operand. */
+    ConstVecLane32
+    readVec32BitLaneReg(const RegId& reg) const
+    { return actualTC->readVec32BitLaneReg(reg); }
+
+    /** Reads source vector 64bit operand. */
+    ConstVecLane64
+    readVec64BitLaneReg(const RegId& reg) const
+    { return actualTC->readVec64BitLaneReg(reg); }
+
+    /** Write a lane of the destination vector register. */
+    virtual void setVecLane(const RegId& reg,
+            const LaneData<LaneSize::Byte>& val)
+    { return actualTC->setVecLane(reg, val); }
+    virtual void setVecLane(const RegId& reg,
+            const LaneData<LaneSize::TwoByte>& val)
+    { return actualTC->setVecLane(reg, val); }
+    virtual void setVecLane(const RegId& reg,
+            const LaneData<LaneSize::FourByte>& val)
+    { return actualTC->setVecLane(reg, val); }
+    virtual void setVecLane(const RegId& reg,
+            const LaneData<LaneSize::EightByte>& val)
+    { return actualTC->setVecLane(reg, val); }
+    /** @} */
+
+    const VecElem& readVecElem(const RegId& reg) const
+    { return actualTC->readVecElem(reg); }
+
     CCReg readCCReg(int reg_idx)
     { return actualTC->readCCReg(reg_idx); }
 
@@ -234,6 +285,18 @@ class CheckerThreadContext : public ThreadContext
         checkerTC->setFloatRegBits(reg_idx, val);
     }
 
+    void setVecReg(const RegId& reg, const VecRegContainer& val)
+    {
+        actualTC->setVecReg(reg, val);
+        checkerTC->setVecReg(reg, val);
+    }
+
+    void setVecElem(const RegId& reg, const VecElem& val)
+    {
+        actualTC->setVecElem(reg, val);
+        checkerTC->setVecElem(reg, val);
+    }
+
     void setCCReg(int reg_idx, CCReg val)
     {
         actualTC->setCCReg(reg_idx, val);
@@ -252,6 +315,12 @@ class CheckerThreadContext : public ThreadContext
         checkerTC->pcState(val);
         checkerCPU->recordPCChange(val);
         return actualTC->pcState(val);
+    }
+
+    void setNPC(Addr val)
+    {
+        checkerTC->setNPC(val);
+        actualTC->setNPC(val);
     }
 
     void pcStateNoRecord(const TheISA::PCState &val)
@@ -293,10 +362,9 @@ class CheckerThreadContext : public ThreadContext
         actualTC->setMiscReg(misc_reg, val);
     }
 
-    int flattenIntIndex(int reg) { return actualTC->flattenIntIndex(reg); }
-    int flattenFloatIndex(int reg) { return actualTC->flattenFloatIndex(reg); }
-    int flattenCCIndex(int reg) { return actualTC->flattenCCIndex(reg); }
-    int flattenMiscIndex(int reg) { return actualTC->flattenMiscIndex(reg); }
+    RegId flattenRegId(const RegId& regId) const {
+        return actualTC->flattenRegId(regId);
+    }
 
     unsigned readStCondFailures()
     { return actualTC->readStCondFailures(); }
@@ -325,6 +393,26 @@ class CheckerThreadContext : public ThreadContext
 
     void setFloatRegBitsFlat(int idx, FloatRegBits val)
     { actualTC->setFloatRegBitsFlat(idx, val); }
+
+    const VecRegContainer& readVecRegFlat(int idx) const
+    { return actualTC->readVecRegFlat(idx); }
+
+    /**
+     * Read vector register for modification, flat indexing.
+     */
+    VecRegContainer& getWritableVecRegFlat(int idx)
+    { return actualTC->getWritableVecRegFlat(idx); }
+
+    void setVecRegFlat(int idx, const VecRegContainer& val)
+    { actualTC->setVecRegFlat(idx, val); }
+
+    const VecElem& readVecElemFlat(const RegIndex& idx,
+                                   const ElemIndex& elem_idx) const
+    { return actualTC->readVecElemFlat(idx, elem_idx); }
+
+    void setVecElemFlat(const RegIndex& idx,
+                        const ElemIndex& elem_idx, const VecElem& val)
+    { actualTC->setVecElemFlat(idx, elem_idx, val); }
 
     CCReg readCCRegFlat(int idx)
     { return actualTC->readCCRegFlat(idx); }

@@ -45,15 +45,27 @@
 #ifndef __SIM_SYSCALL_EMUL_HH__
 #define __SIM_SYSCALL_EMUL_HH__
 
-#define NO_STAT64 (defined(__APPLE__) || defined(__OpenBSD__) || \
-  defined(__FreeBSD__) || defined(__CYGWIN__) || \
-  defined(__NetBSD__))
+#if (defined(__APPLE__) || defined(__OpenBSD__) ||      \
+     defined(__FreeBSD__) || defined(__CYGWIN__) ||     \
+     defined(__NetBSD__))
+#define NO_STAT64 1
+#else
+#define NO_STAT64 0
+#endif
 
-#define NO_STATFS (defined(__APPLE__) || defined(__OpenBSD__) || \
-  defined(__FreeBSD__) || defined(__NetBSD__))
+#if (defined(__APPLE__) || defined(__OpenBSD__) ||      \
+     defined(__FreeBSD__) || defined(__NetBSD__))
+#define NO_STATFS 1
+#else
+#define NO_STATFS 0
+#endif
 
-#define NO_FALLOCATE (defined(__APPLE__) || defined(__OpenBSD__) || \
-  defined(__FreeBSD__) || defined(__NetBSD__))
+#if (defined(__APPLE__) || defined(__OpenBSD__) ||      \
+     defined(__FreeBSD__) || defined(__NetBSD__))
+#define NO_FALLOCATE 1
+#else
+#define NO_FALLOCATE 0
+#endif
 
 ///
 /// @file syscall_emul.hh
@@ -81,6 +93,7 @@
 #include <memory>
 #include <string>
 
+#include "arch/utility.hh"
 #include "base/intmath.hh"
 #include "base/loader/object_file.hh"
 #include "base/misc.hh"
@@ -90,9 +103,12 @@
 #include "cpu/base.hh"
 #include "cpu/thread_context.hh"
 #include "mem/page_table.hh"
+#include "params/Process.hh"
 #include "sim/emul_driver.hh"
+#include "sim/futex_map.hh"
 #include "sim/process.hh"
 #include "sim/syscall_debug_macros.hh"
+#include "sim/syscall_desc.hh"
 #include "sim/syscall_emul_buf.hh"
 #include "sim/syscall_return.hh"
 #include "sim/sim_exit.hh"
@@ -100,8 +116,6 @@
 
 #include "aladdin/gem5/aladdin_sys_connection.h"
 #include "aladdin/gem5/aladdin_sys_constants.h"
-
-class SyscallDesc;
 
 //////////////////////////////////////////////////////////////////////
 //
@@ -135,6 +149,10 @@ SyscallReturn exitFunc(SyscallDesc *desc, int num,
 SyscallReturn exitGroupFunc(SyscallDesc *desc, int num,
                        Process *p, ThreadContext *tc);
 
+/// Target set_tid_address() handler.
+SyscallReturn setTidAddressFunc(SyscallDesc *desc, int num,
+                                Process *p, ThreadContext *tc);
+
 /// Target getpagesize() handler.
 SyscallReturn getpagesizeFunc(SyscallDesc *desc, int num,
                               Process *p, ThreadContext *tc);
@@ -147,7 +165,7 @@ SyscallReturn brkFunc(SyscallDesc *desc, int num,
 SyscallReturn closeFunc(SyscallDesc *desc, int num,
                         Process *p, ThreadContext *tc);
 
-/// Target read() handler.
+// Target read() handler.
 SyscallReturn readFunc(SyscallDesc *desc, int num,
                        Process *p, ThreadContext *tc);
 
@@ -217,11 +235,17 @@ SyscallReturn ftruncate64Func(SyscallDesc *desc, int num,
 SyscallReturn umaskFunc(SyscallDesc *desc, int num,
                         Process *p, ThreadContext *tc);
 
+/// Target gettid() handler.
+SyscallReturn gettidFunc(SyscallDesc *desc, int num,
+                         Process *p, ThreadContext *tc);
 
 /// Target chown() handler.
 SyscallReturn chownFunc(SyscallDesc *desc, int num,
                         Process *p, ThreadContext *tc);
 
+/// Target setpgid() handler.
+SyscallReturn setpgidFunc(SyscallDesc *desc, int num,
+                          Process *p, ThreadContext *tc);
 
 /// Target fchown() handler.
 SyscallReturn fchownFunc(SyscallDesc *desc, int num,
@@ -230,6 +254,10 @@ SyscallReturn fchownFunc(SyscallDesc *desc, int num,
 /// Target dup() handler.
 SyscallReturn dupFunc(SyscallDesc *desc, int num,
                       Process *process, ThreadContext *tc);
+
+/// Target dup2() handler.
+SyscallReturn dup2Func(SyscallDesc *desc, int num,
+                       Process *process, ThreadContext *tc);
 
 /// Target fcntl() handler.
 SyscallReturn fcntlFunc(SyscallDesc *desc, int num,
@@ -245,6 +273,14 @@ void fcntlAladdinHandler(Process *process, ThreadContext *tc);
 /// Target setuid() handler.
 SyscallReturn setuidFunc(SyscallDesc *desc, int num,
                          Process *p, ThreadContext *tc);
+
+/// Target pipe() handler.
+SyscallReturn pipeFunc(SyscallDesc *desc, int num,
+                       Process *p, ThreadContext *tc);
+
+/// Internal pipe() handler.
+SyscallReturn pipeImpl(SyscallDesc *desc, int num, Process *p,
+                       ThreadContext *tc, bool pseudoPipe);
 
 /// Target getpid() handler.
 SyscallReturn getpidFunc(SyscallDesc *desc, int num,
@@ -270,10 +306,6 @@ SyscallReturn geteuidFunc(SyscallDesc *desc, int num,
 SyscallReturn getegidFunc(SyscallDesc *desc, int num,
                           Process *p, ThreadContext *tc);
 
-/// Target clone() handler.
-SyscallReturn cloneFunc(SyscallDesc *desc, int num,
-                        Process *p, ThreadContext *tc);
-
 /// Target access() handler
 SyscallReturn accessFunc(SyscallDesc *desc, int num,
                          Process *p, ThreadContext *tc);
@@ -282,85 +314,51 @@ SyscallReturn accessFunc(SyscallDesc *desc, int num,
                          int index);
 
 /// Futex system call
-///  Implemented by Daniel Sanchez
-///  Used by printf's in multi-threaded apps
+/// Implemented by Daniel Sanchez
+/// Used by printf's in multi-threaded apps
 template <class OS>
 SyscallReturn
 futexFunc(SyscallDesc *desc, int callnum, Process *process,
           ThreadContext *tc)
 {
-    int index_uaddr = 0;
-    int index_op = 1;
-    int index_val = 2;
-    int index_timeout = 3;
+    using namespace std;
 
-    uint64_t uaddr = process->getSyscallArg(tc, index_uaddr);
-    int op = process->getSyscallArg(tc, index_op);
-    int val = process->getSyscallArg(tc, index_val);
-    uint64_t timeout = process->getSyscallArg(tc, index_timeout);
+    int index = 0;
+    Addr uaddr = process->getSyscallArg(tc, index);
+    int op = process->getSyscallArg(tc, index);
+    int val = process->getSyscallArg(tc, index);
 
-    std::map<uint64_t, std::list<ThreadContext *> * >
-        &futex_map = tc->getSystemPtr()->futexMap;
-
-    DPRINTF(SyscallVerbose, "In sys_futex: Address=%llx, op=%d, val=%d\n",
-            uaddr, op, val);
-
+    /*
+     * Unsupported option that does not affect the correctness of the
+     * application. This is a performance optimization utilized by Linux.
+     */
     op &= ~OS::TGT_FUTEX_PRIVATE_FLAG;
 
-    if (op == OS::TGT_FUTEX_WAIT) {
-        if (timeout != 0) {
-            warn("sys_futex: FUTEX_WAIT with non-null timeout unimplemented;"
-                 "we'll wait indefinitely");
-        }
+    FutexMap &futex_map = tc->getSystemPtr()->futexMap;
 
-        uint8_t *buf = new uint8_t[sizeof(int)];
-        tc->getMemProxy().readBlob((Addr)uaddr, buf, (int)sizeof(int));
-        int mem_val = *((int *)buf);
-        delete[] buf;
+    if (OS::TGT_FUTEX_WAIT == op) {
+        // Ensure futex system call accessed atomically.
+        BufferArg buf(uaddr, sizeof(int));
+        buf.copyIn(tc->getMemProxy());
+        int mem_val = *(int*)buf.bufferPtr();
 
-        if (val != mem_val) {
-            DPRINTF(SyscallVerbose, "sys_futex: FUTEX_WAKE, read: %d, "
-                                    "expected: %d\n", mem_val, val);
+        /*
+         * The value in memory at uaddr is not equal with the expected val
+         * (a different thread must have changed it before the system call was
+         * invoked). In this case, we need to throw an error.
+         */
+        if (val != mem_val)
             return -OS::TGT_EWOULDBLOCK;
-        }
 
-        // Queue the thread context
-        std::list<ThreadContext *> * tcWaitList;
-        if (futex_map.count(uaddr)) {
-            tcWaitList = futex_map.find(uaddr)->second;
-        } else {
-            tcWaitList = new std::list<ThreadContext *>();
-            futex_map.insert(std::pair< uint64_t,
-                            std::list<ThreadContext *> * >(uaddr, tcWaitList));
-        }
-        tcWaitList->push_back(tc);
-        DPRINTF(SyscallVerbose, "sys_futex: FUTEX_WAIT, suspending calling "
-                                "thread context\n");
-        tc->suspend();
+        futex_map.suspend(uaddr, process->tgid(), tc);
+
         return 0;
-    } else if (op == OS::TGT_FUTEX_WAKE){
-        int wokenUp = 0;
-        std::list<ThreadContext *> * tcWaitList;
-        if (futex_map.count(uaddr)) {
-            tcWaitList = futex_map.find(uaddr)->second;
-            while (tcWaitList->size() > 0 && wokenUp < val) {
-                tcWaitList->front()->activate();
-                tcWaitList->pop_front();
-                wokenUp++;
-            }
-            if (tcWaitList->empty()) {
-                futex_map.erase(uaddr);
-                delete tcWaitList;
-            }
-        }
-        DPRINTF(SyscallVerbose, "sys_futex: FUTEX_WAKE, activated %d waiting "
-                                "thread contexts\n", wokenUp);
-        return wokenUp;
-    } else {
-        warn("sys_futex: op %d is not implemented, just returning...", op);
-        return 0;
+    } else if (OS::TGT_FUTEX_WAKE == op) {
+        return futex_map.wakeup(uaddr, process->tgid(), val);
     }
 
+    warn("futex: op %d not implemented; ignoring.", op);
+    return -ENOSYS;
 }
 
 
@@ -435,7 +433,7 @@ getElapsedTimeNano(T1 &sec, T2 &nsec)
 //// memory space.  Used by stat(), fstat(), and lstat().
 
 template <typename target_stat, typename host_stat>
-static void
+void
 convertStatBuf(target_stat &tgt, host_stat *host, bool fakeTTY = false)
 {
     using namespace TheISA;
@@ -473,7 +471,7 @@ convertStatBuf(target_stat &tgt, host_stat *host, bool fakeTTY = false)
     tgt->st_mtimeX = TheISA::htog(tgt->st_mtimeX);
     tgt->st_ctimeX = host->st_ctime;
     tgt->st_ctimeX = TheISA::htog(tgt->st_ctimeX);
-    // Force the block size to be 8k. This helps to ensure buffered io works
+    // Force the block size to be 8KB. This helps to ensure buffered io works
     // consistently across different hosts.
     tgt->st_blksize = 0x2000;
     tgt->st_blksize = TheISA::htog(tgt->st_blksize);
@@ -484,7 +482,7 @@ convertStatBuf(target_stat &tgt, host_stat *host, bool fakeTTY = false)
 // Same for stat64
 
 template <typename target_stat, typename host_stat64>
-static void
+void
 convertStat64Buf(target_stat &tgt, host_stat64 *host, bool fakeTTY = false)
 {
     using namespace TheISA;
@@ -504,11 +502,11 @@ convertStat64Buf(target_stat &tgt, host_stat64 *host, bool fakeTTY = false)
 #endif
 }
 
-//Here are a couple convenience functions
+// Here are a couple of convenience functions
 template<class OS>
-static void
+void
 copyOutStatBuf(SETranslatingPortProxy &mem, Addr addr,
-        hst_stat *host, bool fakeTTY = false)
+               hst_stat *host, bool fakeTTY = false)
 {
     typedef TypedBufferArg<typename OS::tgt_stat> tgt_stat_buf;
     tgt_stat_buf tgt(addr);
@@ -517,9 +515,9 @@ copyOutStatBuf(SETranslatingPortProxy &mem, Addr addr,
 }
 
 template<class OS>
-static void
+void
 copyOutStat64Buf(SETranslatingPortProxy &mem, Addr addr,
-        hst_stat64 *host, bool fakeTTY = false)
+                 hst_stat64 *host, bool fakeTTY = false)
 {
     typedef TypedBufferArg<typename OS::tgt_stat64> tgt_stat_buf;
     tgt_stat_buf tgt(addr);
@@ -528,7 +526,7 @@ copyOutStat64Buf(SETranslatingPortProxy &mem, Addr addr,
 }
 
 template <class OS>
-static void
+void
 copyOutStatfsBuf(SETranslatingPortProxy &mem, Addr addr,
                  hst_statfs *host)
 {
@@ -648,80 +646,136 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
 }
 
 template <class OS>
-static SyscallReturn
-openFunc(SyscallDesc *desc, int callnum, Process *process,
-         ThreadContext *tc, int index)
+SyscallReturn
+openImpl(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc,
+         bool isopenat)
 {
-    std::string path;
+    int index = 0;
+    int tgt_dirfd = -1;
 
-    if (!tc->getMemProxy().tryReadString(path,
-                process->getSyscallArg(tc, index)))
+    /**
+     * If using the openat variant, read in the target directory file
+     * descriptor from the simulated process.
+     */
+    if (isopenat)
+        tgt_dirfd = p->getSyscallArg(tc, index);
+
+    /**
+     * Retrieve the simulated process' memory proxy and then read in the path
+     * string from that memory space into the host's working memory space.
+     */
+    std::string path;
+    if (!tc->getMemProxy().tryReadString(path, p->getSyscallArg(tc, index)))
         return -EFAULT;
 
-    int tgtFlags = process->getSyscallArg(tc, index);
-    int mode = process->getSyscallArg(tc, index);
-    int hostFlags = 0;
-
-    // translate open flags
+#ifdef __CYGWIN32__
+    int host_flags = O_BINARY;
+#else
+    int host_flags = 0;
+#endif
+    /**
+     * Translate target flags into host flags. Flags exist which are not
+     * ported between architectures which can cause check failures.
+     */
+    int tgt_flags = p->getSyscallArg(tc, index);
     for (int i = 0; i < OS::NUM_OPEN_FLAGS; i++) {
-        if (tgtFlags & OS::openFlagTable[i].tgtFlag) {
-            tgtFlags &= ~OS::openFlagTable[i].tgtFlag;
-            hostFlags |= OS::openFlagTable[i].hostFlag;
+        if (tgt_flags & OS::openFlagTable[i].tgtFlag) {
+            tgt_flags &= ~OS::openFlagTable[i].tgtFlag;
+            host_flags |= OS::openFlagTable[i].hostFlag;
         }
     }
-
-    // any target flags left?
-    if (tgtFlags != 0)
-        warn("Syscall: open: cannot decode flags 0x%x", tgtFlags);
-
+    if (tgt_flags) {
+        warn("open%s: cannot decode flags 0x%x",
+             isopenat ? "at" : "", tgt_flags);
+    }
 #ifdef __CYGWIN32__
-    hostFlags |= O_BINARY;
+    host_flags |= O_BINARY;
 #endif
 
-    // Adjust path for current working directory
-    path = process->fullPath(path);
+    int mode = p->getSyscallArg(tc, index);
 
-    DPRINTF(SyscallVerbose, "opening file %s\n", path.c_str());
-
-    if (startswith(path, "/dev/")) {
-        std::string filename = path.substr(strlen("/dev/"));
-        if (filename == "sysdev0") {
-            // This is a memory-mapped high-resolution timer device on Alpha.
-            // We don't support it, so just punt.
-            warn("Ignoring open(%s, ...)\n", path);
-            return -ENOENT;
-        }
-
-        EmulatedDriver *drv = process->findDriver(filename);
-        if (drv) {
-            // the driver's open method will allocate a fd from the
-            // process if necessary.
-            return drv->open(process, tc, mode, hostFlags);
-        }
-
-        // fall through here for pass through to host devices, such as
-        // /dev/zero
+    /**
+     * If the simulated process called open or openat with AT_FDCWD specified,
+     * take the current working directory value which was passed into the
+     * process class as a Python parameter and append the current path to
+     * create a full path.
+     * Otherwise, openat with a valid target directory file descriptor has
+     * been called. If the path option, which was passed in as a parameter,
+     * is not absolute, retrieve the directory file descriptor's path and
+     * prepend it to the path passed in as a parameter.
+     * In every case, we should have a full path (which is relevant to the
+     * host) to work with after this block has been passed.
+     */
+    if (!isopenat || (isopenat && tgt_dirfd == OS::TGT_AT_FDCWD)) {
+        path = p->fullPath(path);
+    } else if (!startswith(path, "/")) {
+        std::shared_ptr<FDEntry> fdep = ((*p->fds)[tgt_dirfd]);
+        auto ffdp = std::dynamic_pointer_cast<FileFDEntry>(fdep);
+        if (!ffdp)
+            return -EBADF;
+        path.insert(0, ffdp->getFileName());
     }
 
-    int fd;
-    int local_errno;
-    if (startswith(path, "/proc/") || startswith(path, "/system/") ||
-        startswith(path, "/platform/") || startswith(path, "/sys/")) {
-        // It's a proc/sys entry and requires special handling
-        fd = OS::openSpecialFile(path, process, tc);
-        local_errno = ENOENT;
-     } else {
-        // open the file
-        fd = open(path.c_str(), hostFlags, mode);
-        local_errno = errno;
-     }
+    /**
+     * Since this is an emulated environment, we create pseudo file
+     * descriptors for device requests that have been registered with
+     * the process class through Python; this allows us to create a file
+     * descriptor for subsequent ioctl or mmap calls.
+     */
+    if (startswith(path, "/dev/")) {
+        std::string filename = path.substr(strlen("/dev/"));
+        EmulatedDriver *drv = p->findDriver(filename);
+        if (drv) {
+            DPRINTF_SYSCALL(Verbose, "open%s: passing call to "
+                            "driver open with path[%s]\n",
+                            isopenat ? "at" : "", path.c_str());
+            return drv->open(p, tc, mode, host_flags);
+        }
+        /**
+         * Fall through here for pass through to host devices, such
+         * as /dev/zero
+         */
+    }
 
-    if (fd == -1)
-        return -local_errno;
+    /**
+     * Some special paths and files cannot be called on the host and need
+     * to be handled as special cases inside the simulator.
+     * If the full path that was created above does not match any of the
+     * special cases, pass it through to the open call on the host to let
+     * the host open the file on our behalf.
+     * If the host cannot open the file, return the host's error code back
+     * through the system call to the simulated process.
+     */
+    int sim_fd = -1;
+    std::vector<std::string> special_paths =
+            { "/proc/", "/system/", "/sys/", "/platform/", "/etc/passwd" };
+    for (auto entry : special_paths) {
+        if (startswith(path, entry))
+            sim_fd = OS::openSpecialFile(path, p, tc);
+    }
+    if (sim_fd == -1) {
+        sim_fd = open(path.c_str(), host_flags, mode);
+    }
+    if (sim_fd == -1) {
+        int local = -errno;
+        DPRINTF_SYSCALL(Verbose, "open%s: failed -> path:%s\n",
+                        isopenat ? "at" : "", path.c_str());
+        return local;
+    }
 
-    std::shared_ptr<FileFDEntry> ffdp =
-        std::make_shared<FileFDEntry>(fd, hostFlags, path.c_str(), false);
-    return process->fds->allocFD(ffdp);
+    /**
+     * The file was opened successfully and needs to be recorded in the
+     * process' file descriptor array so that it can be retrieved later.
+     * The target file descriptor that is chosen will be the lowest unused
+     * file descriptor.
+     * Return the indirect target file descriptor back to the simulated
+     * process to act as a handle for the opened file.
+     */
+    auto ffdp = std::make_shared<FileFDEntry>(sim_fd, host_flags, path, 0);
+    int tgt_fd = p->fds->allocFD(ffdp);
+    DPRINTF_SYSCALL(Verbose, "open%s: sim_fd[%d], target_fd[%d] -> path:%s\n",
+                    isopenat ? "at" : "", sim_fd, tgt_fd, path.c_str());
+    return tgt_fd;
 }
 
 /// Target open() handler.
@@ -730,7 +784,7 @@ SyscallReturn
 openFunc(SyscallDesc *desc, int callnum, Process *process,
          ThreadContext *tc)
 {
-    return openFunc<OS>(desc, callnum, process, tc, 0);
+    return openImpl<OS>(desc, callnum, process, tc, false);
 }
 
 /// Target openat() handler.
@@ -739,11 +793,7 @@ SyscallReturn
 openatFunc(SyscallDesc *desc, int callnum, Process *process,
            ThreadContext *tc)
 {
-    int index = 0;
-    int dirfd = process->getSyscallArg(tc, index);
-    if (dirfd != OS::TGT_AT_FDCWD)
-        warn("openat: first argument not AT_FDCWD; unlikely to work");
-    return openFunc<OS>(desc, callnum, process, tc, 1);
+    return openImpl<OS>(desc, callnum, process, tc, true);
 }
 
 /// Target unlinkat() handler.
@@ -920,11 +970,14 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
     new_length = roundUp(new_length, TheISA::PageBytes);
 
     if (new_length > old_length) {
-        if ((start + old_length) == process->mmap_end &&
+        std::shared_ptr<MemState> mem_state = process->memState;
+        Addr mmap_end = mem_state->getMmapEnd();
+
+        if ((start + old_length) == mmap_end &&
             (!use_provided_address || provided_address == start)) {
             uint64_t diff = new_length - old_length;
-            process->allocateMem(process->mmap_end, diff);
-            process->mmap_end += diff;
+            process->allocateMem(mmap_end, diff);
+            mem_state->setMmapEnd(mmap_end + diff);
             return start;
         } else {
             if (!use_provided_address && !(flags & OS::TGT_MREMAP_MAYMOVE)) {
@@ -932,7 +985,7 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
                 return -ENOMEM;
             } else {
                 uint64_t new_start = use_provided_address ?
-                    provided_address : process->mmap_end;
+                    provided_address : mmap_end;
                 process->pTable->remap(start, old_length, new_start);
                 warn("mremapping to new vaddr %08p-%08p, adding %d\n",
                      new_start, new_start + new_length,
@@ -942,9 +995,9 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
                                      new_length - old_length,
                                      use_provided_address /* clobber */);
                 if (!use_provided_address)
-                    process->mmap_end += new_length;
+                    mem_state->setMmapEnd(mmap_end + new_length);
                 if (use_provided_address &&
-                    new_start + new_length > process->mmap_end) {
+                    new_start + new_length > mem_state->getMmapEnd()) {
                     // something fishy going on here, at least notify the user
                     // @todo: increase mmap_end?
                     warn("mmap region limit exceeded with MREMAP_FIXED\n");
@@ -1216,6 +1269,138 @@ statfsFunc(SyscallDesc *desc, int callnum, Process *process,
     return 0;
 }
 
+template <class OS>
+SyscallReturn
+cloneFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+{
+    int index = 0;
+    TheISA::IntReg flags = p->getSyscallArg(tc, index);
+    TheISA::IntReg newStack = p->getSyscallArg(tc, index);
+    Addr ptidPtr = p->getSyscallArg(tc, index);
+    Addr ctidPtr = p->getSyscallArg(tc, index);
+    Addr tlsPtr M5_VAR_USED = p->getSyscallArg(tc, index);
+
+    if (((flags & OS::TGT_CLONE_SIGHAND)&& !(flags & OS::TGT_CLONE_VM)) ||
+        ((flags & OS::TGT_CLONE_THREAD) && !(flags & OS::TGT_CLONE_SIGHAND)) ||
+        ((flags & OS::TGT_CLONE_FS)     &&  (flags & OS::TGT_CLONE_NEWNS)) ||
+        ((flags & OS::TGT_CLONE_NEWIPC) &&  (flags & OS::TGT_CLONE_SYSVSEM)) ||
+        ((flags & OS::TGT_CLONE_NEWPID) &&  (flags & OS::TGT_CLONE_THREAD)) ||
+        ((flags & OS::TGT_CLONE_VM)     && !(newStack)))
+        return -EINVAL;
+
+    ThreadContext *ctc;
+    if (!(ctc = p->findFreeContext()))
+        fatal("clone: no spare thread context in system");
+
+    /**
+     * Note that ProcessParams is generated by swig and there are no other
+     * examples of how to create anything but this default constructor. The
+     * fields are manually initialized instead of passing parameters to the
+     * constructor.
+     */
+    ProcessParams *pp = new ProcessParams();
+    pp->executable.assign(*(new std::string(p->progName())));
+    pp->cmd.push_back(*(new std::string(p->progName())));
+    pp->system = p->system;
+    pp->cwd.assign(p->getcwd());
+    pp->input.assign("stdin");
+    pp->output.assign("stdout");
+    pp->errout.assign("stderr");
+    pp->uid = p->uid();
+    pp->euid = p->euid();
+    pp->gid = p->gid();
+    pp->egid = p->egid();
+
+    /* Find the first free PID that's less than the maximum */
+    std::set<int> const& pids = p->system->PIDs;
+    int temp_pid = *pids.begin();
+    do {
+        temp_pid++;
+    } while (pids.find(temp_pid) != pids.end());
+    if (temp_pid >= System::maxPID)
+        fatal("temp_pid is too large: %d", temp_pid);
+
+    pp->pid = temp_pid;
+    pp->ppid = (flags & OS::TGT_CLONE_THREAD) ? p->ppid() : p->pid();
+    Process *cp = pp->create();
+    delete pp;
+
+    Process *owner = ctc->getProcessPtr();
+    ctc->setProcessPtr(cp);
+    cp->assignThreadContext(ctc->contextId());
+    owner->revokeThreadContext(ctc->contextId());
+
+    if (flags & OS::TGT_CLONE_PARENT_SETTID) {
+        BufferArg ptidBuf(ptidPtr, sizeof(long));
+        long *ptid = (long *)ptidBuf.bufferPtr();
+        *ptid = cp->pid();
+        ptidBuf.copyOut(tc->getMemProxy());
+    }
+
+    cp->initState();
+    p->clone(tc, ctc, cp, flags);
+
+    if (flags & OS::TGT_CLONE_THREAD) {
+        delete cp->sigchld;
+        cp->sigchld = p->sigchld;
+    } else if (flags & OS::TGT_SIGCHLD) {
+        *cp->sigchld = true;
+    }
+
+    if (flags & OS::TGT_CLONE_CHILD_SETTID) {
+        BufferArg ctidBuf(ctidPtr, sizeof(long));
+        long *ctid = (long *)ctidBuf.bufferPtr();
+        *ctid = cp->pid();
+        ctidBuf.copyOut(ctc->getMemProxy());
+    }
+
+    if (flags & OS::TGT_CLONE_CHILD_CLEARTID)
+        cp->childClearTID = (uint64_t)ctidPtr;
+
+    ctc->clearArchRegs();
+
+#if THE_ISA == ALPHA_ISA
+    TheISA::copyMiscRegs(tc, ctc);
+#elif THE_ISA == SPARC_ISA
+    TheISA::copyRegs(tc, ctc);
+    ctc->setIntReg(TheISA::NumIntArchRegs + 6, 0);
+    ctc->setIntReg(TheISA::NumIntArchRegs + 4, 0);
+    ctc->setIntReg(TheISA::NumIntArchRegs + 3, TheISA::NWindows - 2);
+    ctc->setIntReg(TheISA::NumIntArchRegs + 5, TheISA::NWindows);
+    ctc->setMiscReg(TheISA::MISCREG_CWP, 0);
+    ctc->setIntReg(TheISA::NumIntArchRegs + 7, 0);
+    ctc->setMiscRegNoEffect(TheISA::MISCREG_TL, 0);
+    ctc->setMiscReg(TheISA::MISCREG_ASI, TheISA::ASI_PRIMARY);
+    for (int y = 8; y < 32; y++)
+        ctc->setIntReg(y, tc->readIntReg(y));
+#elif THE_ISA == ARM_ISA or THE_ISA == X86_ISA
+    TheISA::copyRegs(tc, ctc);
+#endif
+
+#if THE_ISA == X86_ISA
+    if (flags & OS::TGT_CLONE_SETTLS) {
+        ctc->setMiscRegNoEffect(TheISA::MISCREG_FS_BASE, tlsPtr);
+        ctc->setMiscRegNoEffect(TheISA::MISCREG_FS_EFF_BASE, tlsPtr);
+    }
+#endif
+
+    if (newStack)
+        ctc->setIntReg(TheISA::StackPointerReg, newStack);
+
+    cp->setSyscallReturn(ctc, 0);
+
+#if THE_ISA == ALPHA_ISA
+    ctc->setIntReg(TheISA::SyscallSuccessReg, 0);
+#elif THE_ISA == SPARC_ISA
+    tc->setIntReg(TheISA::SyscallPseudoReturnReg, 0);
+    ctc->setIntReg(TheISA::SyscallPseudoReturnReg, 1);
+#endif
+
+    ctc->pcState(tc->nextInstAddr());
+    ctc->activate();
+
+    return cp->pid();
+}
 
 /// Target fstatfs() handler.
 template <class OS>
@@ -1354,7 +1539,7 @@ mmapImpl(SyscallDesc *desc, int num, Process *p, ThreadContext *tc,
             return -EBADF;
         sim_fd = ffdp->getSimFD();
 
-        pmap = (decltype(pmap))mmap(NULL, length, PROT_READ, MAP_PRIVATE,
+        pmap = (decltype(pmap))mmap(nullptr, length, PROT_READ, MAP_PRIVATE,
                                     sim_fd, offset);
 
         if (pmap == (decltype(pmap))-1) {
@@ -1366,8 +1551,13 @@ mmapImpl(SyscallDesc *desc, int num, Process *p, ThreadContext *tc,
     // Extend global mmap region if necessary. Note that we ignore the
     // start address unless MAP_FIXED is specified.
     if (!(tgt_flags & OS::TGT_MAP_FIXED)) {
-        start = p->mmapGrowsDown() ? p->mmap_end - length : p->mmap_end;
-        p->mmap_end = p->mmapGrowsDown() ? start : p->mmap_end + length;
+        std::shared_ptr<MemState> mem_state = p->memState;
+        Addr mmap_end = mem_state->getMmapEnd();
+
+        start = p->mmapGrowsDown() ? mmap_end - length : mmap_end;
+        mmap_end = p->mmapGrowsDown() ? start : mmap_end + length;
+
+        mem_state->setMmapEnd(mmap_end);
     }
 
     DPRINTF_SYSCALL(Verbose, " mmap range is 0x%x - 0x%x\n",
@@ -1531,24 +1721,24 @@ getrlimitFunc(SyscallDesc *desc, int callnum, Process *process,
     TypedBufferArg<typename OS::rlimit> rlp(process->getSyscallArg(tc, index));
 
     switch (resource) {
-        case OS::TGT_RLIMIT_STACK:
-            // max stack size in bytes: make up a number (8MB for now)
-            rlp->rlim_cur = rlp->rlim_max = 8 * 1024 * 1024;
-            rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
-            rlp->rlim_max = TheISA::htog(rlp->rlim_max);
-            break;
+      case OS::TGT_RLIMIT_STACK:
+        // max stack size in bytes: make up a number (8MB for now)
+        rlp->rlim_cur = rlp->rlim_max = 8 * 1024 * 1024;
+        rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
+        rlp->rlim_max = TheISA::htog(rlp->rlim_max);
+        break;
 
-        case OS::TGT_RLIMIT_DATA:
-            // max data segment size in bytes: make up a number
-            rlp->rlim_cur = rlp->rlim_max = 256 * 1024 * 1024;
-            rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
-            rlp->rlim_max = TheISA::htog(rlp->rlim_max);
-            break;
+      case OS::TGT_RLIMIT_DATA:
+        // max data segment size in bytes: make up a number
+        rlp->rlim_cur = rlp->rlim_max = 256 * 1024 * 1024;
+        rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
+        rlp->rlim_max = TheISA::htog(rlp->rlim_max);
+        break;
 
-        default:
-            warn("getrlimit: unimplemented resource %d", resource);
-            return -EINVAL;
-            break;
+      default:
+        warn("getrlimit: unimplemented resource %d", resource);
+        return -EINVAL;
+        break;
     }
 
     rlp.copyOut(tc->getMemProxy());
@@ -1630,8 +1820,7 @@ utimesFunc(SyscallDesc *desc, int callnum, Process *process,
     tp.copyIn(tc->getMemProxy());
 
     struct timeval hostTimeval[2];
-    for (int i = 0; i < 2; ++i)
-    {
+    for (int i = 0; i < 2; ++i) {
         hostTimeval[i].tv_sec = TheISA::gtoh((*tp)[i].tv_sec);
         hostTimeval[i].tv_usec = TheISA::gtoh((*tp)[i].tv_usec);
     }
@@ -1646,6 +1835,99 @@ utimesFunc(SyscallDesc *desc, int callnum, Process *process,
 
     return 0;
 }
+
+template <class OS>
+SyscallReturn
+execveFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+{
+    desc->setFlags(0);
+
+    int index = 0;
+    std::string path;
+    SETranslatingPortProxy & mem_proxy = tc->getMemProxy();
+    if (!mem_proxy.tryReadString(path, p->getSyscallArg(tc, index)))
+        return -EFAULT;
+
+    if (access(path.c_str(), F_OK) == -1)
+        return -EACCES;
+
+    auto read_in = [](std::vector<std::string> & vect,
+                      SETranslatingPortProxy & mem_proxy,
+                      Addr mem_loc)
+    {
+        for (int inc = 0; ; inc++) {
+            BufferArg b((mem_loc + sizeof(Addr) * inc), sizeof(Addr));
+            b.copyIn(mem_proxy);
+
+            if (!*(Addr*)b.bufferPtr())
+                break;
+
+            vect.push_back(std::string());
+            mem_proxy.tryReadString(vect[inc], *(Addr*)b.bufferPtr());
+        }
+    };
+
+    /**
+     * Note that ProcessParams is generated by swig and there are no other
+     * examples of how to create anything but this default constructor. The
+     * fields are manually initialized instead of passing parameters to the
+     * constructor.
+     */
+    ProcessParams *pp = new ProcessParams();
+    pp->executable = path;
+    Addr argv_mem_loc = p->getSyscallArg(tc, index);
+    read_in(pp->cmd, mem_proxy, argv_mem_loc);
+    Addr envp_mem_loc = p->getSyscallArg(tc, index);
+    read_in(pp->env, mem_proxy, envp_mem_loc);
+    pp->uid = p->uid();
+    pp->egid = p->egid();
+    pp->euid = p->euid();
+    pp->gid = p->gid();
+    pp->ppid = p->ppid();
+    pp->pid = p->pid();
+    pp->input.assign("cin");
+    pp->output.assign("cout");
+    pp->errout.assign("cerr");
+    pp->cwd.assign(p->getcwd());
+    pp->system = p->system;
+    /**
+     * Prevent process object creation with identical PIDs (which will trip
+     * a fatal check in Process constructor). The execve call is supposed to
+     * take over the currently executing process' identity but replace
+     * whatever it is doing with a new process image. Instead of hijacking
+     * the process object in the simulator, we create a new process object
+     * and bind to the previous process' thread below (hijacking the thread).
+     */
+    p->system->PIDs.erase(p->pid());
+    Process *new_p = pp->create();
+    delete pp;
+
+    /**
+     * Work through the file descriptor array and close any files marked
+     * close-on-exec.
+     */
+    new_p->fds = p->fds;
+    for (int i = 0; i < new_p->fds->getSize(); i++) {
+        std::shared_ptr<FDEntry> fdep = (*new_p->fds)[i];
+        if (fdep && fdep->getCOE())
+            new_p->fds->closeFDEntry(i);
+    }
+
+    *new_p->sigchld = true;
+
+    delete p;
+    tc->clearArchRegs();
+    tc->setProcessPtr(new_p);
+    new_p->assignThreadContext(tc->contextId());
+    new_p->initState();
+    tc->activate();
+    TheISA::PCState pcState = tc->pcState();
+    tc->setNPC(pcState.instAddr());
+
+    desc->setFlags(SyscallDesc::SuppressReturnValue);
+    return 0;
+}
+
 /// Target getrusage() function.
 template <class OS>
 SyscallReturn
@@ -1746,21 +2028,51 @@ timeFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
 
 template <class OS>
 SyscallReturn
-clockGetResFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+tgkillFunc(SyscallDesc *desc, int num, Process *process, ThreadContext *tc)
 {
-  typename OS::time_t sec;
-  int index = 1;
-  Addr timespec_addr = (Addr) p->getSyscallArg(tc, index);
-  if (timespec_addr != 0) {
-    SETranslatingPortProxy &proxy = tc->getMemProxy();
-    /* Use a fixed clock precision. */
-    sec = 0;
-    long nsec = 1;
-    proxy.writeBlob(timespec_addr, (uint8_t*)&sec, (int) sizeof(typename OS::time_t));
-    proxy.writeBlob(timespec_addr + sizeof(typename OS::time_t),
-                    (uint8_t *)&nsec, (int)sizeof(long));
-  }
-  return 0;
+    int index = 0;
+    int tgid = process->getSyscallArg(tc, index);
+    int tid = process->getSyscallArg(tc, index);
+    int sig = process->getSyscallArg(tc, index);
+
+    /**
+     * This system call is intended to allow killing a specific thread
+     * within an arbitrary thread group if sanctioned with permission checks.
+     * It's usually true that threads share the termination signal as pointed
+     * out by the pthread_kill man page and this seems to be the intended
+     * usage. Due to this being an emulated environment, assume the following:
+     * Threads are allowed to call tgkill because the EUID for all threads
+     * should be the same. There is no signal handling mechanism for kernel
+     * registration of signal handlers since signals are poorly supported in
+     * emulation mode. Since signal handlers cannot be registered, all
+     * threads within in a thread group must share the termination signal.
+     * We never exhaust PIDs so there's no chance of finding the wrong one
+     * due to PID rollover.
+     */
+
+    System *sys = tc->getSystemPtr();
+    Process *tgt_proc = nullptr;
+    for (int i = 0; i < sys->numContexts(); i++) {
+        Process *temp = sys->threadContexts[i]->getProcessPtr();
+        if (temp->pid() == tid) {
+            tgt_proc = temp;
+            break;
+        }
+    }
+
+    if (sig != 0 || sig != OS::TGT_SIGABRT)
+        return -EINVAL;
+
+    if (tgt_proc == nullptr)
+        return -ESRCH;
+
+    if (tgid != -1 && tgt_proc->tgid() != tgid)
+        return -ESRCH;
+
+    if (sig == OS::TGT_SIGABRT)
+        exitGroupFunc(desc, 252, process, tc);
+
+    return 0;
 }
 
 #endif // __SIM_SYSCALL_EMUL_HH__

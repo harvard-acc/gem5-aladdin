@@ -68,9 +68,14 @@ using namespace TheISA;
 
 IdeDisk::IdeDisk(const Params *p)
     : SimObject(p), ctrl(NULL), image(p->image), diskDelay(p->delay),
-      dmaTransferEvent(this), dmaReadCG(NULL), dmaReadWaitEvent(this),
-      dmaWriteCG(NULL), dmaWriteWaitEvent(this), dmaPrdReadEvent(this),
-      dmaReadEvent(this), dmaWriteEvent(this)
+      dmaTransferEvent([this]{ doDmaTransfer(); }, name()),
+      dmaReadCG(NULL),
+      dmaReadWaitEvent([this]{ doDmaRead(); }, name()),
+      dmaWriteCG(NULL),
+      dmaWriteWaitEvent([this]{ doDmaWrite(); }, name()),
+      dmaPrdReadEvent([this]{ dmaPrdReadDone(); }, name()),
+      dmaReadEvent([this]{ dmaReadDone(); }, name()),
+      dmaWriteEvent([this]{ dmaWriteDone(); }, name())
 {
     // Reset the device state
     reset(p->driveID);
@@ -657,6 +662,7 @@ IdeDisk::startCommand()
 
         // Supported PIO data-in commands
       case WDCC_IDENTIFY:
+      case ATAPI_IDENTIFY_DEVICE:
         cmdBytes = cmdBytesLeft = sizeof(struct ataparams);
         devState = Prepare_Data_In;
         action = ACT_DATA_READY;
@@ -852,7 +858,8 @@ IdeDisk::updateState(DevAction_t action)
             status |= STATUS_DRQ_BIT;
 
             // copy the data into the data buffer
-            if (cmdReg.command == WDCC_IDENTIFY) {
+            if (cmdReg.command == WDCC_IDENTIFY ||
+                cmdReg.command == ATAPI_IDENTIFY_DEVICE) {
                 // Reset the drqBytes for this block
                 drqBytesLeft = sizeof(struct ataparams);
 

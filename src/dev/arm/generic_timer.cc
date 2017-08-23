@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015 ARM Limited
+ * Copyright (c) 2013, 2015, 2017 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -95,7 +95,7 @@ ArchTimer::ArchTimer(const std::string &name,
     : _name(name), _parent(parent), _systemCounter(sysctr),
       _interrupt(interrupt),
       _control(0), _counterLimit(0), _offset(0),
-      _counterLimitReachedEvent(this)
+      _counterLimitReachedEvent([this]{ counterLimitReached(); }, name)
 {
 }
 
@@ -109,8 +109,12 @@ ArchTimer::counterLimitReached()
 
     DPRINTF(Timer, "Counter limit reached\n");
     if (!_control.imask) {
-        DPRINTF(Timer, "Causing interrupt\n");
-        _interrupt.send();
+        if (scheduleEvents()) {
+            DPRINTF(Timer, "Causing interrupt\n");
+            _interrupt.send();
+        } else {
+            DPRINTF(Timer, "Kvm mode; skipping simulated interrupt\n");
+        }
     }
 }
 
@@ -122,10 +126,12 @@ ArchTimer::updateCounter()
     if (value() >= _counterLimit) {
         counterLimitReached();
     } else {
-        const auto period(_systemCounter.period());
         _control.istatus = 0;
-        _parent.schedule(_counterLimitReachedEvent,
-             curTick() + (_counterLimit - value()) * period);
+        if (scheduleEvents()) {
+            const auto period(_systemCounter.period());
+            _parent.schedule(_counterLimitReachedEvent,
+                 curTick() + (_counterLimit - value()) * period);
+        }
     }
 }
 
@@ -179,13 +185,6 @@ ArchTimer::serialize(CheckpointOut &cp) const
     paramOut(cp, "control_serial", _control);
     SERIALIZE_SCALAR(_counterLimit);
     SERIALIZE_SCALAR(_offset);
-
-    const bool event_scheduled(_counterLimitReachedEvent.scheduled());
-    SERIALIZE_SCALAR(event_scheduled);
-    if (event_scheduled) {
-        const Tick event_time(_counterLimitReachedEvent.when());
-        SERIALIZE_SCALAR(event_time);
-    }
 }
 
 void
@@ -197,13 +196,24 @@ ArchTimer::unserialize(CheckpointIn &cp)
     // compatibility.
     if (!UNSERIALIZE_OPT_SCALAR(_offset))
         _offset = 0;
-    bool event_scheduled;
-    UNSERIALIZE_SCALAR(event_scheduled);
-    if (event_scheduled) {
-        Tick event_time;
-        UNSERIALIZE_SCALAR(event_time);
-        _parent.schedule(_counterLimitReachedEvent, event_time);
-    }
+
+    // We no longer schedule an event here because we may enter KVM
+    // emulation.  The event creation is delayed until drainResume().
+}
+
+DrainState
+ArchTimer::drain()
+{
+    if (_counterLimitReachedEvent.scheduled())
+        _parent.deschedule(_counterLimitReachedEvent);
+
+    return DrainState::Drained;
+}
+
+void
+ArchTimer::drainResume()
+{
+    updateCounter();
 }
 
 void
@@ -230,12 +240,13 @@ ArchTimer::Interrupt::clear()
 
 GenericTimer::GenericTimer(GenericTimerParams *p)
     : SimObject(p),
+      system(*p->system),
       gic(p->gic),
       irqPhys(p->int_phys),
       irqVirt(p->int_virt)
 {
     fatal_if(!p->system, "No system specified, can't instantiate timer.\n");
-    p->system->setGenericTimer(this);
+    system.setGenericTimer(this);
 }
 
 void
@@ -299,7 +310,7 @@ GenericTimer::createTimers(unsigned cpus)
     timers.resize(cpus);
     for (unsigned i = old_cpu_count; i < cpus; ++i) {
         timers[i].reset(
-            new CoreTimers(*this, i, irqPhys, irqVirt));
+            new CoreTimers(*this, system, i, irqPhys, irqVirt));
     }
 }
 

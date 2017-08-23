@@ -56,11 +56,11 @@ def config_cache(options, system):
     if options.external_memory_system:
         ExternalCache = ExternalCacheFactory(options.external_memory_system)
 
-    if options.cpu_type == "arm_detailed":
+    if options.cpu_type == "O3_ARM_v7a_3":
         try:
-            from O3_ARM_v7a import *
+            from cores.arm.O3_ARM_v7a import *
         except:
-            print "arm_detailed is unavailable. Did you compile the O3 model?"
+            print "O3_ARM_v7a_3 is unavailable. Did you compile the O3 model?"
             sys.exit(1)
 
         dcache_class, icache_class, l2_cache_class, walk_cache_class = \
@@ -199,7 +199,7 @@ def config_cache(options, system):
       for datapath in datapaths:
         # For now, we will connect all datapaths to a cache regardless of
         # whether they are needed or not.
-        aladdin_dcache = dcache_class(
+        datapath.cache = dcache_class(
             clk_domain=datapath.clk_domain,
             size=str(datapath.cacheSize),
             assoc=datapath.cacheAssoc,
@@ -207,10 +207,10 @@ def config_cache(options, system):
             tag_latency=datapath.cacheHitLatency,
             response_latency=datapath.cacheHitLatency)
         if options.l2cache:
-          datapath.addPrivateL1Dcache(system, aladdin_dcache, system.tol2bus)
+          datapath.addPrivateL1Dcache(system, system.tol2bus)
           datapath.connectPrivateScratchpad(system, system.membus)
         else:
-          datapath.addPrivateL1Dcache(system, aladdin_dcache, system.membus)
+          datapath.addPrivateL1Dcache(system, system.membus)
           datapath.connectPrivateScratchpad(system, system.membus)
     return system
 

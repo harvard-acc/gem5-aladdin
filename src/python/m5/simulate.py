@@ -44,7 +44,7 @@ import atexit
 import os
 import sys
 
-# import the SWIG-wrapped main C++ functions
+# import the wrapped C++ functions
 import _m5.drain
 import _m5.core
 from _m5.stats import updateEvents as updateStatEvents
@@ -368,4 +368,5 @@ def fork(simout="%(parent)s.f%(fork_seq)i"):
     return pid
 
 from _m5.core import disableAllListeners, listenersDisabled
+from _m5.core import listenersLoopbackOnly
 from _m5.core import curTick

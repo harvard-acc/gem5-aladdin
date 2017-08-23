@@ -26,13 +26,18 @@
 #
 # Authors: Nathan Binkert
 
-from m5.SimObject import SimObject
+from m5.SimObject import *
 from m5.params import *
 from m5.proxy import *
 
 class Process(SimObject):
     type = 'Process'
     cxx_header = "sim/process.hh"
+
+    @cxxMethod
+    def map(self, vaddr, paddr, size, cacheable=False):
+        pass
+
     input = Param.String('cin', "filename for stdin")
     output = Param.String('cout', 'filename for stdout')
     errout = Param.String('cerr', 'filename for stderr')
@@ -40,14 +45,15 @@ class Process(SimObject):
     useArchPT = Param.Bool('false', 'maintain an in-memory version of the page\
                             table in an architecture-specific format')
     kvmInSE = Param.Bool('false', 'initialize the process for KvmCPU in SE')
-    max_stack_size = Param.MemorySize('64MB', 'maximum size of the stack')
+    maxStackSize = Param.MemorySize('64MB', 'maximum size of the stack')
 
     uid = Param.Int(100, 'user id')
     euid = Param.Int(100, 'effective user id')
     gid = Param.Int(100, 'group id')
     egid = Param.Int(100, 'effective group id')
     pid = Param.Int(100, 'process id')
-    ppid = Param.Int(99, 'parent process id')
+    ppid = Param.Int(0, 'parent process id')
+    pgid = Param.Int(100, 'process group id')
 
     executable = Param.String('', "executable (overrides cmd[0] if set)")
     cmd = VectorParam.String("command line (executable plus arguments)")

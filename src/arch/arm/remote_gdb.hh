@@ -1,7 +1,7 @@
 /*
  * Copyright 2015 LabWare
  * Copyright 2014 Google, Inc.
- * Copyright (c) 2013 ARM Limited
+ * Copyright (c) 2013, 2016 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,6 +51,7 @@
 #include <algorithm>
 
 #include "arch/arm/utility.hh"
+#include "arch/generic/vec_reg.hh"
 #include "base/remote_gdb.hh"
 
 class System;
@@ -79,7 +80,11 @@ class RemoteGDB : public BaseRemoteGDB
         size_t size() const { return sizeof(r); }
         void getRegs(ThreadContext*);
         void setRegs(ThreadContext*) const;
-        const std::string name() const { return gdb->name() + ".AArch32GdbRegCache"; }
+        const std::string
+        name() const
+        {
+            return gdb->name() + ".AArch32GdbRegCache";
+        }
     };
 
     class AArch64GdbRegCache : public BaseGdbRegCache
@@ -92,14 +97,22 @@ class RemoteGDB : public BaseRemoteGDB
           uint64_t pc;
           uint64_t cpsr;
           uint32_t v[32*4];
+          ArmISA::VecRegContainer vec[32];
         } r;
       public:
         char *data() const { return (char *)&r; }
         size_t size() const { return sizeof(r); }
         void getRegs(ThreadContext*);
         void setRegs(ThreadContext*) const;
-        const std::string name() const { return gdb->name() + ".AArch64GdbRegCache"; }
+        const std::string
+        name() const
+        {
+            return gdb->name() + ".AArch64GdbRegCache";
+        }
     };
+
+    AArch32GdbRegCache regCache32;
+    AArch64GdbRegCache regCache64;
 
   public:
     RemoteGDB(System *_system, ThreadContext *tc);

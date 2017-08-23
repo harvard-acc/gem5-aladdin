@@ -73,9 +73,9 @@ static const int ArgumentReg[] = {
     INTREG_RDI,
     INTREG_RSI,
     INTREG_RDX,
-    //This argument register is r10 for syscalls and rcx for C.
+    // This argument register is r10 for syscalls and rcx for C.
     INTREG_R10W,
-    //INTREG_RCX,
+    // INTREG_RCX,
     INTREG_R8W,
     INTREG_R9W
 };
@@ -100,8 +100,14 @@ X86Process::X86Process(ProcessParams * params, ObjectFile *objFile,
     : Process(params, objFile), syscallDescs(_syscallDescs),
       numSyscallDescs(_numSyscallDescs)
 {
-    brk_point = objFile->dataBase() + objFile->dataSize() + objFile->bssSize();
-    brk_point = roundUp(brk_point, PageBytes);
+}
+
+void X86Process::clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                       Process *p, TheISA::IntReg flags)
+{
+    Process::clone(old_tc, new_tc, p, flags);
+    X86Process *process = (X86Process*)p;
+    *process = *this;
 }
 
 X86_64Process::X86_64Process(ProcessParams *params, ObjectFile *objFile,
@@ -114,23 +120,15 @@ X86_64Process::X86_64Process(ProcessParams *params, ObjectFile *objFile,
     vsyscallPage.vtimeOffset = 0x400;
     vsyscallPage.vgettimeofdayOffset = 0x0;
 
-    // Set up stack. On X86_64 Linux, stack goes from the top of memory
-    // downward, less the hole for the kernel address space plus one page
-    // for undertermined purposes.
-    stack_base = (Addr)0x7FFFFFFFF000ULL;
+    Addr brk_point = roundUp(objFile->dataBase() + objFile->dataSize() +
+                             objFile->bssSize(), PageBytes);
+    Addr stack_base = 0x7FFFFFFFF000ULL;
+    Addr max_stack_size = 8 * 1024 * 1024;
+    Addr next_thread_stack_base = stack_base - max_stack_size;
+    Addr mmap_end = 0x7FFFF7FFF000ULL;
 
-    // Set pointer for next thread stack.  Reserve 8M for main stack.
-    next_thread_stack_base = stack_base - (8 * 1024 * 1024);
-
-    // "mmap_base" is a function which defines where mmap region starts in
-    // the process address space.
-    // mmap_base: PAGE_ALIGN(TASK_SIZE-MIN_GAP-mmap_rnd())
-    // TASK_SIZE: (1<<47)-PAGE_SIZE
-    // MIN_GAP: 128*1024*1024+stack_maxrandom_size()
-    // We do not use any address space layout randomization in gem5
-    // therefore the random fields become zero; the smallest gap space was
-    // chosen but gap could potentially be much larger.
-    mmap_end = (Addr)0x7FFFF7FFF000ULL;
+    memState = make_shared<MemState>(brk_point, stack_base, max_stack_size,
+                                     next_thread_stack_base, mmap_end);
 }
 
 void
@@ -159,20 +157,15 @@ I386Process::I386Process(ProcessParams *params, ObjectFile *objFile,
     vsyscallPage.vsyscallOffset = 0x400;
     vsyscallPage.vsysexitOffset = 0x410;
 
-    stack_base = _gdtStart;
+    Addr brk_point = roundUp(objFile->dataBase() + objFile->dataSize() +
+                             objFile->bssSize(), PageBytes);
+    Addr stack_base = _gdtStart;
+    Addr max_stack_size = 8 * 1024 * 1024;
+    Addr next_thread_stack_base = stack_base - max_stack_size;
+    Addr mmap_end = 0xB7FFF000ULL;
 
-    // Set pointer for next thread stack.  Reserve 8M for main stack.
-    next_thread_stack_base = stack_base - (8 * 1024 * 1024);
-
-    // "mmap_base" is a function which defines where mmap region starts in
-    // the process address space.
-    // mmap_base: PAGE_ALIGN(TASK_SIZE-MIN_GAP-mmap_rnd())
-    // TASK_SIZE: 0xC0000000
-    // MIN_GAP: 128*1024*1024+stack_maxrandom_size()
-    // We do not use any address space layout randomization in gem5
-    // therefore the random fields become zero; the smallest gap space was
-    // chosen but gap could potentially be much larger.
-    mmap_end = (Addr)0xB7FFF000ULL;
+    memState = make_shared<MemState>(brk_point, stack_base, max_stack_size,
+                                     next_thread_stack_base, mmap_end);
 }
 
 SyscallDesc*
@@ -188,9 +181,9 @@ X86_64Process::initState()
 {
     X86Process::initState();
 
-    argsInit(sizeof(uint64_t), PageBytes);
+    argsInit(PageBytes);
 
-       // Set up the vsyscall page for this process.
+    // Set up the vsyscall page for this process.
     allocateMem(vsyscallPage.base, vsyscallPage.size);
     uint8_t vtimeBlob[] = {
         0x48,0xc7,0xc0,0xc9,0x00,0x00,0x00,    // mov    $0xc9,%rax
@@ -573,7 +566,7 @@ X86_64Process::initState()
             dataAttr.expandDown = 0;
             dataAttr.system = 1;
 
-            //Initialize the segment registers.
+            // Initialize the segment registers.
             for (int seg = 0; seg < NUM_SEGMENTREGS; seg++) {
                 tc->setMiscRegNoEffect(MISCREG_SEG_BASE(seg), 0);
                 tc->setMiscRegNoEffect(MISCREG_SEG_EFF_BASE(seg), 0);
@@ -605,7 +598,7 @@ X86_64Process::initState()
             efer.ffxsr = 1; // Turn on fast fxsave and fxrstor.
             tc->setMiscReg(MISCREG_EFER, efer);
 
-            //Set up the registers that describe the operating mode.
+            // Set up the registers that describe the operating mode.
             CR0 cr0 = 0;
             cr0.pg = 1; // Turn on paging.
             cr0.cd = 0; // Don't disable caching.
@@ -632,7 +625,7 @@ I386Process::initState()
 {
     X86Process::initState();
 
-    argsInit(sizeof(uint32_t), PageBytes);
+    argsInit(PageBytes);
 
     /*
      * Set up a GDT for this process. The whole GDT wouldn't really be for
@@ -684,7 +677,7 @@ I386Process::initState()
         dataAttr.expandDown = 0;
         dataAttr.system = 1;
 
-        //Initialize the segment registers.
+        // Initialize the segment registers.
         for (int seg = 0; seg < NUM_SEGMENTREGS; seg++) {
             tc->setMiscRegNoEffect(MISCREG_SEG_BASE(seg), 0);
             tc->setMiscRegNoEffect(MISCREG_SEG_EFF_BASE(seg), 0);
@@ -725,7 +718,7 @@ I386Process::initState()
         efer.ffxsr = 1; // Turn on fast fxsave and fxrstor.
         tc->setMiscReg(MISCREG_EFER, efer);
 
-        //Set up the registers that describe the operating mode.
+        // Set up the registers that describe the operating mode.
         CR0 cr0 = 0;
         cr0.pg = 1; // Turn on paging.
         cr0.cd = 0; // Don't disable caching.
@@ -749,7 +742,7 @@ I386Process::initState()
 template<class IntType>
 void
 X86Process::argsInit(int pageSize,
-        std::vector<AuxVector<IntType> > extraAuxvs)
+                     std::vector<AuxVector<IntType> > extraAuxvs)
 {
     int intSize = sizeof(IntType);
 
@@ -762,7 +755,7 @@ X86Process::argsInit(int pageSize,
     else
         filename = argv[0];
 
-    //We want 16 byte alignment
+    // We want 16 byte alignment
     uint64_t align = 16;
 
     // Patch the ld_bias for dynamic executables.
@@ -848,13 +841,13 @@ X86Process::argsInit(int pageSize,
 //            X86_IA64Processor |
             0;
 
-        //Bits which describe the system hardware capabilities
-        //XXX Figure out what these should be
+        // Bits which describe the system hardware capabilities
+        // XXX Figure out what these should be
         auxv.push_back(auxv_t(M5_AT_HWCAP, features));
-        //The system page size
+        // The system page size
         auxv.push_back(auxv_t(M5_AT_PAGESZ, X86ISA::PageBytes));
-        //Frequency at which times() increments
-        //Defined to be 100 in the kernel source.
+        // Frequency at which times() increments
+        // Defined to be 100 in the kernel source.
         auxv.push_back(auxv_t(M5_AT_CLKTCK, 100));
         // This is the virtual address of the program header tables if they
         // appear in the executable image.
@@ -867,32 +860,32 @@ X86Process::argsInit(int pageSize,
         // zero for static executables or contain the base address for
         // dynamic executables.
         auxv.push_back(auxv_t(M5_AT_BASE, getBias()));
-        //XXX Figure out what this should be.
+        // XXX Figure out what this should be.
         auxv.push_back(auxv_t(M5_AT_FLAGS, 0));
-        //The entry point to the program
+        // The entry point to the program
         auxv.push_back(auxv_t(M5_AT_ENTRY, objFile->entryPoint()));
-        //Different user and group IDs
+        // Different user and group IDs
         auxv.push_back(auxv_t(M5_AT_UID, uid()));
         auxv.push_back(auxv_t(M5_AT_EUID, euid()));
         auxv.push_back(auxv_t(M5_AT_GID, gid()));
         auxv.push_back(auxv_t(M5_AT_EGID, egid()));
-        //Whether to enable "secure mode" in the executable
+        // Whether to enable "secure mode" in the executable
         auxv.push_back(auxv_t(M5_AT_SECURE, 0));
-        //The address of 16 "random" bytes.
+        // The address of 16 "random" bytes.
         auxv.push_back(auxv_t(M5_AT_RANDOM, 0));
-        //The name of the program
+        // The name of the program
         auxv.push_back(auxv_t(M5_AT_EXECFN, 0));
-        //The platform string
+        // The platform string
         auxv.push_back(auxv_t(M5_AT_PLATFORM, 0));
     }
 
-    //Figure out how big the initial stack needs to be
+    // Figure out how big the initial stack needs to be
 
     // A sentry NULL void pointer at the top of the stack.
     int sentry_size = intSize;
 
-    //This is the name of the file which is present on the initial stack
-    //It's purpose is to let the user space linker examine the original file.
+    // This is the name of the file which is present on the initial stack
+    // It's purpose is to let the user space linker examine the original file.
     int file_name_size = filename.size() + 1;
 
     const int numRandomBytes = 16;
@@ -908,10 +901,10 @@ X86Process::argsInit(int pageSize,
     for (int i = 0; i < argv.size(); ++i)
         arg_data_size += argv[i].size() + 1;
 
-    //The info_block needs to be padded so it's size is a multiple of the
-    //alignment mask. Also, it appears that there needs to be at least some
-    //padding, so if the size is already a multiple, we need to increase it
-    //anyway.
+    // The info_block needs to be padded so its size is a multiple of the
+    // alignment mask. Also, it appears that there needs to be at least some
+    // padding, so if the size is already a multiple, we need to increase it
+    // anyway.
     int base_info_block_size =
         sentry_size + file_name_size + env_data_size + arg_data_size;
 
@@ -919,7 +912,7 @@ X86Process::argsInit(int pageSize,
 
     int info_block_padding = info_block_size - base_info_block_size;
 
-    //Each auxilliary vector is two 8 byte words
+    // Each auxiliary vector is two 8 byte words
     int aux_array_size = intSize * 2 * (auxv.size() + 1);
 
     int envp_array_size = intSize * (envp.size() + 1);
@@ -927,15 +920,15 @@ X86Process::argsInit(int pageSize,
 
     int argc_size = intSize;
 
-    //Figure out the size of the contents of the actual initial frame
+    // Figure out the size of the contents of the actual initial frame
     int frame_size =
         aux_array_size +
         envp_array_size +
         argv_array_size +
         argc_size;
 
-    //There needs to be padding after the auxiliary vector data so that the
-    //very bottom of the stack is aligned properly.
+    // There needs to be padding after the auxiliary vector data so that the
+    // very bottom of the stack is aligned properly.
     int partial_size = frame_size + aux_data_size;
     int aligned_partial_size = roundUp(partial_size, align);
     int aux_padding = aligned_partial_size - partial_size;
@@ -946,9 +939,14 @@ X86Process::argsInit(int pageSize,
         aux_padding +
         frame_size;
 
-    stack_min = stack_base - space_needed;
+    Addr stack_base = memState->getStackBase();
+
+    Addr stack_min = stack_base - space_needed;
     stack_min = roundDown(stack_min, align);
-    stack_size = roundUp(stack_base - stack_min, pageSize);
+
+    unsigned stack_size = stack_base - stack_min;
+    stack_size = roundUp(stack_size, pageSize);
+    memState->setStackSize(stack_size);
 
     // map memory
     Addr stack_end = roundDown(stack_base - stack_size, pageSize);
@@ -984,15 +982,14 @@ X86Process::argsInit(int pageSize,
     IntType argc = argv.size();
     IntType guestArgc = X86ISA::htog(argc);
 
-    //Write out the sentry void *
+    // Write out the sentry void *
     IntType sentry_NULL = 0;
-    initVirtMem.writeBlob(sentry_base,
-            (uint8_t*)&sentry_NULL, sentry_size);
+    initVirtMem.writeBlob(sentry_base, (uint8_t*)&sentry_NULL, sentry_size);
 
-    //Write the file name
+    // Write the file name
     initVirtMem.writeString(file_name_base, filename.c_str());
 
-    //Fix up the aux vectors which point to data
+    // Fix up the aux vectors which point to data
     assert(auxv[auxv.size() - 3].a_type == M5_AT_RANDOM);
     auxv[auxv.size() - 3].a_val = aux_data_base;
     assert(auxv[auxv.size() - 2].a_type == M5_AT_EXECFN);
@@ -1000,14 +997,15 @@ X86Process::argsInit(int pageSize,
     assert(auxv[auxv.size() - 1].a_type == M5_AT_PLATFORM);
     auxv[auxv.size() - 1].a_val = aux_data_base + numRandomBytes;
 
-    //Copy the aux stuff
+
+    // Copy the aux stuff
     for (int x = 0; x < auxv.size(); x++) {
         initVirtMem.writeBlob(auxv_array_base + x * 2 * intSize,
                 (uint8_t*)&(auxv[x].a_type), intSize);
         initVirtMem.writeBlob(auxv_array_base + (x * 2 + 1) * intSize,
                 (uint8_t*)&(auxv[x].a_val), intSize);
     }
-    //Write out the terminating zeroed auxilliary vector
+    // Write out the terminating zeroed auxiliary vector
     const uint64_t zero = 0;
     initVirtMem.writeBlob(auxv_array_base + auxv.size() * 2 * intSize,
                           (uint8_t*)&zero, intSize);
@@ -1022,19 +1020,19 @@ X86Process::argsInit(int pageSize,
     initVirtMem.writeBlob(argc_base, (uint8_t*)&guestArgc, intSize);
 
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
-    //Set the stack pointer register
+    // Set the stack pointer register
     tc->setIntReg(StackPointerReg, stack_min);
 
     // There doesn't need to be any segment base added in since we're dealing
     // with the flat segmentation model.
     tc->pcState(getStartPC());
 
-    //Align the "stack_min" to a page boundary.
-    stack_min = roundDown(stack_min, pageSize);
+    // Align the "stack_min" to a page boundary.
+    memState->setStackMin(roundDown(stack_min, pageSize));
 }
 
 void
-X86_64Process::argsInit(int intSize, int pageSize)
+X86_64Process::argsInit(int pageSize)
 {
     std::vector<AuxVector<uint64_t> > extraAuxvs;
     extraAuxvs.push_back(AuxVector<uint64_t>(M5_AT_SYSINFO_EHDR,
@@ -1043,7 +1041,7 @@ X86_64Process::argsInit(int intSize, int pageSize)
 }
 
 void
-I386Process::argsInit(int intSize, int pageSize)
+I386Process::argsInit(int pageSize)
 {
     std::vector<AuxVector<uint32_t> > extraAuxvs;
     //Tell the binary where the vsyscall part of the vsyscall page is.
@@ -1074,6 +1072,14 @@ X86_64Process::setSyscallArg(ThreadContext *tc, int i, X86ISA::IntReg val)
     return tc->setIntReg(ArgumentReg[i], val);
 }
 
+void
+X86_64Process::clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                     Process *p, TheISA::IntReg flags)
+{
+    X86Process::clone(old_tc, new_tc, p, flags);
+    ((X86_64Process*)p)->vsyscallPage = vsyscallPage;
+}
+
 X86ISA::IntReg
 I386Process::getSyscallArg(ThreadContext *tc, int &i)
 {
@@ -1097,4 +1103,12 @@ I386Process::setSyscallArg(ThreadContext *tc, int i, X86ISA::IntReg val)
 {
     assert(i < NumArgumentRegs);
     return tc->setIntReg(ArgumentReg[i], val);
+}
+
+void
+I386Process::clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                   Process *p, TheISA::IntReg flags)
+{
+    X86Process::clone(old_tc, new_tc, p, flags);
+    ((I386Process*)p)->vsyscallPage = vsyscallPage;
 }

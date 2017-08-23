@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015 ARM Limited
+ * Copyright (c) 2012, 2015, 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -46,7 +46,6 @@
 
 class Drainable;
 
-#ifndef SWIG // SWIG doesn't support strongly typed enums
 /**
  * Object drain/handover states
  *
@@ -58,7 +57,11 @@ class Drainable;
  * all objects have entered the Drained state.
  *
  * Before resuming simulation, the simulator calls resume() to
- * transfer the object to the Running state.
+ * transfer the object to the Running state. This in turn results in a
+ * call to drainResume() for all Drainable objects in the
+ * simulator. New Drainable objects may be created while resuming. In
+ * such cases, the new objects will be created in the Resuming state
+ * and later resumed.
  *
  * \note Even though the state of an object (visible to the rest of
  * the world through Drainable::getState()) could be used to determine
@@ -68,9 +71,9 @@ class Drainable;
 enum class DrainState {
     Running,  /** Running normally */
     Draining, /** Draining buffers pending serialization/handover */
-    Drained   /** Buffers drained, ready for serialization/handover */
+    Drained,  /** Buffers drained, ready for serialization/handover */
+    Resuming, /** Transient state while the simulator is resuming */
 };
-#endif
 
 /**
  * This class coordinates draining of a System.
@@ -92,9 +95,7 @@ class DrainManager
 {
   private:
     DrainManager();
-#ifndef SWIG
     DrainManager(DrainManager &) = delete;
-#endif
     ~DrainManager();
 
   public:
@@ -152,6 +153,12 @@ class DrainManager
     void unregisterDrainable(Drainable *obj);
 
   private:
+    /**
+     * Helper function to check if all Drainable objects are in a
+     * specific state.
+     */
+    bool allInState(DrainState state) const;
+
     /**
      * Thread-safe helper function to get the number of Drainable
      * objects in a system.
@@ -261,6 +268,7 @@ class Drainable
         switch (_drainState) {
           case DrainState::Running:
           case DrainState::Drained:
+          case DrainState::Resuming:
             return;
           case DrainState::Draining:
             _drainState = DrainState::Drained;

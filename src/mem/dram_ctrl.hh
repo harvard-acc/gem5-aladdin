@@ -451,7 +451,7 @@ class DRAMCtrl : public AbstractMemory
         /** List to keep track of activate ticks */
         std::deque<Tick> actTicks;
 
-        Rank(DRAMCtrl& _memory, const DRAMCtrlParams* _p);
+        Rank(DRAMCtrl& _memory, const DRAMCtrlParams* _p, int rank);
 
         const std::string name() const
         {
@@ -556,28 +556,22 @@ class DRAMCtrl : public AbstractMemory
         void scheduleWakeUpEvent(Tick exit_delay);
 
         void processWriteDoneEvent();
-        EventWrapper<Rank, &Rank::processWriteDoneEvent>
-        writeDoneEvent;
+        EventFunctionWrapper writeDoneEvent;
 
         void processActivateEvent();
-        EventWrapper<Rank, &Rank::processActivateEvent>
-        activateEvent;
+        EventFunctionWrapper activateEvent;
 
         void processPrechargeEvent();
-        EventWrapper<Rank, &Rank::processPrechargeEvent>
-        prechargeEvent;
+        EventFunctionWrapper prechargeEvent;
 
         void processRefreshEvent();
-        EventWrapper<Rank, &Rank::processRefreshEvent>
-        refreshEvent;
+        EventFunctionWrapper refreshEvent;
 
         void processPowerEvent();
-        EventWrapper<Rank, &Rank::processPowerEvent>
-        powerEvent;
+        EventFunctionWrapper powerEvent;
 
         void processWakeUpEvent();
-        EventWrapper<Rank, &Rank::processWakeUpEvent>
-        wakeUpEvent;
+        EventFunctionWrapper wakeUpEvent;
 
     };
 
@@ -685,10 +679,10 @@ class DRAMCtrl : public AbstractMemory
      * in these methods
      */
     void processNextReqEvent();
-    EventWrapper<DRAMCtrl,&DRAMCtrl::processNextReqEvent> nextReqEvent;
+    EventFunctionWrapper nextReqEvent;
 
     void processRespondEvent();
-    EventWrapper<DRAMCtrl, &DRAMCtrl::processRespondEvent> respondEvent;
+    EventFunctionWrapper respondEvent;
 
     /**
      * Check if the read queue has room for more entries

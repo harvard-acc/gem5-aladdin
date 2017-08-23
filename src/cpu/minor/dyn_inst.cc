@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 ARM Limited
+ * Copyright (c) 2013-2014, 2016 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -133,15 +133,13 @@ operator <<(std::ostream &os, const MinorDynInst &inst)
 /** Print a register in the form r<n>, f<n>, m<n>(<name>), z for integer,
  *  float, misc and zero registers given an 'architectural register number' */
 static void
-printRegName(std::ostream &os, TheISA::RegIndex reg)
+printRegName(std::ostream &os, const RegId& reg)
 {
-    RegClass reg_class = regIdxToClass(reg);
-
-    switch (reg_class)
+    switch (reg.classValue())
     {
       case MiscRegClass:
         {
-            TheISA::RegIndex misc_reg = reg - TheISA::Misc_Reg_Base;
+            RegIndex misc_reg = reg.index();
 
         /* This is an ugly test because not all archs. have miscRegName */
 #if THE_ISA == ARM_ISA
@@ -153,17 +151,26 @@ printRegName(std::ostream &os, TheISA::RegIndex reg)
         }
         break;
       case FloatRegClass:
-        os << 'f' << static_cast<unsigned int>(reg - TheISA::FP_Reg_Base);
+        os << 'f' << static_cast<unsigned int>(reg.index());
+        break;
+      case VecRegClass:
+        os << 'v' << static_cast<unsigned int>(reg.index());
+        break;
+      case VecElemClass:
+        os << 'v' << static_cast<unsigned int>(reg.index()) << '[' <<
+              static_cast<unsigned int>(reg.elemIndex()) << ']';
         break;
       case IntRegClass:
-        if (reg == TheISA::ZeroReg) {
+        if (reg.isZeroReg()) {
             os << 'z';
         } else {
-            os << 'r' << static_cast<unsigned int>(reg);
+            os << 'r' << static_cast<unsigned int>(reg.index());
         }
         break;
       case CCRegClass:
-        os << 'c' << static_cast<unsigned int>(reg - TheISA::CC_Reg_Base);
+        os << 'c' << static_cast<unsigned int>(reg.index());
+      default:
+        panic("Unknown register class: %d", (int)reg.classValue());
     }
 }
 

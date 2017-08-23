@@ -1,3 +1,15 @@
+# Copyright (c) 2016 ARM Limited
+# All rights reserved.
+#
+# The license below extends only to copyright in the software and shall
+# not be construed as granting a license to any other intellectual
+# property including but not limited to intellectual property relating
+# to a hardware implementation of the functionality of the software
+# licensed hereunder.  You may use the software subject to the license
+# terms below provided that you ensure that this notice is replicated
+# unmodified and in its entirety in all distributions of the software,
+# modified or unmodified, in source code or in binary form.
+#
 # Copyright (c) 2005 The Regents of The University of Michigan
 # All rights reserved.
 #
@@ -48,6 +60,8 @@ def parse_options():
     option = options.add_option
     group = options.set_group
 
+    listener_modes = ( "on", "off", "auto" )
+
     # Help options
     option('-B', "--build-info", action="store_true", default=False,
         help="Show build information")
@@ -67,6 +81,13 @@ def parse_options():
         help="Filename for -r redirection [Default: %default]")
     option("--stderr-file", metavar="FILE", default="simerr",
         help="Filename for -e redirection [Default: %default]")
+    option("--listener-mode", metavar="{on,off,auto}",
+        choices=listener_modes, default="auto",
+        help="Port (e.g., gdb) listener mode (auto: Enable if running " \
+        "interactively) [Default: %default]")
+    option("--listener-loopback-only", action="store_true", default=False,
+        help="Port listeners will only accept connections over the " \
+        "loopback device")
     option('-i', "--interactive", action="store_true", default=False,
         help="Invoke the interactive interpreter after running the script")
     option("--pdb", action="store_true", default=False,
@@ -182,7 +203,7 @@ def main(*args):
     import stats
     import trace
 
-    from util import fatal, warn
+    from util import inform, fatal, warn, panic, isInteractive
 
     if len(args) == 0:
         options, arguments = parse_options()
@@ -332,6 +353,22 @@ def main(*args):
     if not stats.stats_output_enabled():
         warn("Unable to output statistics.")
 
+    # Disable listeners unless running interactively or explicitly
+    # enabled
+    if options.listener_mode == "off":
+        m5.disableAllListeners()
+    elif options.listener_mode == "auto":
+        if not isInteractive():
+            inform("Standard input is not a terminal, disabling listeners.")
+            m5.disableAllListeners()
+    elif options.listener_mode == "on":
+        pass
+    else:
+        panic("Unhandled listener mode: %s" % options.listener_mode)
+
+    if options.listener_loopback_only:
+        m5.listenersLoopbackOnly()
+
     # set debugging options
     debug.setRemoteGDBPort(options.remote_gdb_port)
     for when in options.debug_break:
@@ -383,10 +420,6 @@ def main(*args):
     filecode = compile(filedata, filename, 'exec')
     scope = { '__file__' : filename,
               '__name__' : '__m5_main__' }
-
-    # we want readline if we're doing anything interactive
-    if options.interactive or options.pdb:
-        exec "import readline" in scope
 
     # if pdb was requested, execfile the thing under pdb, otherwise,
     # just do the execfile normally

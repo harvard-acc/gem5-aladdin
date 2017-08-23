@@ -36,6 +36,7 @@
 # Authors: Ali Saidi
 
 from m5.params import *
+from m5.SimObject import *
 
 from System import System
 
@@ -75,11 +76,15 @@ class ArmSystem(System):
     have_large_asid_64 = Param.Bool(False,
         "True if ASID is 16 bits in AArch64 (ARMv8)")
 
+    m5ops_base = Param.Addr(0,
+        "Base of the 64KiB PA range used for memory-mapped m5ops. Set to 0 "
+        "to disable.")
+
 class GenericArmSystem(ArmSystem):
     type = 'GenericArmSystem'
     cxx_header = "arch/arm/system.hh"
     load_addr_mask = 0x0fffffff
-    machine_type = Param.ArmMachineType('VExpress_EMM',
+    machine_type = Param.ArmMachineType('DTOnly',
         "Machine id from http://www.arm.linux.org.uk/developer/machines/")
     atags_addr = Param.Addr("Address where default atags structure should " \
                                 "be written")
@@ -98,9 +103,10 @@ class LinuxArmSystem(GenericArmSystem):
     type = 'LinuxArmSystem'
     cxx_header = "arch/arm/linux/system.hh"
 
-    @classmethod
-    def export_methods(cls, code):
-        code('''void dumpDmesg();''')
+    @cxxMethod
+    def dumpDmesg(self):
+        """Dump dmesg from the simulated kernel to standard out"""
+        pass
 
 class FreebsdArmSystem(GenericArmSystem):
     type = 'FreebsdArmSystem'

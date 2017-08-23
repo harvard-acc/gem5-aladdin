@@ -34,6 +34,7 @@ import imp
 import marshal
 import os
 import re
+import subprocess
 import sys
 import zlib
 
@@ -71,6 +72,17 @@ from m5.util import code_formatter, compareVersions
 # values will be retrieved recursively from parents (children override
 # parents).
 #
+def guarded_source_iterator(sources, **guards):
+    '''Iterate over a set of sources, gated by a set of guards.'''
+    for src in sources:
+        for flag,value in guards.iteritems():
+            # if the flag is found and has a different value, skip
+            # this file
+            if src.all_guards.get(flag, False) != value:
+                break
+        else:
+            yield src
+
 class SourceMeta(type):
     '''Meta class for source files that keeps track of all files of a
     particular type and has a get function for finding all functions
@@ -82,14 +94,8 @@ class SourceMeta(type):
     def get(cls, **guards):
         '''Find all files that match the specified guards.  If a source
         file does not specify a flag, the default is False'''
-        for src in cls.all:
-            for flag,value in guards.iteritems():
-                # if the flag is found and has a different value, skip
-                # this file
-                if src.all_guards.get(flag, False) != value:
-                    break
-            else:
-                yield src
+        for s in guarded_source_iterator(cls.all, **guards):
+            yield s
 
 class SourceFile(object):
     '''Base object that encapsulates the notion of a source file.
@@ -160,14 +166,23 @@ class SourceFile(object):
 
 
 class Source(SourceFile):
+    current_group = None
+    source_groups = { None : [] }
+
+    @classmethod
+    def set_group(cls, group):
+        if not group in Source.source_groups:
+            Source.source_groups[group] = []
+        Source.current_group = group
+
     '''Add a c/c++ source file to the build'''
-    def __init__(self, source, Werror=False, swig=False, **guards):
-    #def __init__(self, source, Werror=True, swig=False, **guards):
+    def __init__(self, source, Werror=True, **guards):
         '''specify the source file, and any guards'''
         super(Source, self).__init__(source, **guards)
 
         self.Werror = Werror
-        self.swig = swig
+
+        Source.source_groups[Source.current_group].append(self)
 
 class PySource(SourceFile):
     '''Add a python source file to the named package'''
@@ -227,24 +242,6 @@ class SimObject(PySource):
 
         bisect.insort_right(SimObject.modnames, self.modname)
 
-class SwigSource(SourceFile):
-    '''Add a swig file to build'''
-
-    def __init__(self, package, source, **guards):
-        '''Specify the python package, the source file, and any guards'''
-        super(SwigSource, self).__init__(source, skip_no_python=True, **guards)
-
-        modname,ext = self.extname
-        assert ext == 'i'
-
-        self.package = package
-        self.module = modname
-        cc_file = joinpath(self.dirname, modname + '_wrap.cc')
-        py_file = joinpath(self.dirname, modname + '.py')
-
-        self.cc_source = Source(cc_file, swig=True, parent=self, **guards)
-        self.py_source = PySource(package, py_file, parent=self, **guards)
-
 class ProtoBuf(SourceFile):
     '''Add a Protocol Buffer to build'''
 
@@ -287,7 +284,6 @@ class UnitTest(object):
 Export('Source')
 Export('PySource')
 Export('SimObject')
-Export('SwigSource')
 Export('ProtoBuf')
 Export('UnitTest')
 
@@ -343,6 +339,7 @@ for root, dirs, files in os.walk(base_dir, topdown=True):
 
     if 'SConscript' in files:
         build_dir = joinpath(env['BUILDDIR'], root[len(base_dir) + 1:])
+        Source.set_group(build_dir)
         SConscript(joinpath(root, 'SConscript'), variant_dir=build_dir)
 
 for extra_dir in extras_dir_list:
@@ -542,19 +539,6 @@ sys.meta_path.remove(importer)
 sim_objects = m5.SimObject.allClasses
 all_enums = m5.params.allEnums
 
-if m5.SimObject.noCxxHeader:
-    print >> sys.stderr, \
-        "warning: At least one SimObject lacks a header specification. " \
-        "This can cause unexpected results in the generated SWIG " \
-        "wrappers."
-
-# Find param types that need to be explicitly wrapped with swig.
-# These will be recognized because the ParamDesc will have a
-# swig_decl() method.  Most param types are based on types that don't
-# need this, either because they're based on native types (like Int)
-# or because they're SimObjects (which get swigged independently).
-# For now the only things handled here are VectorParam types.
-params_to_swig = {}
 for name,obj in sorted(sim_objects.iteritems()):
     for param in obj._params.local.values():
         # load the ptype attribute now because it depends on the
@@ -562,12 +546,6 @@ for name,obj in sorted(sim_objects.iteritems()):
         # actually uses the value, all versions of
         # SimObject.allClasses will have been loaded
         param.ptype
-
-        if not hasattr(param, 'swig_decl'):
-            continue
-        pname = param.ptype_str
-        if pname not in params_to_swig:
-            params_to_swig[pname] = param
 
 ########################################################################
 #
@@ -632,7 +610,7 @@ PySource('m5', 'python/m5/info.py')
 def createSimObjectParamStruct(target, source, env):
     assert len(target) == 1 and len(source) == 1
 
-    name = str(source[0].get_contents())
+    name = source[0].get_text_contents()
     obj = sim_objects[name]
 
     code = code_formatter()
@@ -651,57 +629,36 @@ def createSimObjectCxxConfig(is_header):
         code.write(target[0].abspath)
     return body
 
-def createParamSwigWrapper(target, source, env):
-    assert len(target) == 1 and len(source) == 1
-
-    name = str(source[0].get_contents())
-    param = params_to_swig[name]
-
-    code = code_formatter()
-    param.swig_decl(code)
-    code.write(target[0].abspath)
-
 def createEnumStrings(target, source, env):
-    assert len(target) == 1 and len(source) == 1
+    assert len(target) == 1 and len(source) == 2
 
-    name = str(source[0].get_contents())
+    name = source[0].get_text_contents()
+    use_python = source[1].read()
     obj = all_enums[name]
 
     code = code_formatter()
     obj.cxx_def(code)
+    if use_python:
+        obj.pybind_def(code)
     code.write(target[0].abspath)
 
 def createEnumDecls(target, source, env):
     assert len(target) == 1 and len(source) == 1
 
-    name = str(source[0].get_contents())
+    name = source[0].get_text_contents()
     obj = all_enums[name]
 
     code = code_formatter()
     obj.cxx_decl(code)
     code.write(target[0].abspath)
 
-def createEnumSwigWrapper(target, source, env):
-    assert len(target) == 1 and len(source) == 1
-
-    name = str(source[0].get_contents())
-    obj = all_enums[name]
-
-    code = code_formatter()
-    obj.swig_decl(code)
-    code.write(target[0].abspath)
-
-def createSimObjectSwigWrapper(target, source, env):
-    name = source[0].get_contents()
+def createSimObjectPyBindWrapper(target, source, env):
+    name = source[0].get_text_contents()
     obj = sim_objects[name]
 
     code = code_formatter()
-    obj.swig_decl(code)
+    obj.pybind_decl(code)
     code.write(target[0].abspath)
-
-# dummy target for generated code
-# we start out with all the Source files so they get copied to build/*/ also.
-SWIG = env.Dummy('swig', [s.tnode for s in Source.get()])
 
 # Generate all of the SimObject param C++ struct header files
 params_hh_files = []
@@ -714,7 +671,6 @@ for name,simobj in sorted(sim_objects.iteritems()):
     env.Command(hh_file, Value(name),
                 MakeAction(createSimObjectParamStruct, Transform("SO PARAM")))
     env.Depends(hh_file, depends + extra_deps)
-    env.Depends(SWIG, hh_file)
 
 # C++ parameter description files
 if GetOption('with_cxx_config'):
@@ -771,87 +727,33 @@ if GetOption('with_cxx_config'):
             [File('sim/cxx_config.hh')])
     Source(cxx_config_init_cc_file)
 
-# Generate any needed param SWIG wrapper files
-params_i_files = []
-for name,param in sorted(params_to_swig.iteritems()):
-    i_file = File('python/_m5/%s.i' % (param.swig_module_name()))
-    params_i_files.append(i_file)
-    env.Command(i_file, Value(name),
-                MakeAction(createParamSwigWrapper, Transform("SW PARAM")))
-    env.Depends(i_file, depends)
-    env.Depends(SWIG, i_file)
-    SwigSource('_m5', i_file)
-
 # Generate all enum header files
 for name,enum in sorted(all_enums.iteritems()):
     py_source = PySource.modules[enum.__module__]
     extra_deps = [ py_source.tnode ]
 
     cc_file = File('enums/%s.cc' % name)
-    env.Command(cc_file, Value(name),
+    env.Command(cc_file, [Value(name), Value(env['USE_PYTHON'])],
                 MakeAction(createEnumStrings, Transform("ENUM STR")))
     env.Depends(cc_file, depends + extra_deps)
-    env.Depends(SWIG, cc_file)
     Source(cc_file)
 
     hh_file = File('enums/%s.hh' % name)
     env.Command(hh_file, Value(name),
                 MakeAction(createEnumDecls, Transform("ENUMDECL")))
     env.Depends(hh_file, depends + extra_deps)
-    env.Depends(SWIG, hh_file)
 
-    i_file = File('python/_m5/enum_%s.i' % name)
-    env.Command(i_file, Value(name),
-                MakeAction(createEnumSwigWrapper, Transform("ENUMSWIG")))
-    env.Depends(i_file, depends + extra_deps)
-    env.Depends(SWIG, i_file)
-    SwigSource('_m5', i_file)
-
-# Generate SimObject SWIG wrapper files
-for name,simobj in sorted(sim_objects.iteritems()):
-    py_source = PySource.modules[simobj.__module__]
-    extra_deps = [ py_source.tnode ]
-    i_file = File('python/_m5/param_%s.i' % name)
-    env.Command(i_file, Value(name),
-                MakeAction(createSimObjectSwigWrapper, Transform("SO SWIG")))
-    env.Depends(i_file, depends + extra_deps)
-    SwigSource('_m5', i_file)
-
-# Generate the main swig init file
-def makeEmbeddedSwigInit(package):
-    def body(target, source, env):
-        assert len(target) == 1 and len(source) == 1
-
-        code = code_formatter()
-        module = source[0].get_contents()
-        # Provide the full context so that the swig-generated call to
-        # Py_InitModule ends up placing the embedded module in the
-        # right package.
-        context = str(package) + "._" + str(module)
-        code('''\
-        #include "sim/init.hh"
-
-        extern "C" {
-            void init_${module}();
-        }
-
-        EmbeddedSwig embed_swig_${module}(init_${module}, "${context}");
-        ''')
-        code.write(str(target[0]))
-    return body
-
-# Build all swig modules
-for swig in SwigSource.all:
-    env.Command([swig.cc_source.tnode, swig.py_source.tnode], swig.tnode,
-                MakeAction('$SWIG $SWIGFLAGS -outdir ${TARGETS[1].dir} '
-                '-o ${TARGETS[0]} $SOURCES', Transform("SWIG")))
-    cc_file = str(swig.tnode)
-    init_file = '%s/%s_init.cc' % (dirname(cc_file), basename(cc_file))
-    env.Command(init_file, Value(swig.module),
-                MakeAction(makeEmbeddedSwigInit(swig.package),
-                           Transform("EMBED SW")))
-    env.Depends(SWIG, init_file)
-    Source(init_file, **swig.guards)
+# Generate SimObject Python bindings wrapper files
+if env['USE_PYTHON']:
+    for name,simobj in sorted(sim_objects.iteritems()):
+        py_source = PySource.modules[simobj.__module__]
+        extra_deps = [ py_source.tnode ]
+        cc_file = File('python/_m5/param_%s.cc' % name)
+        env.Command(cc_file, Value(name),
+                    MakeAction(createSimObjectPyBindWrapper,
+                               Transform("SO PyBind")))
+        env.Depends(cc_file, depends + extra_deps)
+        Source(cc_file)
 
 # Build all protocol buffers if we have got protoc and protobuf available
 if env['HAVE_PROTOBUF']:
@@ -865,7 +767,6 @@ if env['HAVE_PROTOBUF']:
                                '--proto_path ${SOURCE.dir} $SOURCE',
                                Transform("PROTOC")))
 
-        env.Depends(SWIG, [proto.cc_file, proto.hh_file])
         # Add the C++ source file
         Source(proto.cc_file, **proto.guards)
 elif ProtoBuf.all:
@@ -965,11 +866,9 @@ for name,flag in sorted(debug_flags.iteritems()):
     hh_file = 'debug/%s.hh' % name
     env.Command(hh_file, Value(flag),
                 MakeAction(makeDebugFlagHH, Transform("TRACING", 0)))
-    env.Depends(SWIG, hh_file)
 
 env.Command('debug/flags.cc', Value(debug_flags),
             MakeAction(makeDebugFlagCC, Transform("TRACING", 0)))
-env.Depends(SWIG, 'debug/flags.cc')
 Source('debug/flags.cc')
 
 # version tags
@@ -1035,7 +934,6 @@ EmbeddedPython embedded_${sym}(
 for source in PySource.all:
     env.Command(source.cpp, source.tnode,
                 MakeAction(embedPyFile, Transform("EMBED PY")))
-    env.Depends(SWIG, source.cpp)
     Source(source.cpp, skip_no_python=True)
 
 ########################################################################
@@ -1059,7 +957,7 @@ def variantd(*path):
 # environment 'env' with modified object suffix and optional stripped
 # binary.  Additional keyword arguments are appended to corresponding
 # build environment vars.
-def makeEnv(env, label, objsfx, strip = False, **kwargs):
+def makeEnv(env, label, objsfx, strip=False, disable_partial=False, **kwargs):
     # SCons doesn't know to append a library suffix when there is a '.' in the
     # name.  Use '_' instead.
     libname = variant('gem5_' + label)
@@ -1070,23 +968,7 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
     new_env.Label = label
     new_env.Append(**kwargs)
 
-    swig_env = new_env.Clone()
-
-    # Both gcc and clang have issues with unused labels and values in
-    # the SWIG generated code
-    swig_env.Append(CCFLAGS=['-Wno-unused-label', '-Wno-unused-value'])
-
     if env['GCC']:
-        # Depending on the SWIG version, we also need to supress
-        # warnings about uninitialized variables and missing field
-        # initializers.
-        swig_env.Append(CCFLAGS=['-Wno-uninitialized',
-                                 '-Wno-missing-field-initializers',
-                                 '-Wno-unused-but-set-variable',
-                                 '-Wno-maybe-uninitialized',
-                                 '-Wno-type-limits'])
-
-
         # The address sanitizer is available for gcc >= 4.8
         if GetOption('with_asan'):
             if GetOption('with_ubsan') and \
@@ -1108,10 +990,6 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
 
 
     if env['CLANG']:
-        swig_env.Append(CCFLAGS=['-Wno-sometimes-uninitialized',
-                                 '-Wno-deprecated-register',
-                                 '-Wno-tautological-compare'])
-
         # We require clang >= 3.1, so there is no need to check any
         # versions here.
         if GetOption('with_ubsan'):
@@ -1142,9 +1020,7 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
         build environment, and returns the corresponding SCons Object
         nodes'''
 
-        if source.swig:
-            env = swig_env
-        elif source.Werror:
+        if source.Werror:
             env = werror_env
         else:
             env = new_env
@@ -1161,13 +1037,50 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
 
     lib_guards = {'main': False, 'skip_lib': False}
 
-    # Without Python, leave out all SWIG and Python content from the
-    # library builds.  The option doesn't affect gem5 built as a program
+    # Without Python, leave out all Python content from the library
+    # builds.  The option doesn't affect gem5 built as a program
     if GetOption('without_python'):
         lib_guards['skip_no_python'] = False
 
-    static_objs = [ make_obj(s, True) for s in Source.get(**lib_guards) ]
-    shared_objs = [ make_obj(s, False) for s in Source.get(**lib_guards) ]
+    static_objs = []
+    shared_objs = []
+    for s in guarded_source_iterator(Source.source_groups[None], **lib_guards):
+        static_objs.append(make_obj(s, True))
+        shared_objs.append(make_obj(s, False))
+
+    partial_objs = []
+    for group, all_srcs in Source.source_groups.iteritems():
+        # If these are the ungrouped source files, skip them.
+        if not group:
+            continue
+
+        # Get a list of the source files compatible with the current guards.
+        srcs = [ s for s in guarded_source_iterator(all_srcs, **lib_guards) ]
+        # If there aren't any left, skip this group.
+        if not srcs:
+            continue
+
+        # If partial linking is disabled, add these sources to the build
+        # directly, and short circuit this loop.
+        if disable_partial:
+            for s in srcs:
+                static_objs.append(make_obj(s, True))
+                shared_objs.append(make_obj(s, False))
+            continue
+
+        # Set up the static partially linked objects.
+        source_objs = [ make_obj(s, True) for s in srcs ]
+        file_name = new_env.subst("${OBJPREFIX}lib${OBJSUFFIX}.partial")
+        target = File(joinpath(group, file_name))
+        partial = env.PartialStatic(target=target, source=source_objs)
+        static_objs.append(partial)
+
+        # Set up the shared partially linked objects.
+        source_objs = [ make_obj(s, False) for s in srcs ]
+        file_name = new_env.subst("${SHOBJPREFIX}lib${SHOBJSUFFIX}.partial")
+        target = File(joinpath(group, file_name))
+        partial = env.PartialShared(target=target, source=source_objs)
+        shared_objs.append(partial)
 
     static_date = make_obj(date_source, static=True, extra_deps=static_objs)
     static_objs.append(static_date)
@@ -1210,7 +1123,11 @@ def makeEnv(env, label, objsfx, strip = False, **kwargs):
             MakeAction('ln $SOURCE $TARGET', Transform("HARDLINK")))
 
     new_env.M5Binary = targets[0]
-    return new_env
+
+    # Set up regression tests.
+    SConscript(os.path.join(env.root.abspath, 'tests', 'SConscript'),
+               variant_dir=variantd('tests', new_env.Label),
+               exports={ 'env' : new_env }, duplicate=False)
 
 # Start out with the compiler flags common to all compilers,
 # i.e. they all use -g for opt and -g -pg for prof
@@ -1280,53 +1197,44 @@ def makeEnvirons(target, source, env):
     # cause any later Source() calls to be fatal, as a diagnostic.
     Source.done()
 
-    envList = []
-
     # Debug binary
     if 'debug' in needed_envs:
-        envList.append(
-            makeEnv(env, 'debug', '.do',
-                    CCFLAGS = Split(ccflags['debug']),
-                    CPPDEFINES = ['DEBUG', 'TRACING_ON=1'],
-                    LINKFLAGS = Split(ldflags['debug'])))
+        makeEnv(env, 'debug', '.do',
+                CCFLAGS = Split(ccflags['debug']),
+                CPPDEFINES = ['DEBUG', 'TRACING_ON=1'],
+                LINKFLAGS = Split(ldflags['debug']))
 
     # Optimized binary
     if 'opt' in needed_envs:
-        envList.append(
-            makeEnv(env, 'opt', '.o',
-                    CCFLAGS = Split(ccflags['opt']),
-                    CPPDEFINES = ['TRACING_ON=1'],
-                    LINKFLAGS = Split(ldflags['opt'])))
+        makeEnv(env, 'opt', '.o',
+                CCFLAGS = Split(ccflags['opt']),
+                CPPDEFINES = ['TRACING_ON=1'],
+                LINKFLAGS = Split(ldflags['opt']))
 
     # "Fast" binary
     if 'fast' in needed_envs:
-        envList.append(
-            makeEnv(env, 'fast', '.fo', strip = True,
-                    CCFLAGS = Split(ccflags['fast']),
-                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-                    LINKFLAGS = Split(ldflags['fast'])))
+        disable_partial = \
+                env.get('BROKEN_INCREMENTAL_LTO', False) and \
+                GetOption('force_lto')
+        makeEnv(env, 'fast', '.fo', strip = True,
+                CCFLAGS = Split(ccflags['fast']),
+                CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                LINKFLAGS = Split(ldflags['fast']),
+                disable_partial=disable_partial)
 
     # Profiled binary using gprof
     if 'prof' in needed_envs:
-        envList.append(
-            makeEnv(env, 'prof', '.po',
-                    CCFLAGS = Split(ccflags['prof']),
-                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-                    LINKFLAGS = Split(ldflags['prof'])))
+        makeEnv(env, 'prof', '.po',
+                CCFLAGS = Split(ccflags['prof']),
+                CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                LINKFLAGS = Split(ldflags['prof']))
 
     # Profiled binary using google-pprof
     if 'perf' in needed_envs:
-        envList.append(
-            makeEnv(env, 'perf', '.gpo',
-                    CCFLAGS = Split(ccflags['perf']),
-                    CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
-                    LINKFLAGS = Split(ldflags['perf'])))
-
-    # Set up the regression tests for each build.
-    for e in envList:
-        SConscript(os.path.join(env.root.abspath, 'tests', 'SConscript'),
-                   variant_dir = variantd('tests', e.Label),
-                   exports = { 'env' : e }, duplicate = False)
+        makeEnv(env, 'perf', '.gpo',
+                CCFLAGS = Split(ccflags['perf']),
+                CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],
+                LINKFLAGS = Split(ldflags['perf']))
 
 # The MakeEnvirons Builder defers the full dependency collection until
 # after processing the ISA definition (due to dynamically generated
@@ -1338,9 +1246,9 @@ env.Append(BUILDERS = {'MakeEnvirons' :
                         Builder(action=MakeAction(makeEnvirons,
                                                   Transform("ENVIRONS", 1)))})
 
-isa_target = env['PHONY_BASE'] + '-deps'
-environs   = env['PHONY_BASE'] + '-environs'
-env.Depends('#all-deps',     isa_target)
+isa_target = '#${VARIANT_NAME}-deps'
+environs = '#${VARIANT_NAME}-environs'
+env.Depends('#all-deps', isa_target)
 env.Depends('#all-environs', environs)
 env.ScanISA(isa_target, File('arch/%s/generated/inc.d' % env['TARGET_ISA']))
 envSetup = env.MakeEnvirons(environs, isa_target)

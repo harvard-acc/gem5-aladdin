@@ -100,7 +100,8 @@ def build_test_system(np):
                                  bare_metal=options.bare_metal,
                                  cmdline=cmdline,
                                  external_memory=options.external_memory_system,
-                                 ruby=options.ruby)
+                                 ruby=options.ruby,
+                                 security=options.enable_security_extensions)
         if options.enable_context_switch_stats_dump:
             test_sys.enable_context_switch_stats_dump = True
     else:
@@ -147,7 +148,8 @@ def build_test_system(np):
 
     if options.ruby:
         # Check for timing mode because ruby does not support atomic accesses
-        if not (options.cpu_type == "detailed" or options.cpu_type == "timing"):
+        if not (options.cpu_type == "DerivO3CPU" or
+                options.cpu_type == "TimingSimpleCPU"):
             print >> sys.stderr, "Ruby requires TimingSimpleCPU or O3CPU!!"
             sys.exit(1)
 

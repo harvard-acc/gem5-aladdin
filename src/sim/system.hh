@@ -48,6 +48,7 @@
 #define __SYSTEM_HH__
 
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -57,10 +58,12 @@
 #include "config/the_isa.hh"
 #include "enums/MemoryMode.hh"
 #include "mem/mem_object.hh"
+#include "mem/physical.hh"
 #include "mem/port.hh"
 #include "mem/port_proxy.hh"
-#include "mem/physical.hh"
 #include "params/System.hh"
+#include "sim/futex_map.hh"
+#include "sim/se_signal.hh"
 
 #include "aladdin/gem5/Gem5Datapath.h"
 #include "debug/Aladdin.hh"
@@ -71,6 +74,7 @@
  */
 #if THE_ISA != NULL_ISA
 #include "cpu/pc_event.hh"
+
 #endif
 
 class BaseRemoteGDB;
@@ -384,6 +388,9 @@ class System : public MemObject
         return kvmVM;
     }
 
+    /** Verify gem5 configuration will support KVM emulation */
+    bool validKvmEnvironment() const;
+
     /** Get a pointer to access the physical memory of the system */
     PhysicalMemory& getPhysMem() { return physmem; }
 
@@ -674,8 +681,16 @@ class System : public MemObject
 
     static void printSystems();
 
-    // For futex system call
-    std::map<uint64_t, std::list<ThreadContext *> * > futexMap;
+    FutexMap futexMap;
+
+    static const int maxPID = 32768;
+
+    /** Process set to track which PIDs have already been allocated */
+    std::set<int> PIDs;
+
+    // By convention, all signals are owned by the receiving process. The
+    // receiver will delete the signal upon reception.
+    std::list<BasicSignal> signalList;
 
   protected:
 

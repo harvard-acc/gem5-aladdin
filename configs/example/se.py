@@ -91,7 +91,7 @@ def get_processes(options):
 
     idx = 0
     for wrkld in workloads:
-        process = Process()
+        process = Process(pid = 100 + idx)
         process.executable = wrkld
         process.cwd = os.getcwd()
 
@@ -115,7 +115,7 @@ def get_processes(options):
         idx += 1
 
     if options.smt:
-        assert(options.cpu_type == "detailed")
+        assert(options.cpu_type == "DerivO3CPU")
         return multiprocesses, idx
     else:
         return multiprocesses, 1
@@ -250,7 +250,7 @@ for i in xrange(np):
     system.cpu[i].createThreads()
 
 if options.ruby:
-    if options.cpu_type == "atomic" or options.cpu_type == "AtomicSimpleCPU":
+    if options.cpu_type == "AtomicSimpleCPU":
         print >> sys.stderr, "Ruby does not work with atomic cpu!!"
         sys.exit(1)
 

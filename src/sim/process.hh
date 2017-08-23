@@ -48,6 +48,7 @@
 #include "mem/se_translating_port_proxy.hh"
 #include "sim/fd_array.hh"
 #include "sim/fd_entry.hh"
+#include "sim/mem_state.hh"
 #include "sim/sim_object.hh"
 
 struct ProcessParams;
@@ -63,16 +64,6 @@ class ThreadContext;
 class Process : public SimObject
 {
   public:
-    struct WaitRec
-    {
-        Addr waitChan;
-        ThreadContext *waitingContext;
-
-        WaitRec(Addr chan, ThreadContext *ctx)
-            : waitChan(chan), waitingContext(ctx)
-        { }
-    };
-
     Process(ProcessParams *params, ObjectFile *obj_file);
 
     void serialize(CheckpointOut &cp) const override;
@@ -81,7 +72,7 @@ class Process : public SimObject
     void initState() override;
     DrainState drain() override;
 
-    void syscall(int64_t callnum, ThreadContext *tc, Fault *fault);
+    virtual void syscall(int64_t callnum, ThreadContext *tc, Fault *fault);
     virtual TheISA::IntReg getSyscallArg(ThreadContext *tc, int &i) = 0;
     virtual TheISA::IntReg getSyscallArg(ThreadContext *tc, int &i, int width);
     virtual void setSyscallArg(ThreadContext *tc, int i,
@@ -96,6 +87,9 @@ class Process : public SimObject
     inline uint64_t egid() { return _egid; }
     inline uint64_t pid() { return _pid; }
     inline uint64_t ppid() { return _ppid; }
+    inline uint64_t pgid() { return _pgid; }
+    inline uint64_t tgid() { return _tgid; }
+    inline void setpgid(uint64_t pgid) { _pgid = pgid; }
 
     const char *progName() const { return executable.c_str(); }
     std::string fullPath(const std::string &filename);
@@ -105,7 +99,7 @@ class Process : public SimObject
      * Find an emulated device driver.
      *
      * @param filename Name of the device (under /dev)
-     * @return Pointer to driver object if found, else NULL
+     * @return Pointer to driver object if found, else nullptr
      */
     EmulatedDriver *findDriver(std::string filename);
 
@@ -138,7 +132,13 @@ class Process : public SimObject
     ThreadContext *findFreeContext();
 
     /**
-     * Does mmap region grow upward or downward from mmap_end?  Most
+     * After delegating a thread context to a child process
+     * no longer should relate to the ThreadContext
+     */
+    void revokeThreadContext(int context_id);
+
+    /**
+     * Does mmap region grow upward or downward from mmapEnd?  Most
      * platforms grow downward, but a few (such as Alpha) grow upward
      * instead, so they can override this method to return false.
      */
@@ -159,8 +159,11 @@ class Process : public SimObject
      */
     bool map(Addr vaddr, Addr paddr, int size, bool cacheable = true);
 
-    // list of all blocked contexts
-    std::list<WaitRec> waitList;
+    void replicatePage(Addr vaddr, Addr new_paddr, ThreadContext *old_tc,
+                       ThreadContext *new_tc, bool alloc_page);
+
+    virtual void clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                       Process *new_p, TheISA::IntReg flags);
 
     // thread contexts associated with this process
     std::vector<ContextID> contextIds;
@@ -168,15 +171,7 @@ class Process : public SimObject
     // system object which owns this process
     System *system;
 
-    Addr brk_point;              // top of the data segment
-    Addr stack_base;             // stack segment base
-    unsigned stack_size;         // initial stack size
-    Addr stack_min;              // furthest address accessed from stack base
-    Addr max_stack_size;         // the maximum size allowed for the stack
-    Addr next_thread_stack_base; // addr for next region w/ multithreaded apps
-    Addr mmap_end;               // base of automatic mmap region allocs
-
-    Stats::Scalar num_syscalls;  // track how many system calls are executed
+    Stats::Scalar numSyscalls;  // track how many system calls are executed
 
     bool useArchPT; // flag for using architecture specific page table
     bool kvmInSE;   // running KVM requires special initialization
@@ -200,11 +195,25 @@ class Process : public SimObject
     // pid of the process and it's parent
     uint64_t _pid;
     uint64_t _ppid;
+    uint64_t _pgid;
+    uint64_t _tgid;
 
     // Emulated drivers available to this process
     std::vector<EmulatedDriver *> drivers;
 
     std::shared_ptr<FDArray> fds;
+
+    bool *exitGroup;
+    std::shared_ptr<MemState> memState;
+
+    /**
+     * Calls a futex wakeup at the address specified by this pointer when
+     * this process exits.
+     */
+    uint64_t childClearTID;
+
+    // Process was forked with SIGCHLD set.
+    bool *sigchld;
 };
 
 #endif // __PROCESS_HH__

@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <csignal>
 #include <iostream>
 #include <string>
 
@@ -75,44 +76,116 @@ ignoreFunc(SyscallDesc *desc, int callnum, Process *process,
     return 0;
 }
 
-
-SyscallReturn
-exitFunc(SyscallDesc *desc, int callnum, Process *process,
-         ThreadContext *tc)
+static void
+exitFutexWake(ThreadContext *tc, Addr addr, uint64_t tgid)
 {
-    if (process->system->numRunningContexts() == 1) {
-        // Last running context... exit simulator
-        int index = 0;
-        exitSimLoop("target called exit()",
-                    process->getSyscallArg(tc, index) & 0xff);
-    } else {
-        // other running threads... just halt this one
-        tc->halt();
-    }
+    // Clear value at address pointed to by thread's childClearTID field.
+    BufferArg ctidBuf(addr, sizeof(long));
+    long *ctid = (long *)ctidBuf.bufferPtr();
+    *ctid = 0;
+    ctidBuf.copyOut(tc->getMemProxy());
 
-    return 1;
+    FutexMap &futex_map = tc->getSystemPtr()->futexMap;
+    // Wake one of the waiting threads.
+    futex_map.wakeup(addr, tgid, 1);
 }
 
-
-SyscallReturn
-exitGroupFunc(SyscallDesc *desc, int callnum, Process *process,
-              ThreadContext *tc)
+static SyscallReturn
+exitImpl(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc,
+         bool group)
 {
-    // halt all threads belonging to this process
-    for (auto i: process->contextIds) {
-        process->system->getThreadContext(i)->halt();
+    int index = 0;
+    int status = p->getSyscallArg(tc, index);
+
+    System *sys = tc->getSystemPtr();
+
+    int activeContexts = 0;
+    for (auto &system: sys->systemList)
+        activeContexts += system->numRunningContexts();
+    if (activeContexts == 1) {
+        exitSimLoop("exiting with last active thread context", status & 0xff);
+        return status;
     }
 
-    if (!process->system->numRunningContexts()) {
-        // all threads belonged to this process... exit simulator
-        int index = 0;
-        exitSimLoop("target called exit()",
-                    process->getSyscallArg(tc, index) & 0xff);
+    if (group)
+        *p->exitGroup = true;
+
+    if (p->childClearTID)
+        exitFutexWake(tc, p->childClearTID, p->tgid());
+
+    bool last_thread = true;
+    Process *parent = nullptr, *tg_lead = nullptr;
+    for (int i = 0; last_thread && i < sys->numContexts(); i++) {
+        Process *walk;
+        if (!(walk = sys->threadContexts[i]->getProcessPtr()))
+            continue;
+
+        /**
+         * Threads in a thread group require special handing. For instance,
+         * we send the SIGCHLD signal so that it appears that it came from
+         * the head of the group. We also only delete file descriptors if
+         * we are the last thread in the thread group.
+         */
+        if (walk->pid() == p->tgid())
+            tg_lead = walk;
+
+        if ((sys->threadContexts[i]->status() != ThreadContext::Halted)
+            && (walk != p)) {
+            /**
+             * Check if we share thread group with the pointer; this denotes
+             * that we are not the last thread active in the thread group.
+             * Note that setting this to false also prevents further
+             * iterations of the loop.
+             */
+            if (walk->tgid() == p->tgid())
+                last_thread = false;
+
+            /**
+             * A corner case exists which involves execve(). After execve(),
+             * the execve will enable SIGCHLD in the process. The problem
+             * occurs when the exiting process is the root process in the
+             * system; there is no parent to receive the signal. We obviate
+             * this problem by setting the root process' ppid to zero in the
+             * Python configuration files. We really should handle the
+             * root/execve specific case more gracefully.
+             */
+            if (*p->sigchld && (p->ppid() != 0) && (walk->pid() == p->ppid()))
+                parent = walk;
+        }
     }
 
-    return 1;
+    if (last_thread) {
+        if (parent) {
+            assert(tg_lead);
+            sys->signalList.push_back(BasicSignal(tg_lead, parent, SIGCHLD));
+        }
+
+        /**
+         * Run though FD array of the exiting process and close all file
+         * descriptors except for the standard file descriptors.
+         * (The standard file descriptors are shared with gem5.)
+         */
+        for (int i = 0; i < p->fds->getSize(); i++) {
+            if ((*p->fds)[i])
+                p->fds->closeFDEntry(i);
+        }
+    }
+
+    tc->halt();
+    return status;
 }
 
+SyscallReturn
+exitFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+{
+    return exitImpl(desc, callnum, p, tc, false);
+}
+
+SyscallReturn
+exitGroupFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
+{
+    return exitImpl(desc, callnum, p, tc, true);
+}
 
 SyscallReturn
 getpagesizeFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
@@ -128,21 +201,25 @@ brkFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     int index = 0;
     Addr new_brk = p->getSyscallArg(tc, index);
 
+    std::shared_ptr<MemState> mem_state = p->memState;
+    Addr brk_point = mem_state->getBrkPoint();
+
     // in Linux at least, brk(0) returns the current break value
     // (note that the syscall and the glibc function have different behavior)
     if (new_brk == 0)
-        return p->brk_point;
+        return brk_point;
 
-    if (new_brk > p->brk_point) {
+    if (new_brk > brk_point) {
         // might need to allocate some new pages
-        for (ChunkGenerator gen(p->brk_point, new_brk - p->brk_point,
+        for (ChunkGenerator gen(brk_point,
+                                new_brk - brk_point,
                                 PageBytes); !gen.done(); gen.next()) {
             if (!p->pTable->translate(gen.addr()))
                 p->allocateMem(roundDown(gen.addr(), PageBytes), PageBytes);
 
             // if the address is already there, zero it out
             else {
-                uint8_t zero  = 0;
+                uint8_t zero = 0;
                 SETranslatingPortProxy &tp = tc->getMemProxy();
 
                 // split non-page aligned accesses
@@ -151,8 +228,7 @@ brkFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
                 tp.memsetBlob(gen.addr(), zero, size_needed);
                 if (gen.addr() + PageBytes > next_page &&
                     next_page < new_brk &&
-                    p->pTable->translate(next_page))
-                {
+                    p->pTable->translate(next_page)) {
                     size_needed = PageBytes - size_needed;
                     tp.memsetBlob(next_page, zero, size_needed);
                 }
@@ -160,12 +236,22 @@ brkFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
         }
     }
 
-    p->brk_point = new_brk;
+    mem_state->setBrkPoint(new_brk);
     DPRINTF_SYSCALL(Verbose, "brk: break point changed to: %#X\n",
-                    p->brk_point);
-    return p->brk_point;
+                    mem_state->getBrkPoint());
+    return mem_state->getBrkPoint();
 }
 
+SyscallReturn
+setTidAddressFunc(SyscallDesc *desc, int callnum, Process *process,
+                  ThreadContext *tc)
+{
+    int index = 0;
+    uint64_t tidPtr = process->getSyscallArg(tc, index);
+
+    process->childClearTID = tidPtr;
+    return process->pid();
+}
 
 SyscallReturn
 closeFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
@@ -182,7 +268,7 @@ readFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
     int index = 0;
     int tgt_fd = p->getSyscallArg(tc, index);
-    Addr bufPtr = p->getSyscallArg(tc, index);
+    Addr buf_ptr = p->getSyscallArg(tc, index);
     int nbytes = p->getSyscallArg(tc, index);
 
     auto hbfdp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[tgt_fd]);
@@ -190,7 +276,7 @@ readFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
         return -EBADF;
     int sim_fd = hbfdp->getSimFD();
 
-    BufferArg bufArg(bufPtr, nbytes);
+    BufferArg bufArg(buf_ptr, nbytes);
     int bytes_read = read(sim_fd, bufArg.bufferPtr(), nbytes);
 
     if (bytes_read > 0)
@@ -204,7 +290,7 @@ writeFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
     int index = 0;
     int tgt_fd = p->getSyscallArg(tc, index);
-    Addr bufPtr = p->getSyscallArg(tc, index);
+    Addr buf_ptr = p->getSyscallArg(tc, index);
     int nbytes = p->getSyscallArg(tc, index);
 
     auto hbfdp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[tgt_fd]);
@@ -212,7 +298,7 @@ writeFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
         return -EBADF;
     int sim_fd = hbfdp->getSimFD();
 
-    BufferArg bufArg(bufPtr, nbytes);
+    BufferArg bufArg(buf_ptr, nbytes);
     bufArg.copyIn(tc->getMemProxy());
 
     int bytes_written = write(sim_fd, bufArg.bufferPtr(), nbytes);
@@ -278,9 +364,9 @@ SyscallReturn
 gethostnameFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
     int index = 0;
-    Addr bufPtr = p->getSyscallArg(tc, index);
+    Addr buf_ptr = p->getSyscallArg(tc, index);
     int name_len = p->getSyscallArg(tc, index);
-    BufferArg name(bufPtr, name_len);
+    BufferArg name(buf_ptr, name_len);
 
     strncpy((char *)name.bufferPtr(), hostname, name_len);
 
@@ -294,9 +380,9 @@ getcwdFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
     int result = 0;
     int index = 0;
-    Addr bufPtr = p->getSyscallArg(tc, index);
+    Addr buf_ptr = p->getSyscallArg(tc, index);
     unsigned long size = p->getSyscallArg(tc, index);
-    BufferArg buf(bufPtr, size);
+    BufferArg buf(buf_ptr, size);
 
     // Is current working directory defined?
     string cwd = p->getcwd();
@@ -320,7 +406,6 @@ getcwdFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     return (result == -1) ? -errno : result;
 }
 
-/// Target open() handler.
 SyscallReturn
 readlinkFunc(SyscallDesc *desc, int callnum, Process *process,
              ThreadContext *tc)
@@ -340,10 +425,10 @@ readlinkFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc,
     // Adjust path for current working directory
     path = p->fullPath(path);
 
-    Addr bufPtr = p->getSyscallArg(tc, index);
+    Addr buf_ptr = p->getSyscallArg(tc, index);
     size_t bufsiz = p->getSyscallArg(tc, index);
 
-    BufferArg buf(bufPtr, bufsiz);
+    BufferArg buf(buf_ptr, bufsiz);
 
     int result = -1;
     if (path != "/proc/self/exe") {
@@ -493,7 +578,7 @@ truncate64Func(SyscallDesc *desc, int num,
     string path;
 
     if (!tc->getMemProxy().tryReadString(path, process->getSyscallArg(tc, index)))
-       return -EFAULT;
+        return -EFAULT;
 
     int64_t length = process->getSyscallArg(tc, index, 64);
 
@@ -582,13 +667,11 @@ fchownFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     return (result == -1) ? -errno : result;
 }
 
-
 /**
- * TODO: there's a bit more involved here since file descriptors created with
- * dup are supposed to share a file description. So, there is a problem with
- * maintaining fields like file offset or flags since an update to such a
- * field won't be reflected in the metadata for the fd entries that we
- * maintain to hold metadata for checkpoint restoration.
+ * FIXME: The file description is not shared among file descriptors created
+ * with dup. Really, it's difficult to maintain fields like file offset or
+ * flags since an update to such a field won't be reflected in the metadata
+ * for the fd entries that we maintain for checkpoint restoration.
  */
 SyscallReturn
 dupFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
@@ -602,13 +685,44 @@ dupFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     int sim_fd = old_hbfdp->getSimFD();
 
     int result = dup(sim_fd);
-    int local_errno = errno;
+    if (result == -1)
+        return -errno;
 
-    std::shared_ptr<FDEntry> new_fdep = old_hbfdp->clone();
-    auto new_hbfdp = std::dynamic_pointer_cast<HBFDEntry>(new_fdep);
+    auto new_hbfdp = std::dynamic_pointer_cast<HBFDEntry>(old_hbfdp->clone());
     new_hbfdp->setSimFD(result);
+    new_hbfdp->setCOE(false);
+    return p->fds->allocFD(new_hbfdp);
+}
 
-    return (result == -1) ? -local_errno : p->fds->allocFD(new_fdep);
+SyscallReturn
+dup2Func(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
+{
+    int index = 0;
+
+    int old_tgt_fd = p->getSyscallArg(tc, index);
+    auto old_hbp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[old_tgt_fd]);
+    if (!old_hbp)
+        return -EBADF;
+    int old_sim_fd = old_hbp->getSimFD();
+
+    /**
+     * We need a valid host file descriptor number to be able to pass into
+     * the second parameter for dup2 (newfd), but we don't know what the
+     * viable numbers are; we execute the open call to retrieve one.
+     */
+    int res_fd = dup2(old_sim_fd, open("/dev/null", O_RDONLY));
+    if (res_fd == -1)
+        return -errno;
+
+    int new_tgt_fd = p->getSyscallArg(tc, index);
+    auto new_hbp = std::dynamic_pointer_cast<HBFDEntry>((*p->fds)[new_tgt_fd]);
+    if (new_hbp)
+        p->fds->closeFDEntry(new_tgt_fd);
+    new_hbp = std::dynamic_pointer_cast<HBFDEntry>(old_hbp->clone());
+    new_hbp->setSimFD(res_fd);
+    new_hbp->setCOE(false);
+
+    return p->fds->allocFD(new_hbp);
 }
 
 void
@@ -751,28 +865,32 @@ fcntl64Func(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
         // to the underlying OS
         warn("fcntl64(%d, %d) passed through to host\n", tgt_fd, cmd);
         return fcntl(sim_fd, cmd);
-        // return 0;
     }
 }
 
 SyscallReturn
-pipePseudoFunc(SyscallDesc *desc, int callnum, Process *process,
-               ThreadContext *tc)
+pipeImpl(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc,
+         bool pseudoPipe)
 {
+    Addr tgt_addr = 0;
+    if (!pseudoPipe) {
+        int index = 0;
+        tgt_addr = p->getSyscallArg(tc, index);
+    }
+
     int sim_fds[2], tgt_fds[2];
 
     int pipe_retval = pipe(sim_fds);
-    if (pipe_retval < 0)
-        return pipe_retval;
+    if (pipe_retval == -1)
+        return -errno;
 
     auto rend = PipeFDEntry::EndType::read;
     auto rpfd = std::make_shared<PipeFDEntry>(sim_fds[0], O_WRONLY, rend);
+    tgt_fds[0] = p->fds->allocFD(rpfd);
 
     auto wend = PipeFDEntry::EndType::write;
     auto wpfd = std::make_shared<PipeFDEntry>(sim_fds[1], O_RDONLY, wend);
-
-    tgt_fds[0] = process->fds->allocFD(rpfd);
-    tgt_fds[1] = process->fds->allocFD(wpfd);
+    tgt_fds[1] = p->fds->allocFD(wpfd);
 
     /**
      * Now patch the read object to record the target file descriptor chosen
@@ -784,10 +902,71 @@ pipePseudoFunc(SyscallDesc *desc, int callnum, Process *process,
      * Alpha Linux convention for pipe() is that fd[0] is returned as
      * the return value of the function, and fd[1] is returned in r20.
      */
-    tc->setIntReg(SyscallPseudoReturnReg, tgt_fds[1]);
-    return sim_fds[0];
+    if (pseudoPipe) {
+        tc->setIntReg(SyscallPseudoReturnReg, tgt_fds[1]);
+        return tgt_fds[0];
+    }
+
+    /**
+     * Copy the target file descriptors into buffer space and then copy
+     * the buffer space back into the target address space.
+     */
+    BufferArg tgt_handle(tgt_addr, sizeof(int[2]));
+    int *buf_ptr = (int*)tgt_handle.bufferPtr();
+    buf_ptr[0] = tgt_fds[0];
+    buf_ptr[1] = tgt_fds[1];
+    tgt_handle.copyOut(tc->getMemProxy());
+    return 0;
 }
 
+SyscallReturn
+pipePseudoFunc(SyscallDesc *desc, int callnum, Process *process,
+               ThreadContext *tc)
+{
+    return pipeImpl(desc, callnum, process, tc, true);
+}
+
+SyscallReturn
+pipeFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
+{
+    return pipeImpl(desc, callnum, process, tc, false);
+}
+
+SyscallReturn
+setpgidFunc(SyscallDesc *desc, int callnum, Process *process,
+            ThreadContext *tc)
+{
+    int index = 0;
+    int pid = process->getSyscallArg(tc, index);
+    int pgid = process->getSyscallArg(tc, index);
+
+    if (pgid < 0)
+        return -EINVAL;
+
+    if (pid == 0) {
+        process->setpgid(process->pid());
+        return 0;
+    }
+
+    Process *matched_ph = nullptr;
+    System *sysh = tc->getSystemPtr();
+
+    // Retrieves process pointer from active/suspended thread contexts.
+    for (int i = 0; i < sysh->numContexts(); i++) {
+        if (sysh->threadContexts[i]->status() != ThreadContext::Halted) {
+            Process *temp_h = sysh->threadContexts[i]->getProcessPtr();
+            Process *walk_ph = (Process*)temp_h;
+
+            if (walk_ph && walk_ph->pid() == process->pid())
+                matched_ph = walk_ph;
+        }
+    }
+
+    assert(matched_ph);
+    matched_ph->setpgid((pgid == 0) ? matched_ph->pid() : pgid);
+
+    return 0;
+}
 
 SyscallReturn
 getpidPseudoFunc(SyscallDesc *desc, int callnum, Process *process,
@@ -810,8 +989,8 @@ getuidPseudoFunc(SyscallDesc *desc, int callnum, Process *process,
     // simulation to be deterministic.
 
     // EUID goes in r20.
-    tc->setIntReg(SyscallPseudoReturnReg, process->euid()); //EUID
-    return process->uid();              // UID
+    tc->setIntReg(SyscallPseudoReturnReg, process->euid()); // EUID
+    return process->uid(); // UID
 }
 
 
@@ -820,7 +999,7 @@ getgidPseudoFunc(SyscallDesc *desc, int callnum, Process *process,
                  ThreadContext *tc)
 {
     // Get current group ID.  EGID goes in r20.
-    tc->setIntReg(SyscallPseudoReturnReg, process->egid()); //EGID
+    tc->setIntReg(SyscallPseudoReturnReg, process->egid()); // EGID
     return process->gid();
 }
 
@@ -839,11 +1018,13 @@ SyscallReturn
 getpidFunc(SyscallDesc *desc, int callnum, Process *process,
            ThreadContext *tc)
 {
-    // Make up a PID.  There's no interprocess communication in
-    // fake_syscall mode, so there's no way for a process to know it's
-    // not getting a unique value.
+    return process->tgid();
+}
 
-    tc->setIntReg(SyscallPseudoReturnReg, process->ppid()); //PID
+SyscallReturn
+gettidFunc(SyscallDesc *desc, int callnum, Process *process,
+           ThreadContext *tc)
+{
     return process->pid();
 }
 
@@ -880,89 +1061,6 @@ getegidFunc(SyscallDesc *desc, int callnum, Process *process,
             ThreadContext *tc)
 {
     return process->egid();
-}
-
-
-SyscallReturn
-cloneFunc(SyscallDesc *desc, int callnum, Process *process,
-          ThreadContext *tc)
-{
-    int index = 0;
-    IntReg flags = process->getSyscallArg(tc, index);
-    IntReg newStack = process->getSyscallArg(tc, index);
-
-    DPRINTF(SyscallVerbose, "In sys_clone:\n");
-    DPRINTF(SyscallVerbose, " Flags=%llx\n", flags);
-    DPRINTF(SyscallVerbose, " Child stack=%llx\n", newStack);
-
-
-    if (flags != 0x10f00) {
-        warn("This sys_clone implementation assumes flags "
-             "CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD "
-             "(0x10f00), and may not work correctly with given flags "
-             "0x%llx\n", flags);
-    }
-
-    ThreadContext* ctc; // child thread context
-    if ((ctc = process->findFreeContext())) {
-        DPRINTF(SyscallVerbose, " Found unallocated thread context\n");
-
-        ctc->clearArchRegs();
-
-        // Arch-specific cloning code
-        #if THE_ISA == ALPHA_ISA or THE_ISA == X86_ISA
-            // Cloning the misc. regs for these archs is enough
-            TheISA::copyMiscRegs(tc, ctc);
-        #elif THE_ISA == SPARC_ISA
-            TheISA::copyRegs(tc, ctc);
-
-            // TODO: Explain what this code actually does :-)
-            ctc->setIntReg(NumIntArchRegs + 6, 0);
-            ctc->setIntReg(NumIntArchRegs + 4, 0);
-            ctc->setIntReg(NumIntArchRegs + 3, NWindows - 2);
-            ctc->setIntReg(NumIntArchRegs + 5, NWindows);
-            ctc->setMiscReg(MISCREG_CWP, 0);
-            ctc->setIntReg(NumIntArchRegs + 7, 0);
-            ctc->setMiscRegNoEffect(MISCREG_TL, 0);
-            ctc->setMiscReg(MISCREG_ASI, ASI_PRIMARY);
-
-            for (int y = 8; y < 32; y++)
-                ctc->setIntReg(y, tc->readIntReg(y));
-        #elif THE_ISA == ARM_ISA
-            TheISA::copyRegs(tc, ctc);
-        #else
-            fatal("sys_clone is not implemented for this ISA\n");
-        #endif
-
-        // Set up stack register
-        ctc->setIntReg(TheISA::StackPointerReg, newStack);
-
-        // Set up syscall return values in parent and child
-        ctc->setIntReg(ReturnValueReg, 0); // return value, child
-
-        // Alpha needs SyscallSuccessReg=0 in child
-        #if THE_ISA == ALPHA_ISA
-            ctc->setIntReg(TheISA::SyscallSuccessReg, 0);
-        #endif
-
-        // In SPARC/Linux, clone returns 0 on pseudo-return register if
-        // parent, non-zero if child
-        #if THE_ISA == SPARC_ISA
-            tc->setIntReg(TheISA::SyscallPseudoReturnReg, 0);
-            ctc->setIntReg(TheISA::SyscallPseudoReturnReg, 1);
-        #endif
-
-        ctc->pcState(tc->nextInstAddr());
-
-        ctc->activate();
-
-        // Should return nonzero child TID in parent's syscall return register,
-        // but for our pthread library any non-zero value will work
-        return 1;
-    } else {
-        fatal("Called sys_clone, but no unallocated thread contexts found!\n");
-        return 0;
-    }
 }
 
 SyscallReturn

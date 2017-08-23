@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013, 2015 ARM Limited
+ * Copyright (c) 2010-2013, 2015, 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -65,6 +65,7 @@ HDLcd::HDLcd(const HDLcdParams *p)
       addrRanges{RangeSize(pioAddr, pioSize)},
       enableCapture(p->enable_capture),
       pixelBufferSize(p->pixel_buffer_size),
+      virtRefreshRate(p->virt_refresh_rate),
 
       // Registers
       version(VERSION_RESETV),
@@ -82,6 +83,7 @@ HDLcd::HDLcd(const HDLcdParams *p)
       pixel_format(0),
       red_select(0), green_select(0), blue_select(0),
 
+      virtRefreshEvent([this]{ virtRefresh(); }, name()),
       // Other
       bmp(&pixelPump.fb), pic(NULL), conv(PixelConverter::rgba8888_le),
       pixelPump(*this, *p->pxl_clk, p->pixel_chunk)
@@ -201,15 +203,31 @@ HDLcd::drainResume()
 {
     AmbaDmaDevice::drainResume();
 
-    // We restored from an old checkpoint without a pixel pump, start
-    // an new refresh. This typically happens when restoring from old
-    // checkpoints.
-    if (enabled() && !pixelPump.active())
-        pixelPump.start(displayTimings());
+    if (enabled()) {
+        if (sys->bypassCaches()) {
+            // We restart the HDLCD if we are in KVM mode. This
+            // ensures that we always use the fast refresh logic if we
+            // resume in KVM mode.
+            cmdDisable();
+            cmdEnable();
+        } else if (!pixelPump.active()) {
+            // We restored from an old checkpoint without a pixel
+            // pump, start an new refresh. This typically happens when
+            // restoring from old checkpoints.
+            cmdEnable();
+        }
+    }
 
     // We restored from a checkpoint and need to update the VNC server
     if (pixelPump.active() && vnc)
         vnc->setDirty();
+}
+
+void
+HDLcd::virtRefresh()
+{
+    pixelPump.renderFrame();
+    schedule(virtRefreshEvent, (curTick() + virtRefreshRate));
 }
 
 // read registers and frame buffer
@@ -476,13 +494,26 @@ HDLcd::cmdEnable()
 {
     createDmaEngine();
     conv = pixelConverter();
-    pixelPump.start(displayTimings());
+
+    // Update timing parameter before rendering frames
+    pixelPump.updateTimings(displayTimings());
+
+    if (sys->bypassCaches()) {
+        schedule(virtRefreshEvent, clockEdge());
+    } else {
+        pixelPump.start();
+    }
 }
 
 void
 HDLcd::cmdDisable()
 {
     pixelPump.stop();
+    // Disable the virtual refresh event
+    if (virtRefreshEvent.scheduled()) {
+        assert(sys->bypassCaches());
+        deschedule(virtRefreshEvent);
+    }
     dmaEngine->abortFrame();
 }
 

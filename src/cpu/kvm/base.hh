@@ -106,6 +106,7 @@ class BaseKvmCPU : public BaseCPU
     void deallocateContext(ThreadID thread_num);
     void haltContext(ThreadID thread_num) override;
 
+    long getVCpuID() const { return vcpuID; }
     ThreadContext *getContext(int tn) override;
 
     Counter totalInsts() const override;
@@ -418,6 +419,16 @@ class BaseKvmCPU : public BaseCPU
     void syncThreadContext();
 
     /**
+     * Get a pointer to the event queue owning devices.
+     *
+     * Devices always live in a separate device event queue when
+     * running in multi-core mode. We need to temporarily migrate to
+     * this queue when accessing devices. By convention, devices and
+     * the VM use the same event queue.
+     */
+    EventQueue *deviceEventQueue() { return vm.eventQueue(); }
+
+    /**
      * Update the KVM if the thread context is dirty.
      */
     void syncKvmState();
@@ -629,20 +640,6 @@ class BaseKvmCPU : public BaseCPU
     pthread_t vcpuThread;
 
   private:
-    struct TickEvent : public Event
-    {
-        BaseKvmCPU &cpu;
-
-        TickEvent(BaseKvmCPU &c)
-            : Event(CPU_Tick_Pri), cpu(c) {}
-
-        void process() { cpu.tick(); }
-
-        const char *description() const {
-            return "BaseKvmCPU tick";
-        }
-    };
-
     /**
      * Service MMIO requests in the mmioRing.
      *
@@ -707,7 +704,7 @@ class BaseKvmCPU : public BaseCPU
     /** Cached page size of the host */
     const long pageSize;
 
-    TickEvent tickEvent;
+    EventFunctionWrapper tickEvent;
 
     /**
      * Setup an instruction break if there is one pending.

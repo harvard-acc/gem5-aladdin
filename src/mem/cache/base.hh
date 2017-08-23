@@ -177,8 +177,7 @@ class BaseCache : public MemObject
 
         void processSendRetry();
 
-        EventWrapper<CacheSlavePort,
-                     &CacheSlavePort::processSendRetry> sendRetryEvent;
+        EventFunctionWrapper sendRetryEvent;
 
     };
 
@@ -229,7 +228,7 @@ class BaseCache : public MemObject
     /**
      * Write back dirty blocks in the cache using functional accesses.
      */
-    virtual void memWriteback() = 0;
+    virtual void memWriteback() override = 0;
     /**
      * Invalidates all blocks in the cache.
      *
@@ -237,7 +236,7 @@ class BaseCache : public MemObject
      * memory. Make sure to call functionalWriteback() first if you
      * want the to write them to memory.
      */
-    virtual void memInvalidate() = 0;
+    virtual void memInvalidate() override = 0;
     /**
      * Determine if there are any dirty blocks in the cache.
      *
@@ -461,18 +460,18 @@ class BaseCache : public MemObject
     /**
      * Register stats for this object.
      */
-    virtual void regStats();
+    virtual void regStats() override;
 
   public:
     BaseCache(const BaseCacheParams *p, unsigned blk_size);
     ~BaseCache() {}
 
-    virtual void init();
+    virtual void init() override;
 
     virtual BaseMasterPort &getMasterPort(const std::string &if_name,
-                                          PortID idx = InvalidPortID);
+                                          PortID idx = InvalidPortID) override;
     virtual BaseSlavePort &getSlavePort(const std::string &if_name,
-                                        PortID idx = InvalidPortID);
+                                        PortID idx = InvalidPortID) override;
 
     /**
      * Query block size of a cache.
@@ -484,15 +483,11 @@ class BaseCache : public MemObject
         return blkSize;
     }
 
-
-    Addr blockAlign(Addr addr) const { return (addr & ~(Addr(blkSize - 1))); }
-
-
     const AddrRangeList &getAddrRanges() const { return addrRanges; }
 
     MSHR *allocateMissBuffer(PacketPtr pkt, Tick time, bool sched_send = true)
     {
-        MSHR *mshr = mshrQueue.allocate(blockAlign(pkt->getAddr()), blkSize,
+        MSHR *mshr = mshrQueue.allocate(pkt->getBlockAddr(blkSize), blkSize,
                                         pkt, time, order++,
                                         allocOnFill(pkt->cmd));
 
@@ -513,7 +508,7 @@ class BaseCache : public MemObject
         // should only see writes or clean evicts here
         assert(pkt->isWrite() || pkt->cmd == MemCmd::CleanEvict);
 
-        Addr blk_addr = blockAlign(pkt->getAddr());
+        Addr blk_addr = pkt->getBlockAddr(blkSize);
 
         WriteQueueEntry *wq_entry =
             writeBuffer.findMatch(blk_addr, pkt->isSecure());

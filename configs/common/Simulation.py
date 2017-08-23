@@ -725,4 +725,6 @@ def run(options, root, testsys, cpu_class):
         m5.checkpoint(joinpath(cptdir, "cpt.%d"))
 
     if not m5.options.interactive:
-        sys.exit(exit_event.getCode())
+        # sys.exit() rejects arguments of type long and actually exits with
+        # code 1.
+        sys.exit(int(exit_event.getCode()))

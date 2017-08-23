@@ -37,6 +37,12 @@
 #include "base/types.hh"
 #include "sim/serialize.hh"
 
+// Logical register index type.
+typedef uint16_t RegIndex;
+
+/** Logical vector register elem index type. */
+using ElemIndex = uint16_t;
+
 namespace GenericISA
 {
 
@@ -147,6 +153,12 @@ class SimplePCState : public PCStateBase
         pc(val);
         npc(val + sizeof(MachInst));
     };
+
+    void
+    setNPC(Addr val)
+    {
+        npc(val);
+    }
 
     SimplePCState() {}
     SimplePCState(Addr val) { set(val); }

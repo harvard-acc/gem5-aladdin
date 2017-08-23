@@ -38,6 +38,7 @@
 #include "arch/x86/regs/misc.hh"
 #include "arch/x86/registers.hh"
 #include "base/types.hh"
+#include "cpu/reg_class.hh"
 #include "sim/sim_object.hh"
 
 class Checkpoint;
@@ -69,6 +70,24 @@ namespace X86ISA
         void setMiscRegNoEffect(int miscReg, MiscReg val);
         void setMiscReg(int miscReg, MiscReg val, ThreadContext *tc);
 
+        RegId
+        flattenRegId(const RegId& regId) const
+        {
+            switch (regId.classValue()) {
+              case IntRegClass:
+                return RegId(IntRegClass, flattenIntIndex(regId.index()));
+              case FloatRegClass:
+                return RegId(FloatRegClass, flattenFloatIndex(regId.index()));
+              case CCRegClass:
+                return RegId(CCRegClass, flattenCCIndex(regId.index()));
+              case MiscRegClass:
+                return RegId(MiscRegClass, flattenMiscIndex(regId.index()));
+              default:
+                break;
+            }
+            return regId;
+        }
+
         int
         flattenIntIndex(int reg) const
         {
@@ -82,6 +101,18 @@ namespace X86ISA
                 reg = FLOATREG_STACK(reg - NUM_FLOATREGS,
                                      regVal[MISCREG_X87_TOP]);
             }
+            return reg;
+        }
+
+        int
+        flattenVecIndex(int reg) const
+        {
+            return reg;
+        }
+
+        int
+        flattenVecElemIndex(int reg) const
+        {
             return reg;
         }
 

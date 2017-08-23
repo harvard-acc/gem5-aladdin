@@ -38,6 +38,7 @@
 #
 # Authors: Nathan Binkert
 
+from m5.defines import buildEnv
 from m5.SimObject import SimObject
 from m5.params import *
 from m5.proxy import *
@@ -95,12 +96,26 @@ class EtherSwitch(EtherObject):
     delay_var = Param.Latency('0ns', "packet transmit delay variability")
     time_to_live = Param.Latency('10ms', "time to live of MAC address maping")
 
-class EtherTap(EtherObject):
-    type = 'EtherTap'
+class EtherTapBase(EtherObject):
+    type = 'EtherTapBase'
+    abstract = True
     cxx_header = "dev/net/ethertap.hh"
     bufsz = Param.Int(10000, "tap buffer size")
     dump = Param.EtherDump(NULL, "dump object")
-    port = Param.UInt16(3500, "tap port")
+    tap = SlavePort("Ethernet interface to connect to gem5's network")
+
+if buildEnv['USE_TUNTAP']:
+    class EtherTap(EtherTapBase):
+        type = 'EtherTap'
+        cxx_header = "dev/net/ethertap.hh"
+        tun_clone_device = Param.String('/dev/net/tun',
+                                        "Path to the tun clone device node")
+        tap_device_name = Param.String('gem5-tap', "Tap device name")
+
+class EtherTapStub(EtherTapBase):
+    type = 'EtherTapStub'
+    cxx_header = "dev/net/ethertap.hh"
+    port = Param.UInt16(3500, "Port helper should send packets to")
 
 class EtherDump(SimObject):
     type = 'EtherDump'

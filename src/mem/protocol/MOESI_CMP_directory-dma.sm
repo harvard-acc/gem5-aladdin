@@ -77,6 +77,8 @@ machine(MachineType:DMA, "DMA Controller")
   Tick clockEdge();
   void set_tbe(TBE b);
   void unset_tbe();
+  void wakeUpAllBuffers();
+  MachineID mapAddressToMachine(Addr addr, MachineType mtype);
 
   State getState(TBE tbe, Addr addr) {
     return cur_state;
@@ -160,7 +162,7 @@ machine(MachineType:DMA, "DMA Controller")
         out_msg.Type := CoherenceRequestType:DMA_READ;
         out_msg.DataBlk := in_msg.DataBlk;
         out_msg.Len := in_msg.Len;
-        out_msg.Destination.add(map_Address_to_Directory(address));
+        out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         out_msg.Requestor := machineID;
         out_msg.RequestorMachine := MachineType:DMA;
         out_msg.MessageSize := MessageSizeType:Writeback_Control;
@@ -175,7 +177,7 @@ machine(MachineType:DMA, "DMA Controller")
           out_msg.Type := CoherenceRequestType:DMA_WRITE;
           out_msg.DataBlk := in_msg.DataBlk;
           out_msg.Len := in_msg.Len;
-          out_msg.Destination.add(map_Address_to_Directory(address));
+          out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
           out_msg.Requestor := machineID;
           out_msg.RequestorMachine := MachineType:DMA;
           out_msg.MessageSize := MessageSizeType:Writeback_Control;
@@ -208,7 +210,7 @@ machine(MachineType:DMA, "DMA Controller")
     enqueue(respToDirectory_out, ResponseMsg, response_latency) {
       out_msg.addr := address;
       out_msg.Type := CoherenceResponseType:UNBLOCK_EXCLUSIVE;
-      out_msg.Destination.add(map_Address_to_Directory(address));
+      out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
       out_msg.Sender := machineID;
       out_msg.SenderMachine := MachineType:DMA;
       out_msg.MessageSize := MessageSizeType:Writeback_Control;
@@ -249,6 +251,13 @@ machine(MachineType:DMA, "DMA Controller")
     unset_tbe();
   }
 
+  action(zz_stallAndWaitRequestQueue, "zz", desc="...") {
+    stall_and_wait(dmaRequestQueue_in, address);
+  }
+
+  action(wkad_wakeUpAllDependents, "wkad", desc="wake-up all dependents") {
+    wakeUpAllBuffers();
+  }
 
   transition(READY, ReadRequest, BUSY_RD) {
     s_sendReadRequest;
@@ -269,6 +278,7 @@ machine(MachineType:DMA, "DMA Controller")
     //u_updateAckCount;
     //o_checkForCompletion;
     p_popResponseQueue;
+    wkad_wakeUpAllDependents;
   }
 
   transition(BUSY_RD, All_Acks, READY) {
@@ -276,6 +286,7 @@ machine(MachineType:DMA, "DMA Controller")
     //u_sendExclusiveUnblockToDir;
     w_deallocateTBE;
     p_popTriggerQueue;
+    wkad_wakeUpAllDependents;
   }
 
   transition(READY, WriteRequest, BUSY_WR) {
@@ -301,5 +312,10 @@ machine(MachineType:DMA, "DMA Controller")
     u_sendExclusiveUnblockToDir;
     w_deallocateTBE;
     p_popTriggerQueue;
+    wkad_wakeUpAllDependents;
+  }
+
+  transition({BUSY_RD,BUSY_WR}, {ReadRequest,WriteRequest}) {
+    zz_stallAndWaitRequestQueue;
   }
 }

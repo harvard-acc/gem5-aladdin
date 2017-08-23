@@ -1,4 +1,4 @@
-# Copyright (c) 2016 ARM Limited
+# Copyright (c) 2016-2017 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -43,6 +43,8 @@ from m5.objects import *
 m5.util.addToPath('../../')
 from common.Caches import *
 from common import CpuConfig
+
+have_kvm = "ArmV8KvmCPU" in CpuConfig.cpu_names()
 
 class L1I(L1_ICache):
     tag_latency = 1
@@ -164,9 +166,17 @@ class CpuCluster(SubSystem):
 
 class AtomicCluster(CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock, cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("atomic"), None, None, None, None ]
+        cpu_config = [ CpuConfig.get("AtomicSimpleCPU"), None, None, None, None ]
         super(AtomicCluster, self).__init__(system, num_cpus, cpu_clock,
                                             cpu_voltage, *cpu_config)
+    def addL1(self):
+        pass
+
+class KvmCluster(CpuCluster):
+    def __init__(self, system, num_cpus, cpu_clock, cpu_voltage="1.0V"):
+        cpu_config = [ CpuConfig.get("ArmV8KvmCPU"), None, None, None, None ]
+        super(KvmCluster, self).__init__(system, num_cpus, cpu_clock,
+                                         cpu_voltage, *cpu_config)
     def addL1(self):
         pass
 
@@ -199,13 +209,13 @@ class SimpleSystem(LinuxArmSystem):
         mem_range = self.realview._mem_regions[0]
         mem_range_size = long(mem_range[1]) - long(mem_range[0])
         assert mem_range_size >= long(Addr(mem_size))
-        self._mem_range = AddrRange(start=mem_range[0], size=mem_size)
+        self.mem_ranges = [ AddrRange(start=mem_range[0], size=mem_size) ]
         self._caches = caches
         if self._caches:
-            self.iocache = IOCache(addr_ranges=[self._mem_range])
+            self.iocache = IOCache(addr_ranges=[self.mem_ranges[0]])
         else:
             self.dmabridge = Bridge(delay='50ns',
-                                    ranges=[self._mem_range])
+                                    ranges=[self.mem_ranges[0]])
 
         self._pci_devices = 0
         self._clusters = []

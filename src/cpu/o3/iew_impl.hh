@@ -1433,8 +1433,9 @@ DefaultIEW<Impl>::writebackInsts()
 
             for (int i = 0; i < inst->numDestRegs(); i++) {
                 //mark as Ready
-                DPRINTF(IEW,"Setting Destination Register %i\n",
-                        inst->renamedDestRegIdx(i));
+                DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
+                        inst->renamedDestRegIdx(i)->index(),
+                        inst->renamedDestRegIdx(i)->className());
                 scoreboard->setReg(inst->renamedDestRegIdx(i));
             }
 

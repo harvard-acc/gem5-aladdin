@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 ARM Limited
+ * Copyright (c) 2013-2014, 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -46,7 +46,7 @@ Ticked::Ticked(ClockedObject &object_,
     Stats::Scalar *imported_num_cycles,
     Event::Priority priority) :
     object(object_),
-    event(*this, priority),
+    event([this]{ processClockEvent(); }, name(), false, priority),
     running(false),
     lastStopped(0),
     /* Allocate numCycles if an external stat wasn't passed in */
@@ -56,11 +56,21 @@ Ticked::Ticked(ClockedObject &object_,
 { }
 
 void
+Ticked::processClockEvent() {
+    ++tickCycles;
+    ++numCycles;
+    countCycles(Cycles(1));
+    evaluate();
+    if (running)
+        object.schedule(event, object.clockEdge(Cycles(1)));
+}
+
+void
 Ticked::regStats()
 {
     if (numCyclesLocal) {
         numCycles
-            .name(object.name() + ".tickCycles")
+            .name(object.name() + ".totalTickCycles")
             .desc("Number of cycles that the object ticked or was stopped");
     }
 
@@ -98,7 +108,7 @@ Ticked::unserialize(CheckpointIn &cp)
     lastStopped = Cycles(lastStoppedUint);
 }
 
-TickedObject::TickedObject(TickedObjectParams *params,
+TickedObject::TickedObject(const TickedObjectParams *params,
     Event::Priority priority) :
     ClockedObject(params),
     /* Make numCycles in Ticked */
@@ -109,6 +119,7 @@ void
 TickedObject::regStats()
 {
     Ticked::regStats();
+    ClockedObject::regStats();
 }
 
 void

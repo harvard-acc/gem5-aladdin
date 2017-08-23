@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2014 ARM Limited
+ * Copyright (c) 2011-2012, 2014, 2016, 2017 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -46,6 +46,7 @@
 
 #include "cpu/o3/cpu.hh"
 
+#include "arch/generic/traits.hh"
 #include "arch/kernel_stats.hh"
 #include "config/the_isa.hh"
 #include "cpu/activity.hh"
@@ -136,31 +137,12 @@ FullO3CPU<Impl>::DcachePort::recvReqRetry()
 }
 
 template <class Impl>
-FullO3CPU<Impl>::TickEvent::TickEvent(FullO3CPU<Impl> *c)
-    : Event(CPU_Tick_Pri), cpu(c)
-{
-}
-
-template <class Impl>
-void
-FullO3CPU<Impl>::TickEvent::process()
-{
-    cpu->tick();
-}
-
-template <class Impl>
-const char *
-FullO3CPU<Impl>::TickEvent::description() const
-{
-    return "FullO3CPU tick";
-}
-
-template <class Impl>
 FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
     : BaseO3CPU(params),
       itb(params->itb),
       dtb(params->dtb),
-      tickEvent(this),
+      tickEvent([this]{ tick(); }, "FullO3CPU tick",
+                false, Event::CPU_Tick_Pri),
 #ifndef NDEBUG
       instcount(0),
 #endif
@@ -171,17 +153,21 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
       iew(this, params),
       commit(this, params),
 
+      /* It is mandatory that all SMT threads use the same renaming mode as
+       * they are sharing registers and rename */
+      vecMode(initRenameMode<TheISA::ISA>::mode(params->isa[0])),
       regFile(params->numPhysIntRegs,
               params->numPhysFloatRegs,
-              params->numPhysCCRegs),
+              params->numPhysVecRegs,
+              params->numPhysCCRegs,
+              vecMode),
 
       freeList(name() + ".freelist", &regFile),
 
       rob(this, params),
 
       scoreboard(name() + ".scoreboard",
-                 regFile.totalNumPhysRegs(), TheISA::NumMiscRegs,
-                 TheISA::ZeroReg, TheISA::ZeroReg),
+                 regFile.totalNumPhysRegs()),
 
       isa(numThreads, NULL),
 
@@ -271,6 +257,7 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
     //Make Sure That this a Valid Architeture
     assert(params->numPhysIntRegs   >= numThreads * TheISA::NumIntRegs);
     assert(params->numPhysFloatRegs >= numThreads * TheISA::NumFloatRegs);
+    assert(params->numPhysVecRegs >= numThreads * TheISA::NumVecRegs);
     assert(params->numPhysCCRegs >= numThreads * TheISA::NumCCRegs);
 
     rename.setScoreboard(&scoreboard);
@@ -279,6 +266,7 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
     // Setup the rename map for whichever stages need it.
     for (ThreadID tid = 0; tid < numThreads; tid++) {
         isa[tid] = params->isa[tid];
+        assert(initRenameMode<TheISA::ISA>::equals(isa[tid], isa[0]));
 
         // Only Alpha has an FP zero register, so for other ISAs we
         // use an invalid FP register index to avoid special treatment
@@ -288,10 +276,11 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
             (THE_ISA == ALPHA_ISA) ? TheISA::ZeroReg : invalidFPReg;
 
         commitRenameMap[tid].init(&regFile, TheISA::ZeroReg, fpZeroReg,
-                                  &freeList);
+                                  &freeList,
+                                  vecMode);
 
         renameMap[tid].init(&regFile, TheISA::ZeroReg, fpZeroReg,
-                            &freeList);
+                            &freeList, vecMode);
     }
 
     // Initialize rename map to assign physical registers to the
@@ -300,21 +289,46 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
         for (RegIndex ridx = 0; ridx < TheISA::NumIntRegs; ++ridx) {
             // Note that we can't use the rename() method because we don't
             // want special treatment for the zero register at this point
-            PhysRegIndex phys_reg = freeList.getIntReg();
-            renameMap[tid].setIntEntry(ridx, phys_reg);
-            commitRenameMap[tid].setIntEntry(ridx, phys_reg);
+            PhysRegIdPtr phys_reg = freeList.getIntReg();
+            renameMap[tid].setEntry(RegId(IntRegClass, ridx), phys_reg);
+            commitRenameMap[tid].setEntry(RegId(IntRegClass, ridx), phys_reg);
         }
 
         for (RegIndex ridx = 0; ridx < TheISA::NumFloatRegs; ++ridx) {
-            PhysRegIndex phys_reg = freeList.getFloatReg();
-            renameMap[tid].setFloatEntry(ridx, phys_reg);
-            commitRenameMap[tid].setFloatEntry(ridx, phys_reg);
+            PhysRegIdPtr phys_reg = freeList.getFloatReg();
+            renameMap[tid].setEntry(RegId(FloatRegClass, ridx), phys_reg);
+            commitRenameMap[tid].setEntry(
+                    RegId(FloatRegClass, ridx), phys_reg);
+        }
+
+        /* Here we need two 'interfaces' the 'whole register' and the
+         * 'register element'. At any point only one of them will be
+         * active. */
+        if (vecMode == Enums::Full) {
+            /* Initialize the full-vector interface */
+            for (RegIndex ridx = 0; ridx < TheISA::NumVecRegs; ++ridx) {
+                RegId rid = RegId(VecRegClass, ridx);
+                PhysRegIdPtr phys_reg = freeList.getVecReg();
+                renameMap[tid].setEntry(rid, phys_reg);
+                commitRenameMap[tid].setEntry(rid, phys_reg);
+            }
+        } else {
+            /* Initialize the vector-element interface */
+            for (RegIndex ridx = 0; ridx < TheISA::NumVecRegs; ++ridx) {
+                for (ElemIndex ldx = 0; ldx < TheISA::NumVecElemPerVecReg;
+                        ++ldx) {
+                    RegId lrid = RegId(VecElemClass, ridx, ldx);
+                    PhysRegIdPtr phys_elem = freeList.getVecElem();
+                    renameMap[tid].setEntry(lrid, phys_elem);
+                    commitRenameMap[tid].setEntry(lrid, phys_elem);
+                }
+            }
         }
 
         for (RegIndex ridx = 0; ridx < TheISA::NumCCRegs; ++ridx) {
-            PhysRegIndex phys_reg = freeList.getCCReg();
-            renameMap[tid].setCCEntry(ridx, phys_reg);
-            commitRenameMap[tid].setCCEntry(ridx, phys_reg);
+            PhysRegIdPtr phys_reg = freeList.getCCReg();
+            renameMap[tid].setEntry(RegId(CCRegClass, ridx), phys_reg);
+            commitRenameMap[tid].setEntry(RegId(CCRegClass, ridx), phys_reg);
         }
     }
 
@@ -513,6 +527,16 @@ FullO3CPU<Impl>::regStats()
         .name(name() + ".fp_regfile_writes")
         .desc("number of floating regfile writes")
         .prereq(fpRegfileWrites);
+
+    vecRegfileReads
+        .name(name() + ".vec_regfile_reads")
+        .desc("number of vector regfile reads")
+        .prereq(vecRegfileReads);
+
+    vecRegfileWrites
+        .name(name() + ".vec_regfile_writes")
+        .desc("number of vector regfile writes")
+        .prereq(vecRegfileWrites);
 
     ccRegfileReads
         .name(name() + ".cc_regfile_reads")
@@ -788,29 +812,27 @@ FullO3CPU<Impl>::insertThread(ThreadID tid)
         src_tc = tcBase(tid);
 
     //Bind Int Regs to Rename Map
-    for (int ireg = 0; ireg < TheISA::NumIntRegs; ireg++) {
-        PhysRegIndex phys_reg = freeList.getIntReg();
 
-        renameMap[tid].setEntry(ireg,phys_reg);
+    for (RegId reg_id(IntRegClass, 0); reg_id.index() < TheISA::NumIntRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = freeList.getIntReg();
+        renameMap[tid].setEntry(reg_id, phys_reg);
         scoreboard.setReg(phys_reg);
     }
 
     //Bind Float Regs to Rename Map
-    int max_reg = TheISA::FP_Reg_Base + TheISA::NumFloatRegs;
-    for (int freg = TheISA::FP_Reg_Base; freg < max_reg; freg++) {
-        PhysRegIndex phys_reg = freeList.getFloatReg();
-
-        renameMap[tid].setEntry(freg,phys_reg);
+    for (RegId reg_id(FloatRegClass, 0); reg_id.index() < TheISA::NumFloatRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = freeList.getFloatReg();
+        renameMap[tid].setEntry(reg_id, phys_reg);
         scoreboard.setReg(phys_reg);
     }
 
     //Bind condition-code Regs to Rename Map
-    max_reg = TheISA::CC_Reg_Base + TheISA::NumCCRegs;
-    for (int creg = TheISA::CC_Reg_Base;
-         creg < max_reg; creg++) {
-        PhysRegIndex phys_reg = freeList.getCCReg();
-
-        renameMap[tid].setEntry(creg,phys_reg);
+    for (RegId reg_id(CCRegClass, 0); reg_id.index() < TheISA::NumCCRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = freeList.getCCReg();
+        renameMap[tid].setEntry(reg_id, phys_reg);
         scoreboard.setReg(phys_reg);
     }
 
@@ -845,24 +867,25 @@ FullO3CPU<Impl>::removeThread(ThreadID tid)
     // in SMT workloads.
 
     // Unbind Int Regs from Rename Map
-    for (int ireg = 0; ireg < TheISA::NumIntRegs; ireg++) {
-        PhysRegIndex phys_reg = renameMap[tid].lookup(ireg);
+    for (RegId reg_id(IntRegClass, 0); reg_id.index() < TheISA::NumIntRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = renameMap[tid].lookup(reg_id);
         scoreboard.unsetReg(phys_reg);
         freeList.addReg(phys_reg);
     }
 
     // Unbind Float Regs from Rename Map
-    int max_reg = TheISA::FP_Reg_Base + TheISA::NumFloatRegs;
-    for (int freg = TheISA::FP_Reg_Base; freg < max_reg; freg++) {
-        PhysRegIndex phys_reg = renameMap[tid].lookup(freg);
+    for (RegId reg_id(FloatRegClass, 0); reg_id.index() < TheISA::NumFloatRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = renameMap[tid].lookup(reg_id);
         scoreboard.unsetReg(phys_reg);
         freeList.addReg(phys_reg);
     }
 
     // Unbind condition-code Regs from Rename Map
-    max_reg = TheISA::CC_Reg_Base + TheISA::NumCCRegs;
-    for (int creg = TheISA::CC_Reg_Base; creg < max_reg; creg++) {
-        PhysRegIndex phys_reg = renameMap[tid].lookup(creg);
+    for (RegId reg_id(CCRegClass, 0); reg_id.index() < TheISA::NumCCRegs;
+         reg_id.index()++) {
+        PhysRegIdPtr phys_reg = renameMap[tid].lookup(reg_id);
         scoreboard.unsetReg(phys_reg);
         freeList.addReg(phys_reg);
     }
@@ -1025,6 +1048,17 @@ FullO3CPU<Impl>::drain()
     // Wake the CPU and record activity so everything can drain out if
     // the CPU was not able to immediately drain.
     if (!isDrained())  {
+        // If a thread is suspended, wake it up so it can be drained
+        for (auto t : threadContexts) {
+            if (t->status() == ThreadContext::Suspended){
+                DPRINTF(Drain, "Currently suspended so activate %i \n",
+                        t->threadId());
+                t->activate();
+                // As the thread is now active, change the power state as well
+                activateContext(t->threadId());
+            }
+        }
+
         wakeCPU();
         activityRec.activity();
 
@@ -1235,66 +1269,108 @@ FullO3CPU<Impl>::setMiscReg(int misc_reg,
 
 template <class Impl>
 uint64_t
-FullO3CPU<Impl>::readIntReg(int reg_idx)
+FullO3CPU<Impl>::readIntReg(PhysRegIdPtr phys_reg)
 {
     intRegfileReads++;
-    return regFile.readIntReg(reg_idx);
+    return regFile.readIntReg(phys_reg);
 }
 
 template <class Impl>
 FloatReg
-FullO3CPU<Impl>::readFloatReg(int reg_idx)
+FullO3CPU<Impl>::readFloatReg(PhysRegIdPtr phys_reg)
 {
     fpRegfileReads++;
-    return regFile.readFloatReg(reg_idx);
+    return regFile.readFloatReg(phys_reg);
 }
 
 template <class Impl>
 FloatRegBits
-FullO3CPU<Impl>::readFloatRegBits(int reg_idx)
+FullO3CPU<Impl>::readFloatRegBits(PhysRegIdPtr phys_reg)
 {
     fpRegfileReads++;
-    return regFile.readFloatRegBits(reg_idx);
+    return regFile.readFloatRegBits(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::readVecReg(PhysRegIdPtr phys_reg) const
+        -> const VecRegContainer&
+{
+    vecRegfileReads++;
+    return regFile.readVecReg(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::getWritableVecReg(PhysRegIdPtr phys_reg)
+        -> VecRegContainer&
+{
+    vecRegfileWrites++;
+    return regFile.getWritableVecReg(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::readVecElem(PhysRegIdPtr phys_reg) const -> const VecElem&
+{
+    vecRegfileReads++;
+    return regFile.readVecElem(phys_reg);
 }
 
 template <class Impl>
 CCReg
-FullO3CPU<Impl>::readCCReg(int reg_idx)
+FullO3CPU<Impl>::readCCReg(PhysRegIdPtr phys_reg)
 {
     ccRegfileReads++;
-    return regFile.readCCReg(reg_idx);
+    return regFile.readCCReg(phys_reg);
 }
 
 template <class Impl>
 void
-FullO3CPU<Impl>::setIntReg(int reg_idx, uint64_t val)
+FullO3CPU<Impl>::setIntReg(PhysRegIdPtr phys_reg, uint64_t val)
 {
     intRegfileWrites++;
-    regFile.setIntReg(reg_idx, val);
+    regFile.setIntReg(phys_reg, val);
 }
 
 template <class Impl>
 void
-FullO3CPU<Impl>::setFloatReg(int reg_idx, FloatReg val)
+FullO3CPU<Impl>::setFloatReg(PhysRegIdPtr phys_reg, FloatReg val)
 {
     fpRegfileWrites++;
-    regFile.setFloatReg(reg_idx, val);
+    regFile.setFloatReg(phys_reg, val);
 }
 
 template <class Impl>
 void
-FullO3CPU<Impl>::setFloatRegBits(int reg_idx, FloatRegBits val)
+FullO3CPU<Impl>::setFloatRegBits(PhysRegIdPtr phys_reg, FloatRegBits val)
 {
     fpRegfileWrites++;
-    regFile.setFloatRegBits(reg_idx, val);
+    regFile.setFloatRegBits(phys_reg, val);
 }
 
 template <class Impl>
 void
-FullO3CPU<Impl>::setCCReg(int reg_idx, CCReg val)
+FullO3CPU<Impl>::setVecReg(PhysRegIdPtr phys_reg, const VecRegContainer& val)
+{
+    vecRegfileWrites++;
+    regFile.setVecReg(phys_reg, val);
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::setVecElem(PhysRegIdPtr phys_reg, const VecElem& val)
+{
+    vecRegfileWrites++;
+    regFile.setVecElem(phys_reg, val);
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::setCCReg(PhysRegIdPtr phys_reg, CCReg val)
 {
     ccRegfileWrites++;
-    regFile.setCCReg(reg_idx, val);
+    regFile.setCCReg(phys_reg, val);
 }
 
 template <class Impl>
@@ -1302,7 +1378,8 @@ uint64_t
 FullO3CPU<Impl>::readArchIntReg(int reg_idx, ThreadID tid)
 {
     intRegfileReads++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupInt(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+            RegId(IntRegClass, reg_idx));
 
     return regFile.readIntReg(phys_reg);
 }
@@ -1312,7 +1389,8 @@ float
 FullO3CPU<Impl>::readArchFloatReg(int reg_idx, ThreadID tid)
 {
     fpRegfileReads++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupFloat(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+        RegId(FloatRegClass, reg_idx));
 
     return regFile.readFloatReg(phys_reg);
 }
@@ -1322,9 +1400,40 @@ uint64_t
 FullO3CPU<Impl>::readArchFloatRegInt(int reg_idx, ThreadID tid)
 {
     fpRegfileReads++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupFloat(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+        RegId(FloatRegClass, reg_idx));
 
     return regFile.readFloatRegBits(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::readArchVecReg(int reg_idx, ThreadID tid) const
+        -> const VecRegContainer&
+{
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                RegId(VecRegClass, reg_idx));
+    return readVecReg(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::getWritableArchVecReg(int reg_idx, ThreadID tid)
+        -> VecRegContainer&
+{
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                RegId(VecRegClass, reg_idx));
+    return getWritableVecReg(phys_reg);
+}
+
+template <class Impl>
+auto
+FullO3CPU<Impl>::readArchVecElem(const RegIndex& reg_idx, const ElemIndex& ldx,
+                                 ThreadID tid) const -> const VecElem&
+{
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                                RegId(VecRegClass, reg_idx, ldx));
+    return readVecElem(phys_reg);
 }
 
 template <class Impl>
@@ -1332,7 +1441,8 @@ CCReg
 FullO3CPU<Impl>::readArchCCReg(int reg_idx, ThreadID tid)
 {
     ccRegfileReads++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupCC(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+        RegId(CCRegClass, reg_idx));
 
     return regFile.readCCReg(phys_reg);
 }
@@ -1342,7 +1452,8 @@ void
 FullO3CPU<Impl>::setArchIntReg(int reg_idx, uint64_t val, ThreadID tid)
 {
     intRegfileWrites++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupInt(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+            RegId(IntRegClass, reg_idx));
 
     regFile.setIntReg(phys_reg, val);
 }
@@ -1352,7 +1463,8 @@ void
 FullO3CPU<Impl>::setArchFloatReg(int reg_idx, float val, ThreadID tid)
 {
     fpRegfileWrites++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupFloat(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+            RegId(FloatRegClass, reg_idx));
 
     regFile.setFloatReg(phys_reg, val);
 }
@@ -1362,9 +1474,30 @@ void
 FullO3CPU<Impl>::setArchFloatRegInt(int reg_idx, uint64_t val, ThreadID tid)
 {
     fpRegfileWrites++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupFloat(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+            RegId(FloatRegClass, reg_idx));
 
     regFile.setFloatRegBits(phys_reg, val);
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::setArchVecReg(int reg_idx, const VecRegContainer& val,
+                               ThreadID tid)
+{
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                RegId(VecRegClass, reg_idx));
+    setVecReg(phys_reg, val);
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::setArchVecElem(const RegIndex& reg_idx, const ElemIndex& ldx,
+                                const VecElem& val, ThreadID tid)
+{
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+                RegId(VecRegClass, reg_idx, ldx));
+    setVecElem(phys_reg, val);
 }
 
 template <class Impl>
@@ -1372,7 +1505,8 @@ void
 FullO3CPU<Impl>::setArchCCReg(int reg_idx, CCReg val, ThreadID tid)
 {
     ccRegfileWrites++;
-    PhysRegIndex phys_reg = commitRenameMap[tid].lookupCC(reg_idx);
+    PhysRegIdPtr phys_reg = commitRenameMap[tid].lookup(
+            RegId(CCRegClass, reg_idx));
 
     regFile.setCCReg(phys_reg, val);
 }

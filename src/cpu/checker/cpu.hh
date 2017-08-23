@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 ARM Limited
+ * Copyright (c) 2011, 2016 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -53,6 +53,7 @@
 #include "cpu/base.hh"
 #include "cpu/base_dyn_inst.hh"
 #include "cpu/exec_context.hh"
+#include "cpu/inst_res.hh"
 #include "cpu/pc_event.hh"
 #include "cpu/simple_thread.hh"
 #include "cpu/static_inst.hh"
@@ -95,6 +96,7 @@ class CheckerCPU : public BaseCPU, public ExecContext
     typedef TheISA::FloatReg FloatReg;
     typedef TheISA::FloatRegBits FloatRegBits;
     typedef TheISA::MiscReg MiscReg;
+    using VecRegContainer = TheISA::VecRegContainer;
 
     /** id attached to all issued requests */
     MasterID masterId;
@@ -143,18 +145,9 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     Addr dbg_vtophys(Addr addr);
 
-    union Result {
-        uint64_t integer;
-        double dbl;
-        void set(uint64_t i) { integer = i; }
-        void set(double d) { dbl = d; }
-        void get(uint64_t& i) { i = integer; }
-        void get(double& d) { d = dbl; }
-    };
-
     // ISAs like ARM can have multiple destination registers to check,
     // keep them all in a std::queue
-    std::queue<Result> result;
+    std::queue<InstResult> result;
 
     // Pointer to the one memory request.
     RequestPtr memReq;
@@ -213,64 +206,210 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     IntReg readIntRegOperand(const StaticInst *si, int idx) override
     {
-        return thread->readIntReg(si->srcRegIdx(idx));
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isIntReg());
+        return thread->readIntReg(reg.index());
     }
 
     FloatReg readFloatRegOperand(const StaticInst *si, int idx) override
     {
-        int reg_idx = si->srcRegIdx(idx) - TheISA::FP_Reg_Base;
-        return thread->readFloatReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isFloatReg());
+        return thread->readFloatReg(reg.index());
     }
 
     FloatRegBits readFloatRegOperandBits(const StaticInst *si,
                                          int idx) override
     {
-        int reg_idx = si->srcRegIdx(idx) - TheISA::FP_Reg_Base;
-        return thread->readFloatRegBits(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isFloatReg());
+        return thread->readFloatRegBits(reg.index());
+    }
+
+    /**
+     * Read source vector register operand.
+     */
+    const VecRegContainer& readVecRegOperand(const StaticInst *si,
+                                             int idx) const override
+    {
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVecReg(reg);
+    }
+
+    /**
+     * Read destination vector register operand for modification.
+     */
+    VecRegContainer& getWritableVecRegOperand(const StaticInst *si,
+                                             int idx) override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->getWritableVecReg(reg);
+    }
+
+    /** Vector Register Lane Interfaces. */
+    /** @{ */
+    /** Reads source vector 8bit operand. */
+    virtual ConstVecLane8
+    readVec8BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVec8BitLaneReg(reg);
+    }
+
+    /** Reads source vector 16bit operand. */
+    virtual ConstVecLane16
+    readVec16BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVec16BitLaneReg(reg);
+    }
+
+    /** Reads source vector 32bit operand. */
+    virtual ConstVecLane32
+    readVec32BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVec32BitLaneReg(reg);
+    }
+
+    /** Reads source vector 64bit operand. */
+    virtual ConstVecLane64
+    readVec64BitLaneOperand(const StaticInst *si, int idx) const
+                            override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->readVec64BitLaneReg(reg);
+    }
+
+    /** Write a lane of the destination vector operand. */
+    template <typename LD>
+    void
+    setVecLaneOperandT(const StaticInst *si, int idx, const LD& val)
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        return thread->setVecLane(reg, val);
+    }
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::Byte>& val) override
+    {
+        setVecLaneOperandT(si, idx, val);
+    }
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::TwoByte>& val) override
+    {
+        setVecLaneOperandT(si, idx, val);
+    }
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::FourByte>& val) override
+    {
+        setVecLaneOperandT(si, idx, val);
+    }
+    virtual void
+    setVecLaneOperand(const StaticInst *si, int idx,
+            const LaneData<LaneSize::EightByte>& val) override
+    {
+        setVecLaneOperandT(si, idx, val);
+    }
+    /** @} */
+
+    VecElem readVecElemOperand(const StaticInst *si, int idx) const override
+    {
+        const RegId& reg = si->srcRegIdx(idx);
+        return thread->readVecElem(reg);
     }
 
     CCReg readCCRegOperand(const StaticInst *si, int idx) override
     {
-        int reg_idx = si->srcRegIdx(idx) - TheISA::CC_Reg_Base;
-        return thread->readCCReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isCCReg());
+        return thread->readCCReg(reg.index());
     }
 
-    template <class T>
-    void setResult(T t)
+    template<typename T>
+    void setScalarResult(T&& t)
     {
-        Result instRes;
-        instRes.set(t);
-        result.push(instRes);
+        result.push(InstResult(std::forward<T>(t),
+                        InstResult::ResultType::Scalar));
+    }
+
+    template<typename T>
+    void setVecResult(T&& t)
+    {
+        result.push(InstResult(std::forward<T>(t),
+                        InstResult::ResultType::VecReg));
+    }
+
+    template<typename T>
+    void setVecElemResult(T&& t)
+    {
+        result.push(InstResult(std::forward<T>(t),
+                        InstResult::ResultType::VecElem));
     }
 
     void setIntRegOperand(const StaticInst *si, int idx,
                           IntReg val) override
     {
-        thread->setIntReg(si->destRegIdx(idx), val);
-        setResult<uint64_t>(val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isIntReg());
+        thread->setIntReg(reg.index(), val);
+        setScalarResult(val);
     }
 
     void setFloatRegOperand(const StaticInst *si, int idx,
                             FloatReg val) override
     {
-        int reg_idx = si->destRegIdx(idx) - TheISA::FP_Reg_Base;
-        thread->setFloatReg(reg_idx, val);
-        setResult<double>(val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isFloatReg());
+        thread->setFloatReg(reg.index(), val);
+        setScalarResult(val);
     }
 
     void setFloatRegOperandBits(const StaticInst *si, int idx,
                                 FloatRegBits val) override
     {
-        int reg_idx = si->destRegIdx(idx) - TheISA::FP_Reg_Base;
-        thread->setFloatRegBits(reg_idx, val);
-        setResult<uint64_t>(val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isFloatReg());
+        thread->setFloatRegBits(reg.index(), val);
+        setScalarResult(val);
     }
 
     void setCCRegOperand(const StaticInst *si, int idx, CCReg val) override
     {
-        int reg_idx = si->destRegIdx(idx) - TheISA::CC_Reg_Base;
-        thread->setCCReg(reg_idx, val);
-        setResult<uint64_t>(val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isCCReg());
+        thread->setCCReg(reg.index(), val);
+        setScalarResult((uint64_t)val);
+    }
+
+    void setVecRegOperand(const StaticInst *si, int idx,
+                                const VecRegContainer& val) override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecReg());
+        thread->setVecReg(reg, val);
+        setVecResult(val);
+    }
+
+    void setVecElemOperand(const StaticInst *si, int idx,
+                           const VecElem val) override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecElem());
+        thread->setVecElem(reg, val);
+        setVecElemResult(val);
     }
 
     bool readPredicate() override { return thread->readPredicate(); }
@@ -317,25 +456,28 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     MiscReg readMiscRegOperand(const StaticInst *si, int idx) override
     {
-        int reg_idx = si->srcRegIdx(idx) - TheISA::Misc_Reg_Base;
-        return thread->readMiscReg(reg_idx);
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isMiscReg());
+        return thread->readMiscReg(reg.index());
     }
 
     void setMiscRegOperand(const StaticInst *si, int idx,
                            const MiscReg &val) override
     {
-        int reg_idx = si->destRegIdx(idx) - TheISA::Misc_Reg_Base;
-        return this->setMiscReg(reg_idx, val);
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isMiscReg());
+        return this->setMiscReg(reg.index(), val);
     }
 
 #if THE_ISA == MIPS_ISA
-    MiscReg readRegOtherThread(int misc_reg, ThreadID tid) override
+    MiscReg readRegOtherThread(const RegId& misc_reg, ThreadID tid) override
     {
         panic("MIPS MT not defined for CheckerCPU.\n");
         return 0;
     }
 
-    void setRegOtherThread(int misc_reg, MiscReg val, ThreadID tid) override
+    void setRegOtherThread(const RegId& misc_reg, MiscReg val,
+                               ThreadID tid) override
     {
         panic("MIPS MT not defined for CheckerCPU.\n");
     }
@@ -409,7 +551,7 @@ class CheckerCPU : public BaseCPU, public ExecContext
     ThreadContext *tcBase() override { return tc; }
     SimpleThread *threadBase() { return thread; }
 
-    Result unverifiedResult;
+    InstResult unverifiedResult;
     Request *unverifiedReq;
     uint8_t *unverifiedMemData;
 
@@ -451,7 +593,8 @@ class Checker : public CheckerCPU
     void validateExecution(DynInstPtr &inst);
     void validateState();
 
-    void copyResult(DynInstPtr &inst, uint64_t mismatch_val, int start_idx);
+    void copyResult(DynInstPtr &inst, const InstResult& mismatch_val,
+                    int start_idx);
     void handlePendingInt();
 
   private:
