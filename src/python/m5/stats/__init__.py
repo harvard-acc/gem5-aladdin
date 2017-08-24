@@ -47,78 +47,10 @@ import _m5.stats
 from m5.objects import Root
 from m5.util import attrdict, fatal
 
-# Try and include SQLAlchemy. If this is successful we allow it to be used,
-# otherwise it is disabled.
-try:
-    from sqlalchemy import *
-    from sqlalchemy.orm import sessionmaker
-    import sql as m5sql
-    SQL_ENABLED = True
-except:
-    print "Failed to import sqlalchemy or m5.stats.sql. " \
-          "SQL will not be enabled."
-    SQL_ENABLED = False
-
 # Global variable to determine if statistics output is enabled
 STATS_OUTPUT_ENABLED = False
 
 outputList = []
-
-# Keep track of the number of stats dumps performed. Lets us keep
-# track of the data we write to the SQL database
-dump_count = 0
-
-class OutputSQL(object):
-    """ Class which outputs the stats to a database. """
-    def __init__(self, filename):
-        """ Create the database and add the tables used to store the stats. """
-        self.filename = filename
-        self.db = m5sql.create_database(self.filename)
-        Session = sessionmaker(bind = self.db)
-        m5sql.create_tables(self.db)
-        self.session = Session()
-
-    def visit(self, stat):
-        """ Write the stats to the database.
-
-        On the first dump we also write the information about the stats to the
-        database. This is only done once.
-        """
-        global dump_count
-
-        if dump_count == 0:
-            m5sql.add_stat_info(stat, self.session)
-
-        m5sql.store_stat_value(stat, self.session, dump_count)
-
-    def __call__(self, context):
-        global dump_count
-
-        # On the first dump write the information about the stats to the
-        # database.
-        if dump_count == 0:
-            for name,stat in context.iterate():
-                m5sql.add_stat_info(stat, self.session)
-
-        # Write the values to the database.
-        for name,stat in context.iterate():
-            m5sql.store_stat_value(stat, self.session, dump_count)
-
-        # Commit our changes to the database. All changes are commited once
-        # to allow SQLAlchemy to optimize the database accesses, resulting in
-        # faster stats dumps.
-        self.session.commit()
-
-    def valid(self):
-        """ Checks if the database file exists at the specified location. """
-        return os.path.exists(self.filename)
-
-    def begin(self, desc):
-        m5sql.store_dump_desc(self.session, desc, dump_count)
-
-    def end(self):
-        """ Commits all the data at once. """
-        self.session.commit()
 
 def initText(filename, desc=True):
     output = _m5.stats.initText(filename, desc)
@@ -228,21 +160,19 @@ def initSimStats():
     _m5.stats.initSimStats()
     _m5.stats.registerPythonStatsHandlers()
 
-def init_SQL(outputDirectory, filename):
+def initSQL(outputDirectory, filename):
     """ Add the stats database as an output and add it to outputList.
 
     Args:
       outputDirectory: The directlry to store the database.
       filename: The filename to which the stats are written.
     """
-    global SQL_ENABLED
-
     # Take the supplied filename and prepend the output directory.
     import os
     filename = os.path.join(outputDirectory, filename)
 
-    if SQL_ENABLED:
-        output = OutputSQL(filename)
+    output = _m5.stats.initOutputSQL(filename)
+    if output:
         outputList.append(output)
         global STATS_OUTPUT_ENABLED
         STATS_OUTPUT_ENABLED = True
@@ -322,8 +252,8 @@ def dump(stats_desc=""):
                 stat.visit(output)
             output.end()
 
-    global dump_count
-    dump_count = dump_count + 1
+    # global dump_count
+    # dump_count = dump_count + 1
 
 def reset():
     '''Reset all statistics to the base state'''

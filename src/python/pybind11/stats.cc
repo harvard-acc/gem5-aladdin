@@ -46,6 +46,7 @@
 
 #include "base/statistics.hh"
 #include "base/stats/text.hh"
+#include "base/stats/sql.hh"
 #include "sim/stat_control.hh"
 #include "sim/stat_register.hh"
 
@@ -77,6 +78,7 @@ pybind_init_stats(py::module &m_native)
     m
         .def("initSimStats", &Stats::initSimStats)
         .def("initText", &Stats::initText, py::return_value_policy::reference)
+        .def("initOutputSQL", &Stats::initOutputSQL, py::return_value_policy::reference)
         .def("registerPythonStatsHandlers",
              &Stats::registerPythonStatsHandlers)
         .def("schedStatEvent", &Stats::schedStatEvent)

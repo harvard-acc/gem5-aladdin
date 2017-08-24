@@ -344,7 +344,7 @@ def main(*args):
 
     # set stats options
     if options.stats_db_file:
-        stats.init_SQL(options.outdir, options.stats_db_file)
+        stats.initSQL(options.outdir, options.stats_db_file)
 
     if options.stats_file:
         stats.initText(options.stats_file)

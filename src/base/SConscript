@@ -70,6 +70,7 @@ Source('loader/raw_object.cc')
 Source('loader/symtab.cc')
 
 Source('stats/text.cc')
+Source('stats/sql.cc')
 
 DebugFlag('Annotate', "State machine annotation debugging")
 DebugFlag('AnnotateQ', "State machine annotation queue debugging")

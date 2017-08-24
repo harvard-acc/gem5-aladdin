@@ -247,7 +247,7 @@ main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
 #boost
 main.Append(CPPPATH=[use_env['BOOST_ROOT']])
-main.Append(LINKFLAGS='-lboost_graph')
+main.Append(LIBS=['boost_graph'])
 
 if GetOption('use_db'):
   main.Append(CPPPATH=[use_env['MYSQL_HOME']])
@@ -1144,6 +1144,10 @@ elif conf.CheckLibWithHeader('execinfo', 'execinfo.h', 'C',
     # NetBSD and FreeBSD need libexecinfo.
     backtrace_impls.append("glibc")
     main.Append(LIBS=['execinfo'])
+
+if conf.CheckLibWithHeader("sqlite3", "sqlite3.h", "C"):
+    main.Append(CPPFLAGS="-DENABLE_SQLITE_STATS_OUTPUT")
+    main.Append(LIBS=['sqlite3'])
 
 if backtrace_impls[-1] == "none":
     default_backtrace_impl = "none"
