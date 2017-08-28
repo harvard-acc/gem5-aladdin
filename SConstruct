@@ -190,9 +190,9 @@ AddLocalOption('--update-ref', dest='update_ref', action='store_true',
                help='Update test reference outputs')
 AddLocalOption('--verbose', dest='verbose', action='store_true',
                help='Print full tool command lines')
-AddLocalOption('--use_db', dest='use_db', action='store_true',
+AddLocalOption('--use-db', dest='use_db', action='store_true',
                help='Compile with support for writing to MySQL DB.')
-AddLocalOption('--debug_aladdin', dest='debug_aladdin', action='store_true',
+AddLocalOption('--debug-aladdin', dest='debug_aladdin', action='store_true',
                help='Compile with Aladdin debugging output.')
 AddLocalOption('--without-python', dest='without_python',
                action='store_true',
@@ -523,7 +523,8 @@ main['BUILDROOT'] = build_root
 
 Export('main')
 
-main.SConsignFile(joinpath(build_root, "sconsign"))
+# Put the sconsign DB in its own folder so we can use Travis to cache it.
+main.SConsignFile(joinpath(build_root, "sconsign", "sconsign"))
 
 # Default duplicate option is to use hard links, but this messes up
 # when you use emacs to edit a file in the target dir, as emacs moves
