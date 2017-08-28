@@ -23,6 +23,18 @@ International Symposium on Microarchitecture (MICRO), June 2016.
 
 ## Notices ##
 
+#### August 28th, 2017 ####
+
+All commits from gem5 upstream as of 8/17/17 have been merged into
+gem5-aladdin. Notable changes:
+
+* SWIG has been replaced by PyBind11, so SWIG is no longer a dependency.
+  PyBind11 comes packaged with gem5.
+* There is a new SQL stats dump implementation. The previous version was
+  written in Python, but is no longer compatible with PyBind11. To use the new
+  implementation, you must install the SQLite3 development headers and
+  libraries (in Ubuntu: `sudo apt install libsqlite3-dev`).
+
 #### June 3rd, 2017 ####
 
 This branch has been renamed from `devel` to `master` and is now the default
@@ -61,13 +73,13 @@ please see http://www.gem5.org/Documentation and
 http://www.gem5.org/Tutorials.
 
 To build gem5, you will need the following software: g++ or clang,
-Python (gem5 links in the Python interpreter), SCons, SWIG, zlib, m4,
+Python (gem5 links in the Python interpreter), SCons, ~~SWIG~~, zlib, m4,
 and lastly protobuf if you want trace capture and playback
 support. Please see http://www.gem5.org/Dependencies for more details
 concerning the minimum versions of the aforementioned tools.
 
 If you want gem5 to dump stats in SQLite databases for easy access, you
-will also need the `sqlalchemy` Python module.
+will also need to install SQLite3 development headers and libraries.
 
 ### Aladdin dependencies ####
 

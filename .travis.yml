@@ -4,11 +4,11 @@ dist: trusty
 before_install:
   - sudo apt-get update -qq
   # These are gem5 dependencies.
-  - sudo apt-get install -y swig
   - sudo apt-get install -y m4
   - sudo apt-get install -y libz-dev
   - sudo apt-get install -y libprotobuf-dev
   - sudo apt-get install -y protobuf-compiler
+  - sudo apt-get install -y libsqlite3-dev
   # These are Aladdin dependencies.
   - sudo apt-get install -y libboost-graph-dev
   - sudo apt-get install -y libboost-regex-dev
@@ -23,7 +23,7 @@ compiler:
   - g++
 
 script:
-  - scons build/X86/gem5.opt -j2 --ignore-style
+  - scons build/X86/gem5.opt -j4 --ignore-style
   - cd src/aladdin/integration-test/common && python run_cpu_tests.py
 
 notifications:
