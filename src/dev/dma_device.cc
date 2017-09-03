@@ -213,7 +213,7 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
      * last channel that is just added. If we switch to the fixed-number of
      * channels model, we can let users to pick which channel they want to use,
      * or automatically pick the empty channel. */
-    for (ChunkGenerator gen(addr, size, chunkSize);
+    for (ChunkGenerator gen(addr, size, sys->cacheLineSize());
          !gen.done(); gen.next()) {
         req = new Request(gen.addr(), gen.size(), flag, masterId);
         req->taskId(ContextSwitchTaskId::DMA);

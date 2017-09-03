@@ -254,6 +254,11 @@ if options.accel_cfg_file:
       datapath.numOutStandingWalks = config.getint(
           accel, "tlb_max_outstanding_walks")
       datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
+    elif memory_type == "spad" and options.ruby:
+      # If the memory_type is spad, Aladdin will initiate a 1-way cache for every
+      # datapath, though this cache will not be used in simulation.
+      # Since Ruby doesn't support 1-way cache, so set the assoc to 2.
+      datapath.cacheAssoc = 2
     if (memory_type != "cache" and memory_type != "spad"):
       fatal("Aladdin configuration file specified invalid memory type %s for "
             "accelerator %s." % (memory_type, accel))
@@ -296,20 +301,18 @@ for i in xrange(np):
     system.cpu[i].createThreads()
 
 if options.ruby:
-    if not (options.cpu_type == "detailed" or options.cpu_type == "timing"):
-        print >> sys.stderr, "Ruby requires TimingSimpleCPU or O3CPU!!"
+    if not (options.cpu_type == "TimingSimpleCPU" or options.cpu_type == "DerivO3CPU"):
+        print >> sys.stderr, "Ruby requires TimingSimpleCPU or DerivO3CPU!!"
         sys.exit(1)
 
-    # Set the option for physmem so that it is not allocated any space
-    system.physmem = MemClass(range=AddrRange(options.mem_size),
-                              null = True)
+    Ruby.create_system(options, False, system)
+    assert(options.num_cpus + 2*len(system.find_all(HybridDatapath)[0]) ==
+           len(system.ruby._cpu_ports))
 
-    options.use_map = True
-    Ruby.create_system(options, system)
-    assert(options.num_cpus == len(system.ruby._cpu_ruby_ports))
-
+    system.ruby.clk_domain = SrcClockDomain(clock = options.ruby_clock,
+                                        voltage_domain = system.voltage_domain)
     for i in xrange(np):
-        ruby_port = system.ruby._cpu_ruby_ports[i]
+        ruby_port = system.ruby._cpu_ports[i]
 
         # Create the interrupt controller and connect its ports to Ruby
         # Note that the interrupt controller is always present but only
@@ -320,11 +323,17 @@ if options.ruby:
         system.cpu[i].icache_port = ruby_port.slave
         system.cpu[i].dcache_port = ruby_port.slave
         if buildEnv['TARGET_ISA'] == 'x86':
-            system.cpu[i].interrupts.pio = ruby_port.master
-            system.cpu[i].interrupts.int_master = ruby_port.slave
-            system.cpu[i].interrupts.int_slave = ruby_port.master
+            system.cpu[i].interrupts[0].pio = ruby_port.master
+            system.cpu[i].interrupts[0].int_master = ruby_port.slave
+            system.cpu[i].interrupts[0].int_slave = ruby_port.master
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
+
+    if options.accel_cfg_file:
+        for i,datapath in enumerate(datapaths):
+            datapath.cache_port = system.ruby._cpu_ports[options.num_cpus+2*i].slave
+            datapath.spad_port = system.ruby._cpu_ports[options.num_cpus+2*i+1].slave
+
 else:
     system.membus = SystemXBar(width=options.xbar_width)
 
