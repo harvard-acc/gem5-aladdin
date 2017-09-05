@@ -426,7 +426,6 @@ std::string StatInfo::create_sql_cmd() {
 
   std::string final_cmd = "insert into stats (" + sql_col_creator.str() +
                           ") values (" + sql_val_creator.str() + ");";
-  std::cout << final_cmd << std::endl;
   return final_cmd;
 }
 
