@@ -95,21 +95,23 @@ bool OutputSQL::create_tables() {
   std::string scalar_value_sql =
       "drop table if exists scalarValue;"
       "create table scalarValue ("
-          "id int primary key,"
+          "id int,"
           "dump int,"
-          "value real);";
+          "value real,"
+          "primary key (id, dump));";
 
   std::string vector_value_sql =
       "drop table if exists vectorValue;"
       "create table vectorValue ("
-          "id int primary key,"
+          "id int,"
           "dump int,"
-          "value blob);";
+          "value blob,"
+          "primary key (id, dump));";
 
   std::string dist_value_sql =
       "drop table if exists distValue;"
       "create table distValue ("
-          "id int primary key,"
+          "id int,"
           "dump int,"
           "sum real,"
           "squares real,"
@@ -121,7 +123,8 @@ bool OutputSQL::create_tables() {
           "min_val real,"
           "max_val real,"
           "underflow real,"
-          "overflow real);";
+          "overflow real,"
+          "primary key (id, dump));";
 
   std::string dump_desc_sql =
       "drop table if exists dumpDesc;"
