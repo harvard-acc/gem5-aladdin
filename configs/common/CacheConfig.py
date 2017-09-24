@@ -206,12 +206,16 @@ def config_cache(options, system):
             data_latency=datapath.cacheHitLatency,
             tag_latency=datapath.cacheHitLatency,
             response_latency=datapath.cacheHitLatency)
-        if options.l2cache:
-          datapath.addPrivateL1Dcache(system, system.tol2bus)
-          datapath.connectPrivateScratchpad(system, system.membus)
-        else:
-          datapath.addPrivateL1Dcache(system, system.membus)
-          datapath.connectPrivateScratchpad(system, system.membus)
+        # The ability for the accelerator to have an L2 cache has been removed
+        # for now. The original implementation of attaching the accelerator's
+        # dcache to the CPU's L2 cache is probably not what users would expect
+        # anyways.
+        datapath.addPrivateL1Dcache(system, system.membus)
+        datapath.connectPrivateScratchpad(system, system.membus)
+
+        if datapath.enableAcp:
+          assert(options.l2cache and "ACP requires an L2 cache!")
+          datapath.connectAcpPort(system.tol2bus)
     return system
 
 # ExternalSlave provides a "port", but when that port connects to a cache,
