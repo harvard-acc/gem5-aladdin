@@ -227,7 +227,7 @@ if options.accel_cfg_file:
         cycleTime = cycleTime,
         useDb = config.getboolean(accel, "use_db"),
         experimentName = config.get(accel, "experiment_name"),
-        enableStatsDump = options.enable_stats_dump,
+        enableStatsDump = options.enable_stats_dump_and_resume,
         executeStandalone = (np == 0))
     datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
     datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")

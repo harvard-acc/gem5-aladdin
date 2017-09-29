@@ -309,8 +309,13 @@ def addCommonOptions(parser):
 
 
     # Stats options.
-    parser.add_option("--enable-stats-dump", action="store_true", default=False,
-        help="Dump stats if sim loop exits with cause \"dump statistics\".")
+    parser.add_option("--enable-stats-dump-and-resume",
+        action="store_true", default=False,
+        help="When enabled, if the simulation loop ends with a cause beginning "
+             "with \"dump statistics:\", then output all stats to all formats, "
+             "reset stat values, and resume simulation where we left off. If "
+             "disabled, then exitSimLoop() will be handled in the usual way "
+             "(e.g. checkpoints).")
 
 def addSEOptions(parser):
     # Benchmark options

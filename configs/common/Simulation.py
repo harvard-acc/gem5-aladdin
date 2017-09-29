@@ -715,7 +715,7 @@ def run(options, root, testsys, cpu_class):
         if options.repeat_switch and maxtick > options.repeat_switch:
             exit_event = repeatSwitch(testsys, repeat_switch_cpu_list,
                                       maxtick, options.repeat_switch)
-        elif options.enable_stats_dump:
+        elif options.enable_stats_dump_and_resume:
             exit_event = dumpStatsInterval(options, maxtick)
         else:
             exit_event = benchCheckpoints(options, maxtick, cptdir)

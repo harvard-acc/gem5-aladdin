@@ -155,7 +155,9 @@ void OutputSQL::begin(std::string desc) {
     return;
   }
   std::string dump_desc_sql;
-  dump_desc_sql += "insert into dumpDesc (desc) values (\"";
+  dump_desc_sql += "insert into dumpDesc (id, desc) values (";
+  dump_desc_sql += std::to_string(dump_count);
+  dump_desc_sql += ", \"";
   dump_desc_sql += desc;
   dump_desc_sql += "\");";
   exec_sql(dump_desc_sql);
