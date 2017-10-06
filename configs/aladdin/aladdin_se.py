@@ -238,6 +238,7 @@ if options.accel_cfg_file:
     datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
     datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
     datapath.enableAcp = config.getboolean(accel, "enable_acp")
+    datapath.useAcpCache = True
     if memory_type == "cache":
       datapath.cacheSize = config.get(accel, "cache_size")
       datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
