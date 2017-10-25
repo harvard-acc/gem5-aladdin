@@ -320,12 +320,13 @@ class System : public MemObject
     }
 
     /* Add an mapping between array names to the simulated virtual addresses. */
-    void insertArrayLabelMapping(int id, std::string array_label, Addr sim_vaddr) {
+    void insertArrayLabelMapping(int id, std::string array_label,
+                                 Addr sim_vaddr, size_t size) {
         if (accelerators.find(id) == accelerators.end())
             fatal("Unable to add array label mapping: No accelerator with id %#x.",
                   id);
-        Gem5Datapath* datapath = accelerators[id]->datapath;
-        datapath->insertArrayLabelToVirtual(array_label, sim_vaddr);
+        Gem5Datapath *datapath = accelerators[id]->datapath;
+      datapath->insertArrayLabelToVirtual(array_label, sim_vaddr, size);
     }
 
     /* Get the base trace address of of the array for the specified accelerator. */

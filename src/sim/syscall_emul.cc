@@ -765,7 +765,7 @@ fcntlAladdinHandler(Process *process, ThreadContext *tc)
     // cause issues if we don't?
     process->system->insertArrayLabelMapping(
           mapping.request_code,
-          mapping.array_name, sim_base_addr);
+          mapping.array_name, sim_base_addr, mapping.size);
 
     // Set up all mappings, taking into account straddling page boundaries.
     Addr starting_page_offset = sim_base_addr & (TheISA::PageBytes - 1);
