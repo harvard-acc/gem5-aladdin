@@ -13,10 +13,12 @@ import signal
 import subprocess
 import sys
 import threading
+import unittest
 
 # Import all unit tests into this module.
 sys.path.append(os.path.join(os.getcwd(), "src", "aladdin", "integration-test", "common"))
-from run_cpu_tests import *
+import run_cpu_tests
+import run_ruby_tests
 
 MAXIMUM_RETRIES = 1
 TIMEOUT = 40  # Minutes.
@@ -52,7 +54,17 @@ def run_build(cmd):
     if num_retries < MAXIMUM_RETRIES:
       print "Last build was killed after %d minutes. Starting again..." % TIMEOUT
 
+def create_variables_file():
+  contents = ("TARGET_ISA = 'x86'\n"
+              "CPU_MODELS = 'AtomicSimpleCPU,O3CPU,TimingSimpleCPU'\n"
+              "PROTOCOL = 'MESI_Two_Level_aladdin'\n")
+  if not os.path.exists("build/variables"):
+    os.makedirs("build/variables")
+  with open("build/variables/X86", "w") as f:
+    f.write(contents)
+
 def main():
+  create_variables_file()
   ret = run_build(CMD)
   # SIGINT is the one we send and want to fake as success. Anything else than
   # 0 should be an actual build error.
@@ -61,7 +73,12 @@ def main():
   elif ret != 0:
     return ret
 
-  unittest.main()
+  suite = unittest.TestSuite()
+  suite.addTests(unittest.TestLoader().loadTestsFromModule(run_cpu_tests))
+  suite.addTests(unittest.TestLoader().loadTestsFromModule(run_ruby_tests))
+  result = unittest.TextTestRunner(verbosity=2).run(suite)
+  retcode = 0 if result.wasSuccessful() else 1
+  sys.exit(retcode)
 
 if __name__ == "__main__":
   main()
