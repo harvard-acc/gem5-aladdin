@@ -119,7 +119,7 @@ def addNoISAOptions(parser):
     parser.add_option("--l1i_hit_latency", type="int", default="2")
     parser.add_option("--l2_hit_latency", type="int", default="20")
     parser.add_option("--cacheline_size", type="int", default=64)
-    parser.add_option("--xbar_width", type="int", default=8)
+    parser.add_option("--xbar_width", type="int", default=16)
     parser.add_option("--record-dram-traffic", action="store_true",
         help="Record DRAM memory traffic packets to file (requires protobuf).")
 
