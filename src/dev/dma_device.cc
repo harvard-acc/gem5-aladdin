@@ -367,14 +367,15 @@ DmaPort::sendDma()
 
 Addr
 DmaPort::getPacketAddr(PacketPtr pkt) {
-
-  DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
+  DmaReqState *state = pkt->findNextSenderState<DmaReqState>();
+  assert(state && "No DmaReqState found!");
   return state->addr;
 }
 
 Event*
 DmaPort::getPacketCompletionEvent(PacketPtr pkt) {
-    DmaReqState *state = dynamic_cast<DmaReqState*>(pkt->senderState);
+    DmaReqState *state = pkt->findNextSenderState<DmaReqState>();
+    assert(state && "No DmaReqState found!");
     return state->completionEvent;
 }
 
