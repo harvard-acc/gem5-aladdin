@@ -1132,6 +1132,9 @@ if not GetOption('without_tcmalloc'):
               "installing tcmalloc (libgoogle-perftools-dev package "\
               "on Ubuntu or RedHat)." + termcap.Normal
 
+# Check if we have libreadline (used for the Aladdin debugger).
+if conf.CheckLibWithHeader('readline', 'readline/readline.h', 'C'):
+  main.Append(CCFLAGS = '-DHAS_READLINE')
 
 # Detect back trace implementations. The last implementation in the
 # list will be used by default.

@@ -63,6 +63,12 @@ from common import MemConfig
 from common.Caches import *
 from common.cpu2000 import *
 
+def addAladdinOptions(parser):
+    parser.add_option("--accel_cfg_file", default=None,
+        help="Aladdin accelerator configuration file.")
+    parser.add_option("--aladdin-debugger", action="store_true",
+        help="Run the Aladdin debugger on accelerator initialization.")
+
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""
 
@@ -113,6 +119,7 @@ def get_processes(options):
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
 Options.addSEOptions(parser)
+addAladdinOptions(parser)
 
 if '--ruby' in sys.argv:
     Ruby.define_options(parser)
@@ -239,6 +246,7 @@ if options.accel_cfg_file:
     datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
     datapath.enableAcp = config.getboolean(accel, "enable_acp")
     datapath.useAcpCache = True
+    datapath.useAladdinDebugger = options.aladdin_debugger
     if memory_type == "cache":
       datapath.cacheSize = config.get(accel, "cache_size")
       datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")

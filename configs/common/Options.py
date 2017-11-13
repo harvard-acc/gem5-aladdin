@@ -123,9 +123,6 @@ def addNoISAOptions(parser):
     parser.add_option("--record-dram-traffic", action="store_true",
         help="Record DRAM memory traffic packets to file (requires protobuf).")
 
-    # Aladdin Options
-    parser.add_option("--accel_cfg_file", default=None,
-                      help="Aladdin accelerator configuration file.")
     # Enable Ruby
     parser.add_option("--ruby", action="store_true")
 
