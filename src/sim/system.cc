@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014 ARM Limited
+ * Copyright (c) 2011-2014,2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -158,6 +158,14 @@ System::System(Params *p)
             kernelEnd = kernel->bssBase() + kernel->bssSize();
             kernelEntry = kernel->entryPoint();
 
+            // If load_addr_mask is set to 0x0, then auto-calculate
+            // the smallest mask to cover all kernel addresses so gem5
+            // can relocate the kernel to a new offset.
+            if (loadAddrMask == 0) {
+                Addr shift_amt = findMsbSet(kernelEnd - kernelStart) + 1;
+                loadAddrMask = ((Addr)1 << shift_amt) - 1;
+            }
+
             // load symbols
             if (!kernel->loadGlobalSymbols(kernelSymtab))
                 fatal("could not load kernel symbols\n");
@@ -173,6 +181,14 @@ System::System(Params *p)
 
             // Loading only needs to happen once and after memory system is
             // connected so it will happen in initState()
+        }
+
+        for (const auto &obj_name : p->kernel_extras) {
+            inform("Loading additional kernel object: %s", obj_name);
+            ObjectFile *obj = createObjectFile(obj_name);
+            fatal_if(!obj, "Failed to additional kernel object '%s'.\n",
+                     obj_name);
+            kernelExtras.push_back(obj);
         }
     }
 
@@ -312,6 +328,10 @@ System::initState()
             }
             // Load program sections into memory
             kernel->loadSections(physProxy, loadAddrMask, loadAddrOffset);
+            for (const auto &extra_kernel : kernelExtras) {
+                extra_kernel->loadSections(physProxy, loadAddrMask,
+                                           loadAddrOffset);
+            }
 
             DPRINTF(Loader, "Kernel start = %#x\n", kernelStart);
             DPRINTF(Loader, "Kernel end   = %#x\n", kernelEnd);

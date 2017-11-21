@@ -1,6 +1,6 @@
 # -*- mode:python -*-
 
-# Copyright (c) 2013, 2015, 2016 ARM Limited
+# Copyright (c) 2013, 2015-2017 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -78,36 +78,6 @@
 #
 ###################################################
 
-# Check for recent-enough Python and SCons versions.
-try:
-    # Really old versions of scons only take two options for the
-    # function, so check once without the revision and once with the
-    # revision, the first instance will fail for stuff other than
-    # 0.98, and the second will fail for 0.98.0
-    EnsureSConsVersion(0, 98)
-    EnsureSConsVersion(0, 98, 1)
-except SystemExit, e:
-    print """
-For more details, see:
-    http://gem5.org/Dependencies
-"""
-    raise
-
-# We ensure the python version early because because python-config
-# requires python 2.5
-try:
-    EnsurePythonVersion(2, 5)
-except SystemExit, e:
-    print """
-You can use a non-default installation of the Python interpreter by
-rearranging your PATH so that scons finds the non-default 'python' and
-'python-config' first.
-
-For more details, see:
-    http://gem5.org/wiki/index.php/Using_a_non-default_Python_installation
-"""
-    raise
-
 # Global Python includes
 import itertools
 import os
@@ -125,15 +95,7 @@ from os.path import join as joinpath, split as splitpath
 import SCons
 import SCons.Node
 
-extra_python_paths = [
-    Dir('src/python').srcnode().abspath, # gem5 includes
-    Dir('ext/ply').srcnode().abspath, # ply is used by several files
-    ]
-
-sys.path[1:1] = extra_python_paths
-
 from m5.util import compareVersions, readCommand
-from m5.util.terminal import get_termcap
 
 help_texts = {
     "options" : "",
@@ -209,55 +171,17 @@ if GetOption('no_lto') and GetOption('force_lto'):
     print '--no-lto and --force-lto are mutually exclusive'
     Exit(1)
 
-termcap = get_termcap(GetOption('use_colors'))
-
 ########################################################################
 #
 # Set up the main build environment.
 #
 ########################################################################
 
-# export TERM so that clang reports errors in color
-use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
-                 'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PROTOC',
-                 'PYTHONPATH', 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT',
-                 'MYSQL_HOME', 'FORCE_CXX11_ABI'])
+main = Environment()
 
-use_prefixes = [
-    "ASAN_",           # address sanitizer symbolizer path and settings
-    "CCACHE_",         # ccache (caching compiler wrapper) configuration
-    "CCC_",            # clang static analyzer configuration
-    "DISTCC_",         # distcc (distributed compiler wrapper) configuration
-    "INCLUDE_SERVER_", # distcc pump server settings
-    "M5",              # M5 configuration (e.g., path to kernels)
-    ]
-
-use_env = {}
-for key,val in sorted(os.environ.iteritems()):
-    if key in use_vars or \
-            any([key.startswith(prefix) for prefix in use_prefixes]):
-        use_env[key] = val
-
-# Tell scons to avoid implicit command dependencies to avoid issues
-# with the param wrappes being compiled twice (see
-# http://scons.tigris.org/issues/show_bug.cgi?id=2811)
-main = Environment(ENV=use_env, IMPLICIT_COMMAND_DEPENDENCIES=0)
-main.Decider('MD5-timestamp')
-main.root = Dir(".")         # The current directory (where this file lives).
-main.srcdir = Dir("src")     # The source directory
-
-if 'BOOST_ROOT' in use_env:
-    main.Append(CPPPATH=[os.path.join(use_env['BOOST_ROOT'], 'include')])
-    main.Append(LIBPATH=[os.path.join(use_env['BOOST_ROOT'], 'lib')])
-    main.Append(LIBS=['boost_graph'])
-
-if GetOption('use_db'):
-    main.Append(CPPPATH=[use_env['MYSQL_HOME']])
-    main.Append(CXXFLAGS='-DUSE_DB')
-    main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
-
-if GetOption('debug_aladdin'):
-    main.Append(CCFLAGS = '-DDEBUG')
+from gem5_scons import Transform
+from gem5_scons.util import get_termcap
+termcap = get_termcap()
 
 #FIXME
 main_dict_keys = main.Dictionary().keys()
@@ -266,199 +190,6 @@ main_dict_keys = main.Dictionary().keys()
 if not ('CC' in main_dict_keys and 'CXX' in main_dict_keys):
     print "No C++ compiler installed (package g++ on Ubuntu and RedHat)"
     Exit(1)
-
-# add useful python code PYTHONPATH so it can be used by subprocesses
-# as well
-main.AppendENVPath('PYTHONPATH', extra_python_paths)
-
-########################################################################
-#
-# Mercurial Stuff.
-#
-# If the gem5 directory is a mercurial repository, we should do some
-# extra things.
-#
-########################################################################
-
-hgdir = main.root.Dir(".hg")
-
-
-style_message = """
-You're missing the gem5 style hook, which automatically checks your code
-against the gem5 style rules on %s.
-This script will now install the hook in your %s.
-Press enter to continue, or ctrl-c to abort: """
-
-mercurial_style_message = """
-You're missing the gem5 style hook, which automatically checks your code
-against the gem5 style rules on hg commit and qrefresh commands.
-This script will now install the hook in your .hg/hgrc file.
-Press enter to continue, or ctrl-c to abort: """
-
-git_style_message = """
-You're missing the gem5 style or commit message hook. These hooks help
-to ensure that your code follows gem5's style rules on git commit.
-This script will now install the hook in your .git/hooks/ directory.
-Press enter to continue, or ctrl-c to abort: """
-
-mercurial_style_upgrade_message = """
-Your Mercurial style hooks are not up-to-date. This script will now
-try to automatically update them. A backup of your hgrc will be saved
-in .hg/hgrc.old.
-Press enter to continue, or ctrl-c to abort: """
-
-mercurial_style_hook = """
-# The following lines were automatically added by gem5/SConstruct
-# to provide the gem5 style-checking hooks
-[extensions]
-hgstyle = %s/util/hgstyle.py
-
-[hooks]
-pretxncommit.style = python:hgstyle.check_style
-pre-qrefresh.style = python:hgstyle.check_style
-# End of SConstruct additions
-
-""" % (main.root.abspath)
-
-mercurial_lib_not_found = """
-Mercurial libraries cannot be found, ignoring style hook.  If
-you are a gem5 developer, please fix this and run the style
-hook. It is important.
-"""
-
-# Check for style hook and prompt for installation if it's not there.
-# Skip this if --ignore-style was specified, there's no interactive
-# terminal to prompt, or no recognized revision control system can be
-# found.
-ignore_style = GetOption('ignore_style') or not sys.stdin.isatty()
-
-# Try wire up Mercurial to the style hooks
-if not ignore_style and hgdir.exists():
-    style_hook = True
-    style_hooks = tuple()
-    hgrc = hgdir.File('hgrc')
-    hgrc_old = hgdir.File('hgrc.old')
-    try:
-        from mercurial import ui
-        ui = ui.ui()
-        ui.readconfig(hgrc.abspath)
-        style_hooks = (ui.config('hooks', 'pretxncommit.style', None),
-                       ui.config('hooks', 'pre-qrefresh.style', None))
-        style_hook = all(style_hooks)
-        style_extension = ui.config('extensions', 'style', None)
-    except ImportError:
-        print mercurial_lib_not_found
-
-    if "python:style.check_style" in style_hooks:
-        # Try to upgrade the style hooks
-        print mercurial_style_upgrade_message
-        # continue unless user does ctrl-c/ctrl-d etc.
-        try:
-            raw_input()
-        except:
-            print "Input exception, exiting scons.\n"
-            sys.exit(1)
-        shutil.copyfile(hgrc.abspath, hgrc_old.abspath)
-        re_style_hook = re.compile(r"^([^=#]+)\.style\s*=\s*([^#\s]+).*")
-        re_style_extension = re.compile("style\s*=\s*([^#\s]+).*")
-        old, new = open(hgrc_old.abspath, 'r'), open(hgrc.abspath, 'w')
-        for l in old:
-            m_hook = re_style_hook.match(l)
-            m_ext = re_style_extension.match(l)
-            if m_hook:
-                hook, check = m_hook.groups()
-                if check != "python:style.check_style":
-                    print "Warning: %s.style is using a non-default " \
-                        "checker: %s" % (hook, check)
-                if hook not in ("pretxncommit", "pre-qrefresh"):
-                    print "Warning: Updating unknown style hook: %s" % hook
-
-                l = "%s.style = python:hgstyle.check_style\n" % hook
-            elif m_ext and m_ext.group(1) == style_extension:
-                l = "hgstyle = %s/util/hgstyle.py\n" % main.root.abspath
-
-            new.write(l)
-    elif not style_hook:
-        print mercurial_style_message,
-        # continue unless user does ctrl-c/ctrl-d etc.
-        try:
-            raw_input()
-        except:
-            print "Input exception, exiting scons.\n"
-            sys.exit(1)
-        hgrc_path = '%s/.hg/hgrc' % main.root.abspath
-        print "Adding style hook to", hgrc_path, "\n"
-        try:
-            with open(hgrc_path, 'a') as f:
-                f.write(mercurial_style_hook)
-        except:
-            print "Error updating", hgrc_path
-            sys.exit(1)
-
-def install_git_style_hooks():
-    try:
-        gitdir = Dir(readCommand(
-            ["git", "rev-parse", "--git-dir"]).strip("\n"))
-    except Exception, e:
-        print "Warning: Failed to find git repo directory: %s" % e
-        return
-
-    git_hooks = gitdir.Dir("hooks")
-    def hook_exists(hook_name):
-        hook = git_hooks.File(hook_name)
-        return hook.exists()
-
-    def hook_install(hook_name, script):
-        hook = git_hooks.File(hook_name)
-        if hook.exists():
-            print "Warning: Can't install %s, hook already exists." % hook_name
-            return
-
-        if hook.islink():
-            print "Warning: Removing broken symlink for hook %s." % hook_name
-            os.unlink(hook.get_abspath())
-
-        if not git_hooks.exists():
-            mkdir(git_hooks.get_abspath())
-            git_hooks.clear()
-
-        abs_symlink_hooks = git_hooks.islink() and \
-            os.path.isabs(os.readlink(git_hooks.get_abspath()))
-
-        # Use a relative symlink if the hooks live in the source directory,
-        # and the hooks directory is not a symlink to an absolute path.
-        if hook.is_under(main.root) and not abs_symlink_hooks:
-            script_path = os.path.relpath(
-                os.path.realpath(script.get_abspath()),
-                os.path.realpath(hook.Dir(".").get_abspath()))
-        else:
-            script_path = script.get_abspath()
-
-        try:
-            os.symlink(script_path, hook.get_abspath())
-        except:
-            print "Error updating git %s hook" % hook_name
-            raise
-
-    if hook_exists("pre-commit") and hook_exists("commit-msg"):
-        return
-
-    print git_style_message,
-    try:
-        raw_input()
-    except:
-        print "Input exception, exiting scons.\n"
-        sys.exit(1)
-
-    git_style_script = File("util/git-pre-commit.py")
-    git_msg_script = File("ext/git-commit-msg")
-
-    hook_install("pre-commit", git_style_script)
-    hook_install("commit-msg", git_msg_script)
-
-# Try to wire up git to the style hooks
-if not ignore_style and main.root.Entry(".git").exists():
-    install_git_style_hooks()
 
 ###################################################
 #
@@ -550,6 +281,13 @@ global_vars.AddVariables(
     ('BATCH', 'Use batch pool for build and tests', False),
     ('BATCH_CMD', 'Batch pool submission command name', 'qdo'),
     ('M5_BUILD_CACHE', 'Cache built objects in this directory', False),
+    ('BOOST_ROOT', 'Boost library location', environ.get('BOOST_ROOT'), None),
+    ('MYSQL_HOME', 'MySQL library location', environ.get('MYSQL_HOME'), None),
+    ('USER_TOOLCHAIN_ROOT',
+         'Path to toolchain if installed in non-standard location',
+         environ.get('USER_TOOLCHAIN_ROOT'), None),
+    ('FORCE_CXX11_ABI', 'Force use of CXX11 ABI on gcc 5.0+',
+         environ.get('FORCE_CXX11_ABI'), False),
     ('EXTRAS', 'Add extra directories to the compilation', '')
     )
 
@@ -577,89 +315,13 @@ main.Append(CPPPATH=[Dir('ext')])
 # Add shared top-level headers
 main.Prepend(CPPPATH=Dir('include'))
 
-def strip_build_path(path, env):
-    path = str(path)
-    variant_base = env['BUILDROOT'] + os.path.sep
-    if path.startswith(variant_base):
-        path = path[len(variant_base):]
-    elif path.startswith('build/'):
-        path = path[6:]
-    return path
-
-# Generate a string of the form:
-#   common/path/prefix/src1, src2 -> tgt1, tgt2
-# to print while building.
-class Transform(object):
-    # all specific color settings should be here and nowhere else
-    tool_color = termcap.Normal
-    pfx_color = termcap.Yellow
-    srcs_color = termcap.Yellow + termcap.Bold
-    arrow_color = termcap.Blue + termcap.Bold
-    tgts_color = termcap.Yellow + termcap.Bold
-
-    def __init__(self, tool, max_sources=99):
-        self.format = self.tool_color + (" [%8s] " % tool) \
-                      + self.pfx_color + "%s" \
-                      + self.srcs_color + "%s" \
-                      + self.arrow_color + " -> " \
-                      + self.tgts_color + "%s" \
-                      + termcap.Normal
-        self.max_sources = max_sources
-
-    def __call__(self, target, source, env, for_signature=None):
-        # truncate source list according to max_sources param
-        source = source[0:self.max_sources]
-        def strip(f):
-            return strip_build_path(str(f), env)
-        if len(source) > 0:
-            srcs = map(strip, source)
-        else:
-            srcs = ['']
-        tgts = map(strip, target)
-        # surprisingly, os.path.commonprefix is a dumb char-by-char string
-        # operation that has nothing to do with paths.
-        com_pfx = os.path.commonprefix(srcs + tgts)
-        com_pfx_len = len(com_pfx)
-        if com_pfx:
-            # do some cleanup and sanity checking on common prefix
-            if com_pfx[-1] == ".":
-                # prefix matches all but file extension: ok
-                # back up one to change 'foo.cc -> o' to 'foo.cc -> .o'
-                com_pfx = com_pfx[0:-1]
-            elif com_pfx[-1] == "/":
-                # common prefix is directory path: OK
-                pass
-            else:
-                src0_len = len(srcs[0])
-                tgt0_len = len(tgts[0])
-                if src0_len == com_pfx_len:
-                    # source is a substring of target, OK
-                    pass
-                elif tgt0_len == com_pfx_len:
-                    # target is a substring of source, need to back up to
-                    # avoid empty string on RHS of arrow
-                    sep_idx = com_pfx.rfind(".")
-                    if sep_idx != -1:
-                        com_pfx = com_pfx[0:sep_idx]
-                    else:
-                        com_pfx = ''
-                elif src0_len > com_pfx_len and srcs[0][com_pfx_len] == ".":
-                    # still splitting at file extension: ok
-                    pass
-                else:
-                    # probably a fluke; ignore it
-                    com_pfx = ''
-        # recalculate length in case com_pfx was modified
-        com_pfx_len = len(com_pfx)
-        def fmt(files):
-            f = map(lambda s: s[com_pfx_len:], files)
-            return ', '.join(f)
-        return self.format % (com_pfx, fmt(srcs), fmt(tgts))
-
-Export('Transform')
-
-# enable the regression script to use the termcap
-main['TERMCAP'] = termcap
+if 'USER_TOOLCHAIN_ROOT' in main and main['USER_TOOLCHAIN_ROOT']:
+    toolchain_bin_path = os.path.join(main['USER_TOOLCHAIN_ROOT'], 'bin')
+    toolchain_lib_path = os.path.join(main['USER_TOOLCHAIN_ROOT'], 'lib')
+    main.Append(PATH=[toolchain_bin_path])
+    main.Append(LIBPATH=[toolchain_lib_path])
+    main['CC'] = os.path.join(toolchain_bin_path, main['CC'])
+    main['CXX'] = os.path.join(toolchain_bin_path, main['CXX'])
 
 if GetOption('verbose'):
     def MakeAction(action, string, *args, **kwargs):
@@ -677,6 +339,23 @@ else:
     main['SHCCCOMSTR']      = Transform("SHCC")
     main['SHCXXCOMSTR']     = Transform("SHCXX")
 Export('MakeAction')
+
+if 'BOOST_ROOT' in main and main['BOOST_ROOT']:
+    boost_lib_path = os.path.join(main['BOOST_ROOT'], 'lib')
+    main.Append(CPPPATH=[os.path.join(main['BOOST_ROOT'], 'include')])
+    main.Append(LIBPATH=[boost_lib_path])
+    main.Append(LD_LIBRARY_PATH=[boost_lib_path])
+    main.Append(LIBS=['boost_graph', 'boost_regex'])
+
+if GetOption('use_db'):
+    if 'MYSQL_HOME' in main and main['MYSQL_HOME']:
+        main.Append(CPPPATH=[os.path.join(main['MYSQL_HOME'], 'include')])
+        main.Append(CXXFLAGS='-DUSE_DB')
+        main.Append(LIBPATH=[os.path.join(main['MYSQL_HOME'], 'lib')])
+        main.Append(LIBS=['-lmysqlcppconn'])
+
+if GetOption('debug_aladdin'):
+    main.Append(CPPFLAGS = '-DDEBUG')
 
 # Initialize the Link-Time Optimization (LTO) flags
 main['LTO_CCFLAGS'] = []
@@ -848,7 +527,7 @@ if main['GCC']:
         # compiled with the older ABI, so for the sake of backwards
         # compatibility, use the older ABI unless the user has explicitly
         # requested otherwise.
-        if not ('FORCE_CXX_ABI' in main and main['FORCE_CXX11_ABI']):
+        if not ('FORCE_CXX11_ABI' in main and main['FORCE_CXX11_ABI']):
             main.Append(CPPFLAGS=["-D_GLIBCXX_USE_CXX11_ABI=0"])
 
 elif main['CLANG']:
@@ -1181,6 +860,14 @@ if not have_fenv:
     print "Warning: Header file <fenv.h> not found."
     print "         This host has no IEEE FP rounding mode control."
 
+# Check for <png.h> (libpng library needed if wanting to dump
+# frame buffer image in png format)
+have_png = conf.CheckHeader('png.h', '<>')
+if not have_png:
+    print "Warning: Header file <png.h> not found."
+    print "         This host has no libpng library."
+    print "         Disabling support for PNG framebuffers."
+
 # Check if we should enable KVM-based hardware virtualization. The API
 # we rely on exists since version 2.6.36 of the kernel, but somehow
 # the KVM_API_VERSION does not reflect the change. We test for one of
@@ -1325,8 +1012,11 @@ sticky_vars.AddVariables(
                  False),
     BoolVariable('USE_POSIX_CLOCK', 'Use POSIX Clocks', have_posix_clock),
     BoolVariable('USE_FENV', 'Use <fenv.h> IEEE mode control', have_fenv),
-    BoolVariable('CP_ANNOTATE', 'Enable critical path annotation capability', False),
-    BoolVariable('USE_KVM', 'Enable hardware virtualized (KVM) CPU models', have_kvm),
+    BoolVariable('USE_PNG',  'Enable support for PNG images', have_png),
+    BoolVariable('CP_ANNOTATE', 'Enable critical path annotation capability',
+                 False),
+    BoolVariable('USE_KVM', 'Enable hardware virtualized (KVM) CPU models',
+                 have_kvm),
     BoolVariable('USE_TUNTAP',
                  'Enable using a tap device to bridge to the host network',
                  have_tuntap),
@@ -1340,7 +1030,8 @@ sticky_vars.AddVariables(
 # These variables get exported to #defines in config/*.hh (see src/SConscript).
 export_vars += ['USE_FENV', 'SS_COMPATIBLE_FP', 'TARGET_ISA', 'TARGET_GPU_ISA',
                 'CP_ANNOTATE', 'USE_POSIX_CLOCK', 'USE_KVM', 'USE_TUNTAP',
-                'PROTOCOL', 'HAVE_PROTOBUF', 'HAVE_PERF_ATTR_EXCLUDE_HOST']
+                'PROTOCOL', 'HAVE_PROTOBUF', 'HAVE_PERF_ATTR_EXCLUDE_HOST',
+                'USE_PNG']
 
 ###################################################
 #
@@ -1454,40 +1145,11 @@ def switching_headers(self, headers, source):
 
 main.AddMethod(switching_headers, 'SwitchingHeaders')
 
-# all-isas -> all-deps -> all-environs -> all_targets
-main.Alias('#all-isas', [])
-main.Alias('#all-deps', '#all-isas')
-
-# Dummy target to ensure all environments are created before telling
-# SCons what to actually make (the command line arguments).  We attach
-# them to the dependence graph after the environments are complete.
-ORIG_BUILD_TARGETS = list(BUILD_TARGETS) # force a copy; gets closure to work.
-def environsComplete(target, source, env):
-    for t in ORIG_BUILD_TARGETS:
-        main.Depends('#all-targets', t)
-
-# Each build/* switching_dir attaches its *-environs target to #all-environs.
-main.Append(BUILDERS = {'CompleteEnvirons' :
-                        Builder(action=MakeAction(environsComplete, None))})
-main.CompleteEnvirons('#all-environs', [])
-
-def doNothing(**ignored): pass
-main.Append(BUILDERS = {'Dummy': Builder(action=MakeAction(doNothing, None))})
-
-# The final target to which all the original targets ultimately get attached.
-main.Dummy('#all-targets', '#all-environs')
-BUILD_TARGETS[:] = ['#all-targets']
-
 ###################################################
 #
 # Define build environments for selected configurations.
 #
 ###################################################
-
-def variant_name(path):
-    return os.path.basename(path).lower().replace('_', '-')
-main['variant_name'] = variant_name
-main['VARIANT_NAME'] = '${variant_name(BUILDDIR)}'
 
 for variant_path in variant_paths:
     if not GetOption('silent'):
@@ -1562,6 +1224,14 @@ for variant_path in variant_paths:
         print "Warning: No IEEE FP rounding mode control in", variant_dir + "."
         print "         FP results may deviate slightly from other platforms."
 
+    if not have_png and env['USE_PNG']:
+        print "Warning: <png.h> not available; " \
+              "forcing USE_PNG to False in", variant_dir + "."
+        env['USE_PNG'] = False
+
+    if env['USE_PNG']:
+        env.Append(LIBS=['png'])
+
     if env['EFENCE']:
         env.Append(LIBS=['efence'])
 
@@ -1599,26 +1269,6 @@ for variant_path in variant_paths:
     # to the configured variables.  It returns a list of environments,
     # one for each variant build (debug, opt, etc.)
     SConscript('src/SConscript', variant_dir = variant_path, exports = 'env')
-
-def pairwise(iterable):
-    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
-    a, b = itertools.tee(iterable)
-    b.next()
-    return itertools.izip(a, b)
-
-variant_names = [variant_name(path) for path in variant_paths]
-
-# Create false dependencies so SCons will parse ISAs, establish
-# dependencies, and setup the build Environments serially. Either
-# SCons (likely) and/or our SConscripts (possibly) cannot cope with -j
-# greater than 1. It appears to be standard race condition stuff; it
-# doesn't always fail, but usually, and the behaviors are different.
-# Every time I tried to remove this, builds would fail in some
-# creative new way. So, don't do that. You'll want to, though, because
-# tests/SConscript takes a long time to make its Environments.
-for t1, t2 in pairwise(sorted(variant_names)):
-    main.Depends('#%s-deps'     % t2, '#%s-deps'     % t1)
-    main.Depends('#%s-environs' % t2, '#%s-environs' % t1)
 
 # base help text
 Help('''

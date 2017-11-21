@@ -270,7 +270,7 @@ class SimObjectVector(VectorParamValue):
                 v.set_parent(parent, "%s%0*d" % (name, width, i))
 
     def has_parent(self):
-        return reduce(lambda x,y: x and y, [v.has_parent() for v in self])
+        return any([e.has_parent() for e in self if not isNullPointer(e)])
 
     # return 'cpu0 cpu1' etc. for print_ini()
     def get_name(self):
@@ -1541,71 +1541,38 @@ class Clock(TickParamValue):
     def ini_str(self):
         return self.period.ini_str()
 
-class Voltage(float,ParamValue):
-    cxx_type = 'double'
+class Voltage(Float):
     ex_str = "1V"
-    cmd_line_settable = True
 
     def __new__(cls, value):
-        # convert to voltage
-        val = convert.toVoltage(value)
-        return super(cls, Voltage).__new__(cls, val)
+        value = convert.toVoltage(value)
+        return super(cls, Voltage).__new__(cls, value)
 
-    def __call__(self, value):
-        val = convert.toVoltage(value)
-        self.__init__(val)
-        return value
+    def __init__(self, value):
+        value = convert.toVoltage(value)
+        super(Voltage, self).__init__(value)
 
-    def __str__(self):
-        return str(self.getValue())
-
-    def getValue(self):
-        value = float(self)
-        return value
-
-    def ini_str(self):
-        return '%f' % self.getValue()
-
-    @classmethod
-    def cxx_ini_predecls(cls, code):
-        code('#include <sstream>')
-
-    @classmethod
-    def cxx_ini_parse(self, code, src, dest, ret):
-        code('%s (std::istringstream(%s) >> %s).eof();' % (ret, src, dest))
-
-class Current(float, ParamValue):
-    cxx_type = 'double'
+class Current(Float):
     ex_str = "1mA"
-    cmd_line_settable = False
 
     def __new__(cls, value):
-        # convert to current
-        val = convert.toCurrent(value)
-        return super(cls, Current).__new__(cls, val)
+        value = convert.toCurrent(value)
+        return super(cls, Current).__new__(cls, value)
 
-    def __call__(self, value):
-        val = convert.toCurrent(value)
-        self.__init__(val)
-        return value
+    def __init__(self, value):
+        value = convert.toCurrent(value)
+        super(Current, self).__init__(value)
 
-    def __str__(self):
-        return str(self.getValue())
+class Energy(Float):
+    ex_str = "1pJ"
 
-    def getValue(self):
-        value = float(self)
-        return value
+    def __new__(cls, value):
+        value = convert.toEnergy(value)
+        return super(cls, Energy).__new__(cls, value)
 
-    def ini_str(self):
-        return '%f' % self.getValue()
-
-    @classmethod
-    def cxx_ini_predecls(cls, code):
-        code('#include <sstream>')
-
-    @classmethod
-    def cxx_ini_parse(self, code, src, dest, ret):
-        code('%s (std::istringstream(%s) >> %s).eof();' % (ret, src, dest))
+    def __init__(self, value):
+        value = convert.toEnergy(value)
+        super(Energy, self).__init__(value)
 
 class NetworkBandwidth(float,ParamValue):
     cxx_type = 'float'
@@ -1694,6 +1661,7 @@ class MemoryBandwidth(float,ParamValue):
 # only one copy of a particular node
 class NullSimObject(object):
     __metaclass__ = Singleton
+    _name = 'Null'
 
     def __call__(cls):
         return cls
@@ -1710,8 +1678,21 @@ class NullSimObject(object):
     def set_path(self, parent, name):
         pass
 
+    def set_parent(self, parent, name):
+        pass
+
+    def clear_parent(self, old_parent):
+        pass
+
+    def descendants(self):
+        return
+        yield None
+
+    def get_config_as_dict(self):
+        return {}
+
     def __str__(self):
-        return 'Null'
+        return self._name
 
     def config_value(self):
         return None
@@ -2065,7 +2046,7 @@ __all__ = ['Param', 'VectorParam',
            'TcpPort', 'UdpPort', 'EthernetAddr',
            'IpAddress', 'IpNetmask', 'IpWithPort',
            'MemorySize', 'MemorySize32',
-           'Latency', 'Frequency', 'Clock', 'Voltage',
+           'Latency', 'Frequency', 'Clock', 'Voltage', 'Current', 'Energy',
            'NetworkBandwidth', 'MemoryBandwidth',
            'AddrRange',
            'MaxAddr', 'MaxTick', 'AllMemory',

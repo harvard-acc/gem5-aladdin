@@ -63,6 +63,7 @@ class MemTimingSpec : public virtual Parametrisable {
   int64_t RL;
   int64_t RP;
   int64_t RFC;
+  int64_t REFB;
   int64_t RAS;
   int64_t WL;
   int64_t AL;

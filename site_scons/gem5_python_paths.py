@@ -1,4 +1,18 @@
-# Copyright (c) 2005-2007 The Regents of The University of Michigan
+# Copyright (c) 2013, 2015-2017 ARM Limited
+# All rights reserved.
+#
+# The license below extends only to copyright in the software and shall
+# not be construed as granting a license to any other intellectual
+# property including but not limited to intellectual property relating
+# to a hardware implementation of the functionality of the software
+# licensed hereunder.  You may use the software subject to the license
+# terms below provided that you ensure that this notice is replicated
+# unmodified and in its entirety in all distributions of the software,
+# modified or unmodified, in source code or in binary form.
+#
+# Copyright (c) 2011 Advanced Micro Devices, Inc.
+# Copyright (c) 2009 The Hewlett-Packard Development Company
+# Copyright (c) 2004-2005 The Regents of The University of Michigan
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -23,20 +37,16 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Authors: Nathan Binkert
 
-from m5.params import *
-from m5.proxy import *
-from Device import BasicPioDevice
+import SCons.Node.FS
 
-class Uart(BasicPioDevice):
-    type = 'Uart'
-    abstract = True
-    cxx_header = "dev/uart.hh"
-    platform = Param.Platform(Parent.any, "Platform this device is part of.")
-    terminal = Param.Terminal(Parent.any, "The terminal")
+fs = SCons.Node.FS.get_default_fs()
+root = fs.Dir('#')
+extra_python_nodes = [
+    root.Dir('src').Dir('python').srcnode(), # gem5 includes
+    root.Dir('ext').Dir('ply').srcnode(), # ply is used by several files
+]
 
-class Uart8250(Uart):
-    type = 'Uart8250'
-    cxx_header = "dev/uart8250.hh"
+extra_python_paths = [ node.abspath for node in extra_python_nodes ]
+
+__all__ = ['extra_python_paths']

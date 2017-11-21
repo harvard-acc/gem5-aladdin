@@ -136,7 +136,47 @@ let {{
     decoder_output += BasicConstructor.subst(eretIop)
     exec_output += PredOpExecute.subst(eretIop)
 
+    crcCode = '''
+    constexpr uint8_t size_bytes = %(sz)d;
+    constexpr uint32_t poly = %(polynom)s;
 
+    uint32_t data = htole(Op2);
+    auto data_buffer = reinterpret_cast<uint8_t*>(&data);
+
+    Dest = crc32<poly>(
+        data_buffer,   /* Message Register */
+        Op1,           /* Initial Value  of the CRC */
+        size_bytes     /* Size of the original Message */
+    );
+    '''
+
+    def crc32Emit(mnem, implCode, castagnoli, size):
+        global header_output, decoder_output, exec_output
+
+        if castagnoli:
+            # crc32c instructions
+            poly = "0x1EDC6F41"
+        else:
+            # crc32 instructions
+            poly = "0x04C11DB7"
+
+        data = {'sz' : size, 'polynom': poly}
+
+        instCode = implCode % data
+
+        crcIop = InstObjParams(mnem, mnem.capitalize(), "RegRegRegOp",
+                               { "code": instCode,
+                                 "predicate_test": predicateTest }, [])
+        header_output += RegRegRegOpDeclare.subst(crcIop)
+        decoder_output += RegRegRegOpConstructor.subst(crcIop)
+        exec_output += PredOpExecute.subst(crcIop)
+
+    crc32Emit("crc32b", crcCode, False, 1);
+    crc32Emit("crc32h", crcCode, False, 2);
+    crc32Emit("crc32w", crcCode, False, 4);
+    crc32Emit("crc32cb", crcCode, True, 1);
+    crc32Emit("crc32ch", crcCode, True, 2);
+    crc32Emit("crc32cw", crcCode, True, 4);
 
 }};
 
@@ -329,17 +369,7 @@ let {{
     exec_output += PredOpExecute.subst(revshIop)
 
     rbitCode = '''
-    uint8_t *opBytes = (uint8_t *)&Op1;
-    uint32_t resTemp;
-    uint8_t *destBytes = (uint8_t *)&resTemp;
-    // This reverses the bytes and bits of the input, or so says the
-    // internet.
-    for (int i = 0; i < 4; i++) {
-        uint32_t temp = opBytes[i];
-        temp = (temp * 0x0802 & 0x22110) | (temp * 0x8020 & 0x88440);
-        destBytes[3 - i] = (temp * 0x10101) >> 16;
-    }
-    Dest = resTemp;
+    Dest = reverseBits(Op1);
     '''
     rbitIop = InstObjParams("rbit", "Rbit", "RegRegOp",
                             { "code": rbitCode,
@@ -1040,12 +1070,11 @@ let {{
             return std::make_shared<HypervisorTrap>(machInst, imm,
                 EC_TRAPPED_CP15_MCR_MRC);
         }
-        fault = std::make_shared<FlushPipe>();
     '''
     isbIop = InstObjParams("isb", "Isb", "ImmOp",
                              {"code": isbCode,
                                "predicate_test": predicateTest},
-                                ['IsSerializeAfter'])
+                                ['IsSerializeAfter', 'IsSquashAfter'])
     header_output += ImmOpDeclare.subst(isbIop)
     decoder_output += ImmOpConstructor.subst(isbIop)
     exec_output += PredOpExecute.subst(isbIop)
@@ -1057,7 +1086,6 @@ let {{
             return std::make_shared<HypervisorTrap>(machInst, imm,
                 EC_TRAPPED_CP15_MCR_MRC);
         }
-        fault = std::make_shared<FlushPipe>();
     '''
     dsbIop = InstObjParams("dsb", "Dsb", "ImmOp",
                              {"code": dsbCode,

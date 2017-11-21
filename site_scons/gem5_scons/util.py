@@ -1,4 +1,18 @@
-# Copyright (c) 2005-2007 The Regents of The University of Michigan
+# Copyright (c) 2013, 2015-2017 ARM Limited
+# All rights reserved.
+#
+# The license below extends only to copyright in the software and shall
+# not be construed as granting a license to any other intellectual
+# property including but not limited to intellectual property relating
+# to a hardware implementation of the functionality of the software
+# licensed hereunder.  You may use the software subject to the license
+# terms below provided that you ensure that this notice is replicated
+# unmodified and in its entirety in all distributions of the software,
+# modified or unmodified, in source code or in binary form.
+#
+# Copyright (c) 2011 Advanced Micro Devices, Inc.
+# Copyright (c) 2009 The Hewlett-Packard Development Company
+# Copyright (c) 2004-2005 The Regents of The University of Michigan
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -23,17 +37,16 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Authors: Nathan Binkert
 
-from m5.SimObject import SimObject
-from m5.params import *
-from m5.proxy import *
+import sys
 
-class Terminal(SimObject):
-    type = 'Terminal'
-    cxx_header = "dev/terminal.hh"
-    intr_control = Param.IntrControl(Parent.any, "interrupt controller")
-    port = Param.TcpPort(3456, "listen port")
-    number = Param.Int(0, "terminal number")
-    output = Param.Bool(True, "Enable output dump to file")
+import SCons.Script
+
+import m5.util.terminal
+
+def ignore_style():
+    """Determine whether we should ignore style checks"""
+    return SCons.Script.GetOption('ignore_style') or not sys.stdin.isatty()
+
+def get_termcap():
+    return m5.util.terminal.get_termcap(SCons.Script.GetOption('use_colors'))

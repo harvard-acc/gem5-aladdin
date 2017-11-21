@@ -36,7 +36,7 @@
 #define __DEV_UART8250_HH__
 
 #include "dev/io_device.hh"
-#include "dev/uart.hh"
+#include "dev/serial/uart.hh"
 #include "params/Uart8250.hh"
 
 /* UART8250 Interrupt ID Register

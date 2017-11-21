@@ -44,8 +44,6 @@ if env['TARGET_ISA'] == 'null':
 
 SimObject('BadDevice.py')
 SimObject('Platform.py')
-SimObject('Terminal.py')
-SimObject('Uart.py')
 
 Source('baddev.cc')
 Source('intel_8254_timer.cc')
@@ -53,12 +51,6 @@ Source('mc146818.cc')
 Source('pixelpump.cc')
 Source('platform.cc')
 Source('ps2.cc')
-Source('terminal.cc')
-Source('uart.cc')
-Source('uart8250.cc')
 
 DebugFlag('Intel8254Timer')
 DebugFlag('MC146818')
-DebugFlag('Terminal')
-DebugFlag('TerminalVerbose')
-DebugFlag('Uart')

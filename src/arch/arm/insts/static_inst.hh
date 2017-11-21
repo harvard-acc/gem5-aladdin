@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013, 2016 ARM Limited
+ * Copyright (c) 2010-2013,2016-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -48,6 +48,7 @@
 #include "arch/arm/utility.hh"
 #include "arch/arm/system.hh"
 #include "base/trace.hh"
+#include "cpu/exec_context.hh"
 #include "cpu/static_inst.hh"
 #include "sim/byteswap.hh"
 #include "sim/full_system.hh"
@@ -290,16 +291,14 @@ class ArmStaticInst : public StaticInst
         return ((spsr & ~bitMask) | (val & bitMask));
     }
 
-    template<class XC>
     static inline Addr
-    readPC(XC *xc)
+    readPC(ExecContext *xc)
     {
         return xc->pcState().instPC();
     }
 
-    template<class XC>
     static inline void
-    setNextPC(XC *xc, Addr val)
+    setNextPC(ExecContext *xc, Addr val)
     {
         PCState pc = xc->pcState();
         pc.instNPC(val);
@@ -340,9 +339,8 @@ class ArmStaticInst : public StaticInst
     }
 
     // Perform an interworking branch.
-    template<class XC>
     static inline void
-    setIWNextPC(XC *xc, Addr val)
+    setIWNextPC(ExecContext *xc, Addr val)
     {
         PCState pc = xc->pcState();
         pc.instIWNPC(val);
@@ -351,9 +349,8 @@ class ArmStaticInst : public StaticInst
 
     // Perform an interworking branch in ARM mode, a regular branch
     // otherwise.
-    template<class XC>
     static inline void
-    setAIWNextPC(XC *xc, Addr val)
+    setAIWNextPC(ExecContext *xc, Addr val)
     {
         PCState pc = xc->pcState();
         pc.instAIWNPC(val);
@@ -420,6 +417,12 @@ class ArmStaticInst : public StaticInst
   public:
     virtual void
     annotateFault(ArmFault *fault) {}
+
+    uint8_t
+    getIntWidth() const
+    {
+        return intWidth;
+    }
 };
 }
 

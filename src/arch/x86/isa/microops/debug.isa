@@ -78,13 +78,13 @@ def template MicroDebugDeclare {{
         %(class_name)s(ExtMachInst _machInst, const char * instMnem,
                 uint64_t setFlags, std::string _message, uint8_t _cc);
 
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
     };
 }};
 
 def template MicroDebugExecute {{
         Fault
-        %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
+        %(class_name)s::execute(ExecContext *xc,
                 Trace::InstRecord *traceData) const
         {
             %(op_decl)s

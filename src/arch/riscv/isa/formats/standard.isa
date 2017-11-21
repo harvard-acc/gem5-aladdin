@@ -184,7 +184,7 @@ def template ImmDeclare {{
       public:
         /// Constructor.
         %(class_name)s(MachInst machInst);
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
         std::string generateDisassembly(Addr pc,
             const SymbolTable *symtab) const override;
     };
@@ -201,8 +201,8 @@ def template ImmConstructor {{
 
 def template ImmExecute {{
     Fault
-    %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
-        Trace::InstRecord *traceData) const
+    %(class_name)s::execute(
+        ExecContext *xc, Trace::InstRecord *traceData) const
     {
         Fault fault = NoFault;
 
@@ -240,7 +240,7 @@ def template BranchDeclare {{
       public:
         /// Constructor.
         %(class_name)s(MachInst machInst);
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
 
         std::string
         generateDisassembly(Addr pc, const SymbolTable *symtab) const override;
@@ -254,7 +254,7 @@ def template BranchDeclare {{
 
 def template BranchExecute {{
     Fault
-    %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
+    %(class_name)s::execute(ExecContext *xc,
         Trace::InstRecord *traceData) const
     {
         Fault fault = NoFault;
@@ -299,7 +299,7 @@ def template JumpDeclare {{
       public:
         /// Constructor.
         %(class_name)s(MachInst machInst);
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
 
         std::string
         generateDisassembly(Addr pc, const SymbolTable *symtab) const override;
@@ -313,8 +313,8 @@ def template JumpDeclare {{
 
 def template JumpExecute {{
     Fault
-    %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
-        Trace::InstRecord *traceData) const
+    %(class_name)s::execute(
+        ExecContext *xc, Trace::InstRecord *traceData) const
     {
         Fault fault = NoFault;
 

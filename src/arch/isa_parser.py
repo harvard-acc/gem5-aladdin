@@ -122,8 +122,6 @@ class Template(object):
         # Protect non-Python-dict substitutions (e.g. if there's a printf
         # in the templated C++ code)
         template = self.parser.protectNonSubstPercents(self.template)
-        # CPU-model-specific substitutions are handled later (in GenCode).
-        template = self.parser.protectCpuSymbols(template)
 
         # Build a dict ('myDict') to use for the template substitution.
         # Start with the template namespace.  Make a copy since we're
@@ -218,11 +216,9 @@ class Template(object):
             raise TypeError, "Template.subst() arg must be or have dictionary"
         return template % myDict
 
-    # Convert to string.  This handles the case when a template with a
-    # CPU-specific term gets interpolated into another template or into
-    # an output block.
+    # Convert to string.
     def __str__(self):
-        return self.parser.expandCpuSymbolsToString(self.template)
+        return self.template
 
 ################
 # Format object.
@@ -284,23 +280,18 @@ class NoFormat(object):
 # strings containing code destined for decoder.hh and decoder.cc
 # respectively.  The decode_block attribute contains code to be
 # incorporated in the decode function itself (that will also end up in
-# decoder.cc).  The exec_output attribute is a dictionary with a key
-# for each CPU model name; the value associated with a particular key
-# is the string of code for that CPU model's exec.cc file.  The
-# has_decode_default attribute is used in the decode block to allow
-# explicit default clauses to override default default clauses.
+# decoder.cc).  The exec_output attribute  is the string of code for the
+# exec.cc file.  The has_decode_default attribute is used in the decode block
+# to allow explicit default clauses to override default default clauses.
 
 class GenCode(object):
-    # Constructor.  At this point we substitute out all CPU-specific
-    # symbols.  For the exec output, these go into the per-model
-    # dictionary.  For all other output types they get collapsed into
-    # a single string.
+    # Constructor.
     def __init__(self, parser,
                  header_output = '', decoder_output = '', exec_output = '',
                  decode_block = '', has_decode_default = False):
         self.parser = parser
-        self.header_output = parser.expandCpuSymbolsToString(header_output)
-        self.decoder_output = parser.expandCpuSymbolsToString(decoder_output)
+        self.header_output = header_output
+        self.decoder_output = decoder_output
         self.exec_output = exec_output
         self.decode_block = decode_block
         self.has_decode_default = has_decode_default
@@ -802,7 +793,7 @@ class VecRegOperand(Operand):
 
         wb = '''
         if (traceData) {
-            panic("Vectors not supported yet in tracedata");
+            warn_once("Vectors not supported yet in tracedata");
             /*traceData->setData(final_val);*/
         }
         '''
@@ -1462,25 +1453,11 @@ class LineTracker(object):
 #
 
 class ISAParser(Grammar):
-    class CpuModel(object):
-        def __init__(self, name, filename, includes, strings):
-            self.name = name
-            self.filename = filename
-            self.includes = includes
-            self.strings = strings
-
     def __init__(self, output_dir):
         super(ISAParser, self).__init__()
         self.output_dir = output_dir
 
         self.filename = None # for output file watermarking/scaremongering
-
-        self.cpuModels = [
-            ISAParser.CpuModel('ExecContext',
-                               'generic_cpu_exec.cc',
-                               '#include "cpu/exec_context.hh"',
-                               { "CPU_exec_context" : "ExecContext" }),
-            ]
 
         # variable to hold templates
         self.templateMap = {}
@@ -1573,46 +1550,31 @@ class ISAParser(Grammar):
     # These small files make it much clearer how this tool works, since
     # you directly see the chunks emitted as files that are #include'd.
     def write_top_level_files(self):
-        dep = self.open('inc.d', bare=True)
-
         # decoder header - everything depends on this
         file = 'decoder.hh'
         with self.open(file) as f:
-            inc = []
-
             fn = 'decoder-g.hh.inc'
             assert(fn in self.files)
             f.write('#include "%s"\n' % fn)
-            inc.append(fn)
 
             fn = 'decoder-ns.hh.inc'
             assert(fn in self.files)
             f.write('namespace %s {\n#include "%s"\n}\n'
                     % (self.namespace, fn))
-            inc.append(fn)
-
-            print >>dep, file+':', ' '.join(inc)
 
         # decoder method - cannot be split
         file = 'decoder.cc'
         with self.open(file) as f:
-            inc = []
-
             fn = 'decoder-g.cc.inc'
             assert(fn in self.files)
             f.write('#include "%s"\n' % fn)
-            inc.append(fn)
 
             fn = 'decoder.hh'
             f.write('#include "%s"\n' % fn)
-            inc.append(fn)
 
             fn = 'decode-method.cc.inc'
             # is guaranteed to have been written for parse to complete
             f.write('#include "%s"\n' % fn)
-            inc.append(fn)
-
-            print >>dep, file+':', ' '.join(inc)
 
         extn = re.compile('(\.[^\.]+)$')
 
@@ -1625,16 +1587,12 @@ class ISAParser(Grammar):
             else:
                 file = file_
             with self.open(file) as f:
-                inc = []
-
                 fn = 'decoder-g.cc.inc'
                 assert(fn in self.files)
                 f.write('#include "%s"\n' % fn)
-                inc.append(fn)
 
                 fn = 'decoder.hh'
                 f.write('#include "%s"\n' % fn)
-                inc.append(fn)
 
                 fn = 'decoder-ns.cc.inc'
                 assert(fn in self.files)
@@ -1643,45 +1601,27 @@ class ISAParser(Grammar):
                     print >>f, '#define __SPLIT %u' % i
                 print >>f, '#include "%s"' % fn
                 print >>f, '}'
-                inc.append(fn)
 
-                print >>dep, file+':', ' '.join(inc)
-
-        # instruction execution per-CPU model
+        # instruction execution
         splits = self.splits[self.get_file('exec')]
-        for cpu in self.cpuModels:
-            for i in range(1, splits+1):
+        for i in range(1, splits+1):
+            file = 'generic_cpu_exec.cc'
+            if splits > 1:
+                file = extn.sub(r'_%d\1' % i, file)
+            with self.open(file) as f:
+                fn = 'exec-g.cc.inc'
+                assert(fn in self.files)
+                f.write('#include "%s"\n' % fn)
+                f.write('#include "cpu/exec_context.hh"\n')
+                f.write('#include "decoder.hh"\n')
+
+                fn = 'exec-ns.cc.inc'
+                assert(fn in self.files)
+                print >>f, 'namespace %s {' % self.namespace
                 if splits > 1:
-                    file = extn.sub(r'_%d\1' % i, cpu.filename)
-                else:
-                    file = cpu.filename
-                with self.open(file) as f:
-                    inc = []
-
-                    fn = 'exec-g.cc.inc'
-                    assert(fn in self.files)
-                    f.write('#include "%s"\n' % fn)
-                    inc.append(fn)
-
-                    f.write(cpu.includes+"\n")
-
-                    fn = 'decoder.hh'
-                    f.write('#include "%s"\n' % fn)
-                    inc.append(fn)
-
-                    fn = 'exec-ns.cc.inc'
-                    assert(fn in self.files)
-                    print >>f, 'namespace %s {' % self.namespace
-                    print >>f, '#define CPU_EXEC_CONTEXT %s' \
-                               % cpu.strings['CPU_exec_context']
-                    if splits > 1:
-                        print >>f, '#define __SPLIT %u' % i
-                    print >>f, '#include "%s"' % fn
-                    print >>f, '}'
-                    inc.append(fn)
-
-                    inc.append("decoder.hh")
-                    print >>dep, file+':', ' '.join(inc)
+                    print >>f, '#define __SPLIT %u' % i
+                print >>f, '#include "%s"' % fn
+                print >>f, '}'
 
         # max_inst_regs.hh
         self.update('max_inst_regs.hh',
@@ -1689,10 +1629,6 @@ class ISAParser(Grammar):
     const int MaxInstSrcRegs = %(maxInstSrcRegs)d;
     const int MaxInstDestRegs = %(maxInstDestRegs)d;
     const int MaxMiscDestRegs = %(maxMiscDestRegs)d;\n}\n''' % self)
-        print >>dep, 'max_inst_regs.hh:'
-
-        dep.close()
-
 
     scaremonger_template ='''// DO NOT EDIT
 // This file was automatically generated from an ISA description:
@@ -1955,13 +1891,10 @@ class ISAParser(Grammar):
 
     # Massage output block by substituting in template definitions and
     # bit operators.  We handle '%'s embedded in the string that don't
-    # indicate template substitutions (or CPU-specific symbols, which
-    # get handled in GenCode) by doubling them first so that the
+    # indicate template substitutions by doubling them first so that the
     # format operation will reduce them back to single '%'s.
     def process_output(self, s):
         s = self.protectNonSubstPercents(s)
-        # protects cpu-specific symbols too
-        s = self.protectCpuSymbols(s)
         return substBitOps(s % self.templateMap)
 
     def p_output(self, t):
@@ -2459,40 +2392,6 @@ StaticInstPtr
 
         # create new object and store in global map
         self.formatMap[id] = Format(id, params, code)
-
-    def expandCpuSymbolsToDict(self, template):
-        '''Expand template with CPU-specific references into a
-        dictionary with an entry for each CPU model name.  The entry
-        key is the model name and the corresponding value is the
-        template with the CPU-specific refs substituted for that
-        model.'''
-
-        # Protect '%'s that don't go with CPU-specific terms
-        t = re.sub(r'%(?!\(CPU_)', '%%', template)
-        result = {}
-        for cpu in self.cpuModels:
-            result[cpu.name] = t % cpu.strings
-        return result
-
-    def expandCpuSymbolsToString(self, template):
-        '''*If* the template has CPU-specific references, return a
-        single string containing a copy of the template for each CPU
-        model with the corresponding values substituted in.  If the
-        template has no CPU-specific references, it is returned
-        unmodified.'''
-
-        if template.find('%(CPU_') != -1:
-            return reduce(lambda x,y: x+y,
-                          self.expandCpuSymbolsToDict(template).values())
-        else:
-            return template
-
-    def protectCpuSymbols(self, template):
-        '''Protect CPU-specific references by doubling the
-        corresponding '%'s (in preparation for substituting a different
-        set of references into the template).'''
-
-        return re.sub(r'%(?=\(CPU_)', '%%', template)
 
     def protectNonSubstPercents(self, s):
         '''Protect any non-dict-substitution '%'s in a format string

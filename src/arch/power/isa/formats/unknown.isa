@@ -53,7 +53,7 @@ output header {{
             flags[IsNonSpeculative] = true;
         }
 
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
 
         std::string
         generateDisassembly(Addr pc, const SymbolTable *symtab) const;
@@ -71,8 +71,7 @@ output decoder {{
 
 output exec {{
     Fault
-    Unknown::execute(CPU_EXEC_CONTEXT *xc,
-                     Trace::InstRecord *traceData) const
+    Unknown::execute(ExecContext *xc, Trace::InstRecord *traceData) const
     {
         panic("attempt to execute unknown instruction at %#x"
               "(inst 0x%08x, opcode 0x%x, binary: %s)",

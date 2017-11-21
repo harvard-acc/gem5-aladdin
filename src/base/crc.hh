@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2015 ARM Limited
+ * Copyright (c) 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -34,93 +34,48 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Authors: William Wang
- *          Ali Saidi
- *          Chris Emmons
- *          Andreas Sandberg
+ * Authors: Giacomo Travaglini
  */
-#ifndef __BASE_BITMAP_HH__
-#define __BASE_BITMAP_HH__
 
-#include <ostream>
+#ifndef __BASE_CRC_HH__
+#define __BASE_CRC_HH__
 
-#include "base/compiler.hh"
-#include "base/framebuffer.hh"
+#include "base/bitfield.hh"
 
 /**
- * @file Declaration of a class that writes a frame buffer to a bitmap
+ * Evaluate the CRC32 of the first size bytes of a data buffer,
+ * using a specific polynomium and an initial value.
+ * The crc is accomplished by reversing the input, the initial value
+ * and the output (remainder).
+ *
+ * @param data: Input data buffer pointer
+ * @param crc:  Initial value of the checksum
+ * @param size: Number of bytes
+ *
+ * @return 32-bit remainder of the checksum
  */
-
-
-// write frame buffer into a bitmap picture
-class  Bitmap
+template <uint32_t Poly>
+uint32_t
+crc32(const uint8_t* data, uint32_t crc, std::size_t size)
 {
-  public:
-    /**
-     * Create a bitmap that takes data in a given mode & size and
-     * outputs to an ostream.
-     */
-    Bitmap(const FrameBuffer *fb);
+    uint32_t byte = 0;
 
-    ~Bitmap();
+    crc = reverseBits(crc);
+    for (auto i = 0; i < size; i++) {
+        byte = data[i];
 
-    /**
-     * Write the frame buffer data into the provided ostream
-     *
-     * @param bmp stream to write to
-     */
-    void write(std::ostream &bmp) const;
-
-
-  private:
-    struct FileHeader {
-        unsigned char magic_number[2];
-        uint32_t size;
-        uint16_t reserved1;
-        uint16_t reserved2;
-        uint32_t offset;
-    } M5_ATTR_PACKED;
-
-    struct InfoHeaderV1 { /* Aka DIB header */
-        uint32_t Size;
-        uint32_t Width;
-        uint32_t Height;
-        uint16_t Planes;
-        uint16_t BitCount;
-        uint32_t Compression;
-        uint32_t SizeImage;
-        uint32_t XPelsPerMeter;
-        uint32_t YPelsPerMeter;
-        uint32_t ClrUsed;
-        uint32_t ClrImportant;
-    } M5_ATTR_PACKED;
-
-    struct CompleteV1Header {
-        FileHeader file;
-        InfoHeaderV1 info;
-    } M5_ATTR_PACKED;
-
-    struct BmpPixel32 {
-        BmpPixel32 &operator=(const Pixel &rhs) {
-            red = rhs.red;
-            green = rhs.green;
-            blue = rhs.blue;
-            padding = 0;
-
-            return *this;
+        // 32-bit reverse
+        byte = reverseBits(byte);
+        for (auto j = 0; j <= 7; j++) {
+            if ((int)(crc ^ byte) < 0) {
+                crc = (crc << 1) ^ Poly;
+            } else {
+                crc = crc << 1;
+            }
+            byte = byte << 1;
         }
-        uint8_t blue;
-        uint8_t green;
-        uint8_t red;
-        uint8_t padding;
-    } M5_ATTR_PACKED;
+    }
+    return reverseBits(crc);
+}
 
-    typedef BmpPixel32 PixelType;
-
-    const CompleteV1Header getCompleteHeader() const;
-
-    const FrameBuffer &fb;
-};
-
-#endif // __BASE_BITMAP_HH__
-
+#endif // __BASE_CRC_HH__

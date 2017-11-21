@@ -56,6 +56,7 @@ from Gic import *
 from EnergyCtrl import EnergyCtrl
 from ClockDomain import SrcClockDomain
 from SubSystem import SubSystem
+from Graphics import ImageFormat
 
 # Platforms with KVM support should generally use in-kernel GIC
 # emulation. Use a GIC model that automatically switches between
@@ -298,7 +299,10 @@ class HDLcd(AmbaDmaDevice):
                                     "selector order in some kernels")
     workaround_dma_line_count = Param.Bool(True, "Workaround incorrect "
                                            "DMA line count (off by 1)")
-    enable_capture = Param.Bool(True, "capture frame to system.framebuffer.bmp")
+    enable_capture = Param.Bool(True, "capture frame to "
+                                      "system.framebuffer.{extension}")
+    frame_format = Param.ImageFormat("Auto",
+                                     "image format of the captured frame")
 
     pixel_buffer_size = Param.MemorySize32("2kB", "Size of address range")
 
@@ -365,7 +369,6 @@ class RealView(Platform):
         self.nvmem.port = mem_bus.master
         cur_sys.boot_loader = loc('boot.arm')
         cur_sys.atags_addr = 0x100
-        cur_sys.load_addr_mask = 0xfffffff
         cur_sys.load_offset = 0
 
 
@@ -742,7 +745,6 @@ class VExpress_EMM(RealView):
         if not cur_sys.boot_loader:
             cur_sys.boot_loader = loc('boot_emm.arm')
         cur_sys.atags_addr = 0x8000000
-        cur_sys.load_addr_mask = 0xfffffff
         cur_sys.load_offset = 0x80000000
 
 class VExpress_EMM64(VExpress_EMM):
@@ -760,7 +762,6 @@ class VExpress_EMM64(VExpress_EMM):
         if not cur_sys.boot_loader:
             cur_sys.boot_loader = loc('boot_emm.arm64')
         cur_sys.atags_addr = 0x8000000
-        cur_sys.load_addr_mask = 0xfffffff
         cur_sys.load_offset = 0x80000000
 
 
@@ -932,9 +933,6 @@ Interrupts:
         if not cur_sys.boot_loader:
             cur_sys.boot_loader = [ loc('boot_emm.arm64'), loc('boot_emm.arm') ]
         cur_sys.atags_addr = 0x8000000
-        # the old load_add_mask 0xfffffff works for 32-bit kernel
-        # but not the 64-bit one. The new value 0x7ffffff works for both
-        cur_sys.load_addr_mask = 0x7ffffff
         cur_sys.load_offset = 0x80000000
 
         #  Setup m5ops. It's technically not a part of the boot

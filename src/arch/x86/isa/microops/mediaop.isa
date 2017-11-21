@@ -29,7 +29,7 @@
 // Authors: Gabe Black
 
 def template MediaOpExecute {{
-        Fault %(class_name)s::execute(CPU_EXEC_CONTEXT *xc,
+        Fault %(class_name)s::execute(ExecContext *xc,
                 Trace::InstRecord *traceData) const
         {
             Fault fault = NoFault;
@@ -57,7 +57,7 @@ def template MediaOpRegDeclare {{
                 InstRegIndex _src1, InstRegIndex _src2, InstRegIndex _dest,
                 uint8_t _srcSize, uint8_t _destSize, uint16_t _ext);
 
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
     };
 }};
 
@@ -71,7 +71,7 @@ def template MediaOpImmDeclare {{
                 InstRegIndex _src1, uint16_t _imm8, InstRegIndex _dest,
                 uint8_t _srcSize, uint8_t _destSize, uint16_t _ext);
 
-        %(BasicExecDeclare)s
+        Fault execute(ExecContext *, Trace::InstRecord *) const;
     };
 }};
 

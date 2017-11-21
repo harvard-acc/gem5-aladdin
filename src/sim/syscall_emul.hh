@@ -975,6 +975,8 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
 
         if ((start + old_length) == mmap_end &&
             (!use_provided_address || provided_address == start)) {
+            // This case cannot occur when growing downward, as
+            // start is greater than or equal to mmap_end.
             uint64_t diff = new_length - old_length;
             process->allocateMem(mmap_end, diff);
             mem_state->setMmapEnd(mmap_end + diff);
@@ -984,8 +986,15 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
                 warn("can't remap here and MREMAP_MAYMOVE flag not set\n");
                 return -ENOMEM;
             } else {
-                uint64_t new_start = use_provided_address ?
-                    provided_address : mmap_end;
+                uint64_t new_start = provided_address;
+                if (!use_provided_address) {
+                    new_start = process->mmapGrowsDown() ?
+                                mmap_end - new_length : mmap_end;
+                    mmap_end = process->mmapGrowsDown() ?
+                               new_start : mmap_end + new_length;
+                    mem_state->setMmapEnd(mmap_end);
+                }
+
                 process->pTable->remap(start, old_length, new_start);
                 warn("mremapping to new vaddr %08p-%08p, adding %d\n",
                      new_start, new_start + new_length,
@@ -994,10 +1003,11 @@ mremapFunc(SyscallDesc *desc, int callnum, Process *process, ThreadContext *tc)
                 process->allocateMem(new_start + old_length,
                                      new_length - old_length,
                                      use_provided_address /* clobber */);
-                if (!use_provided_address)
-                    mem_state->setMmapEnd(mmap_end + new_length);
                 if (use_provided_address &&
-                    new_start + new_length > mem_state->getMmapEnd()) {
+                    ((new_start + new_length > mem_state->getMmapEnd() &&
+                      !process->mmapGrowsDown()) ||
+                    (new_start < mem_state->getMmapEnd() &&
+                      process->mmapGrowsDown()))) {
                     // something fishy going on here, at least notify the user
                     // @todo: increase mmap_end?
                     warn("mmap region limit exceeded with MREMAP_FIXED\n");
@@ -1742,6 +1752,48 @@ getrlimitFunc(SyscallDesc *desc, int callnum, Process *process,
     }
 
     rlp.copyOut(tc->getMemProxy());
+    return 0;
+}
+
+template <class OS>
+SyscallReturn
+prlimitFunc(SyscallDesc *desc, int callnum, Process *process,
+            ThreadContext *tc)
+{
+    int index = 0;
+    if (process->getSyscallArg(tc, index) != 0)
+    {
+        warn("prlimit: ignoring rlimits for nonzero pid");
+        return -EPERM;
+    }
+    int resource = process->getSyscallArg(tc, index);
+    Addr n = process->getSyscallArg(tc, index);
+    if (n != 0)
+        warn("prlimit: ignoring new rlimit");
+    Addr o = process->getSyscallArg(tc, index);
+    if (o != 0)
+    {
+        TypedBufferArg<typename OS::rlimit> rlp(
+                process->getSyscallArg(tc, index));
+        switch (resource) {
+          case OS::TGT_RLIMIT_STACK:
+            // max stack size in bytes: make up a number (8MB for now)
+            rlp->rlim_cur = rlp->rlim_max = 8 * 1024 * 1024;
+            rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
+            rlp->rlim_max = TheISA::htog(rlp->rlim_max);
+            break;
+          case OS::TGT_RLIMIT_DATA:
+            // max data segment size in bytes: make up a number
+            rlp->rlim_cur = rlp->rlim_max = 256*1024*1024;
+            rlp->rlim_cur = TheISA::htog(rlp->rlim_cur);
+            rlp->rlim_max = TheISA::htog(rlp->rlim_max);
+          default:
+            warn("prlimit: unimplemented resource %d", resource);
+            return -EINVAL;
+            break;
+        }
+        rlp.copyOut(tc->getMemProxy());
+    }
     return 0;
 }
 
