@@ -69,7 +69,7 @@ DMASequencer::makeRequest(PacketPtr pkt)
     }
 
     Addr paddr = pkt->getAddr();
-    uint8_t* data = pkt->hasData() ? pkt->getPtr<uint8_t>() : NULL;
+    uint8_t* data = pkt->isDataSet() ? pkt->getPtr<uint8_t>() : NULL;
     int len = pkt->getSize();
     bool write = pkt->isWrite();
 
