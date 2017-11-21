@@ -221,7 +221,7 @@ termcap = get_termcap(GetOption('use_colors'))
 use_vars = set([ 'AS', 'AR', 'CC', 'CXX', 'HOME', 'LD_LIBRARY_PATH',
                  'LIBRARY_PATH', 'PATH', 'PKG_CONFIG_PATH', 'PROTOC',
                  'PYTHONPATH', 'RANLIB', 'SWIG', 'TERM', 'BOOST_ROOT',
-                 'MYSQL_HOME' ])
+                 'MYSQL_HOME', 'FORCE_CXX11_ABI'])
 
 use_prefixes = [
     "ASAN_",           # address sanitizer symbolizer path and settings
@@ -245,17 +245,19 @@ main = Environment(ENV=use_env, IMPLICIT_COMMAND_DEPENDENCIES=0)
 main.Decider('MD5-timestamp')
 main.root = Dir(".")         # The current directory (where this file lives).
 main.srcdir = Dir("src")     # The source directory
-#boost
-main.Append(CPPPATH=[use_env['BOOST_ROOT']])
-main.Append(LIBS=['boost_graph'])
+
+if 'BOOST_ROOT' in use_env:
+    main.Append(CPPPATH=[os.path.join(use_env['BOOST_ROOT'], 'include')])
+    main.Append(LIBPATH=[os.path.join(use_env['BOOST_ROOT'], 'lib')])
+    main.Append(LIBS=['boost_graph'])
 
 if GetOption('use_db'):
-  main.Append(CPPPATH=[use_env['MYSQL_HOME']])
-  main.Append(CXXFLAGS='-DUSE_DB')
-  main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
+    main.Append(CPPPATH=[use_env['MYSQL_HOME']])
+    main.Append(CXXFLAGS='-DUSE_DB')
+    main.Append(LINKFLAGS='-L%s/lib/ -lmysqlcppconn' % use_env['MYSQL_HOME'])
 
 if GetOption('debug_aladdin'):
-  main.Append(CCFLAGS = '-DDEBUG')
+    main.Append(CCFLAGS = '-DDEBUG')
 
 #FIXME
 main_dict_keys = main.Dictionary().keys()
@@ -702,10 +704,12 @@ if main['GCC'] or main['CLANG']:
     main.Append(CCFLAGS=['-fno-strict-aliasing'])
     # Enable -Wall and -Wextra and then disable the few warnings that
     # we consistently violate
-    main.Append(CCFLAGS=['-Wall', '-Wundef', '-Wextra',
+    main.Append(CCFLAGS=['-Wall', '-Wextra',
                          '-Wno-sign-compare', '-Wno-unused-parameter',
                          '-Wmissing-field-initializers',
                          '-Woverloaded-virtual',
+                         # For Boost 1.58
+                         '-Wno-undef',
                          # These come from CACTI.
                          '-Wno-unused-local-typedefs',
                          '-Wno-reorder',
@@ -836,7 +840,16 @@ if main['GCC']:
 
     # add option to check for undeclared overrides
     if compareVersions(gcc_version, "5.0") > 0:
-        main.Append(CCFLAGS=['-Wno-error=suggest-override'])
+        main.Append(CCFLAGS=['-Wno-error=suggest-override',
+                             # For Boost.
+                             '-Wno-deprecated-declarations'])
+        # GCC 5 introduced a new ABI to conform to certain C++11 standards,
+        # which will result in link failures if other dependencies were
+        # compiled with the older ABI, so for the sake of backwards
+        # compatibility, use the older ABI unless the user has explicitly
+        # requested otherwise.
+        if not ('FORCE_CXX_ABI' in main and main['FORCE_CXX11_ABI']):
+            main.Append(CPPFLAGS=["-D_GLIBCXX_USE_CXX11_ABI=0"])
 
 elif main['CLANG']:
     # Check for a supported version of clang, >= 3.1 is needed to
