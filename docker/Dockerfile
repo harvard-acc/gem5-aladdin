@@ -55,6 +55,13 @@ RUN wget -q http://releases.llvm.org/3.4.2/cfe-3.4.2.src.tar.gz && \
     make -j8 && \
     make install
 
+# Install libconfuse 3.2.1 from source.
+RUN wget -q https://github.com/martinh/libconfuse/releases/download/v3.2.1/confuse-3.2.1.tar.gz && \
+    tar -xf confuse-3.2.1.tar.gz && \
+    cd confuse-3.2.1 && \
+    ./configure && \
+    make install
+
 WORKDIR /workspace
 
 # Build and install LLVM-Tracer
@@ -64,6 +71,9 @@ RUN git clone https://github.com/ysshao/LLVM-Tracer && \
     mkdir lib && \
     mkdir build && cd build && \
     cmake .. && make && make install
+
+# So we can link gem5 against libprotobuf when installed from apt.
+ENV FORCE_CXX11_ABI 1
 
 # Clone gem5-aladdin, but don't build. We'll assume the developer will build.
 RUN apt-get install -y scons
