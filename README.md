@@ -20,8 +20,20 @@ Yakun Sophia Shao, Sam (Likun) Xi, Vijayalakashmi Srinvisan, Gu-Yeon Wei, and Da
 International Symposium on Microarchitecture (MICRO), June 2016.
 [PDF](http://www.eecs.harvard.edu/~shao/papers/shao2016-micro.pdf)
 
+If you have any questions, please send them to the gem5-aladdin users mailing
+list (see link at the very bottom).
 
 ## Notices ##
+
+#### December 1st, 2017 ####
+
+gem5-Aladdin now has a Docker image! This image has all of gem5-aladdin's
+dependencies installed, and it comes with a basic set of development tools
+(e.g. vim). If you are having issues building the simulator because of
+dependency problems, please consider using Docker! The prebuilt image is
+located on [Docker Hub](https://hub.docker.com/r/xyzsam/gem5-aladdin/).
+
+See the `docker` directory for more details.
 
 #### August 28th, 2017 ####
 
@@ -182,8 +194,9 @@ gem5-Aladdin does not currently support full-system simulation.
 
 -----------------------
 
-### Contact ###
+### Questions ###
 
-Sam Xi: samxi@seas.harvard.edu
+We would appreciate if you post any questions to the gem5-aladdin users mailing
+list.
 
-Sophia Shao: sshao@nvidia.com
+[gem5-aladdin users mailing list](https://groups.google.com/forum/#!forum/gem5-aladdin-users)
