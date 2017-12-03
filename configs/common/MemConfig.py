@@ -39,7 +39,7 @@
 import m5
 from m5.defines import buildEnv
 import m5.objects
-from m5.objects import CommMonitor
+from m5.objects import CommMonitor, MemTraceProbe
 from m5.util import addToPath, fatal
 import inspect
 import sys
@@ -242,8 +242,8 @@ def config_mem(options, system):
             subsystem.mem_ctrls[i].port = xbar[i/4].master
         else:
             if options.record_dram_traffic:
-                monitor = CommMonitor(
-                    trace_enable=True, trace_file="dram_%d.trc.gz" % i)
+                monitor = CommMonitor()
+                monitor.trace = MemTraceProbe(trace_file="dram_%d.trc.gz" % i)
                 xbar.master = monitor.slave
                 monitor.master = subsystem.mem_ctrls[i].port
                 monitor_name = "dram_%d_monitor" % i
