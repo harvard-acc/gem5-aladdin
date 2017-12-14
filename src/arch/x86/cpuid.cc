@@ -138,7 +138,11 @@ namespace CpuidCacheParams {
 }  // namespace CpuidCacheParams
 
     static const int vendorStringSize = 13;
+#ifdef USE_M5_CPUID_VENDOR_STRING
     static const char vendorString[vendorStringSize] = "M5 Simulator";
+#else
+    static const char vendorString[vendorStringSize] = "GenuineIntel";
+#endif
     static const int nameStringSize = 48;
     static const char nameString[nameStringSize] = "Fake M5 x86_64 CPU";
 
