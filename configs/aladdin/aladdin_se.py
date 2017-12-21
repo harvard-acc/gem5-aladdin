@@ -236,6 +236,8 @@ if options.accel_cfg_file:
         experimentName = config.get(accel, "experiment_name"),
         enableStatsDump = options.enable_stats_dump_and_resume,
         executeStandalone = (np == 0))
+    datapath.cacheLineFlushLatency = config.getint(accel, "cacheline_flush_latency")
+    datapath.cacheLineInvalidateLatency = config.getint(accel, "cacheline_invalidate_latency")
     datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
     datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
     datapath.numDmaChannels = config.getint(accel, "num_dma_channels")
