@@ -350,13 +350,14 @@ DmaPort::sendDma()
         trySendTimingReq();
     } else if (sys->isAtomicMode()) {
         // send everything there is to send in zero time
-        for (auto it : transmitList) {
+        for (auto& it : transmitList) {
           while(!it.empty()){
             PacketPtr pkt = it.front();
             it.pop_front();
             DPRINTF(DMA, "Sending  DMA for addr: %#x size: %d\n",
                     pkt->req->getPaddr(), pkt->req->getSize());
             Tick lat = sendAtomic(pkt);
+            numOutstandingRequests++;
 
             handleResp(pkt, lat);
           }
