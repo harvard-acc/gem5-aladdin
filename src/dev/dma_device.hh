@@ -79,6 +79,19 @@ class DmaPort : public MasterPort, public Drainable
      */
     void sendDma();
 
+    // Describes a call to dmaAction(). It can be used to delay the actual
+    // construction and queuing of DMA packets. Each of these fields is an
+    // argument to dmaAction().
+    struct DmaActionReq {
+        Packet::Command cmd;
+        Addr addr;
+        int size;
+        Event* event;
+        uint8_t* data;
+        Tick delay;
+        Request::Flags flag;
+    };
+
     /**
      * Handle a response packet by updating the corresponding DMA
      * request state to reflect the bytes received, and also update
@@ -116,6 +129,21 @@ class DmaPort : public MasterPort, public Drainable
 
     };
 
+    /** Event used to act on a delayed dmaAction request. */
+    EventFunctionWrapper sendDataAfterInvalidateEvent;
+    std::deque<DmaActionReq> outstandingRequests;
+
+    /**
+     * Callback function for sendDataAfterInvalidateEvent.  This quees up the
+     * first DmaActionReq on the outstanding requests list.
+     */
+    void sendDataAfterInvalidate();
+
+    /** Queue up DMA packets for this DmaActionReq at cache line granularity
+     * and return the last request queued.
+     */
+    Request* queueDmaAction(DmaActionReq& req, DmaReqState *reqState);
+
   public:
     /** The device that owns this port. */
     MemObject *device;
@@ -128,6 +156,7 @@ class DmaPort : public MasterPort, public Drainable
     const MasterID masterId;
 
   protected:
+
     /** Each deque represents a memory channel that never does any insertion or
      * removal in the middle. A vector of deques are used to represent
      * multi-chanel DMAs that requests across channels can be interleaved. */

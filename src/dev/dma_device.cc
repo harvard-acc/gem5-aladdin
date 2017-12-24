@@ -59,6 +59,7 @@ DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
     : MasterPort(dev->name() + ".dma", dev),
       device(dev), sys(s), masterId(s->getMasterId(dev->name())),
       sendEvent([this]{ sendDma(); }, dev->name()),
+      sendDataAfterInvalidateEvent([this]{ sendDataAfterInvalidate(); }, dev->name()),
       pendingCount(0), inRetry(false),
       maxRequests(max_req),
       chunkSize(_chunkSize),
@@ -173,61 +174,36 @@ RequestPtr
 DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
                    uint8_t *data, Tick delay, Request::Flags flag)
 {
-    // one DMA request sender state for every action, that is then
-    // split into many requests and packets based on the block size,
-    // i.e. cache line size
-    DmaReqState *reqState = new DmaReqState(event, size, addr, delay);
+    DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n",
+            addr, size, event ? event->scheduled() : -1);
+
+    DmaActionReq dmaActionReq = { cmd, addr, size, event, data, delay, flag };
 
     // (functionality added for Table Walker statistics)
     // We're only interested in this when there will only be one request.
     // For simplicity, we return the last request, which would also be
     // the only request in that case.
-    RequestPtr req = NULL;
-
-    DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n",
-            addr, size, event ? event->scheduled() : -1);
-
-    unsigned channel = findNextEmptyChannel();
+    Request* final_req = NULL;
 
     MemCmd memcmd(cmd);
     if (invalidateOnWrite && memcmd.isWrite()) {
-      // Invalidation requests have no completion events, generate no
-      // responses, and do not transmit data.
-      DmaReqState *invalidateReqState = new DmaReqState(
-          nullptr, size, addr, delay);
-      for (ChunkGenerator gen(addr, size, sys->cacheLineSize());
-           !gen.done(); gen.next()) {
-          req = new Request(gen.addr(), gen.size(), 0, masterId);
-          req->taskId(ContextSwitchTaskId::DMA);
-          PacketPtr pkt = new Packet(req, MemCmd::InvalidateReq);
-          pkt->senderState = invalidateReqState;
+        // Delay the dmaAction until all invalidation responses are received.
+        outstandingRequests.push_back(dmaActionReq);
 
-          DPRINTF(DMA, "--Queuing invalidation request for addr: %#x size: %d "
-                       "in channel %d\n",
-                  gen.addr(), gen.size(), channel);
-          queueDma(channel, pkt);
-      }
-    }
-
-    /* TODO: Currently as we dynamically add channels, the channel ID is the
-     * last channel that is just added. If we switch to the fixed-number of
-     * channels model, we can let users to pick which channel they want to use,
-     * or automatically pick the empty channel. */
-    for (ChunkGenerator gen(addr, size, sys->cacheLineSize());
-         !gen.done(); gen.next()) {
-        req = new Request(gen.addr(), gen.size(), flag, masterId);
-        req->taskId(ContextSwitchTaskId::DMA);
-        PacketPtr pkt = new Packet(req, cmd);
-
-        // Increment the data pointer on a write
-        if (data)
-            pkt->dataStatic(data + gen.complete());
-
-        pkt->senderState = reqState;
-
-        DPRINTF(DMA, "--Queuing DMA for addr: %#x size: %d in channel %d\n", gen.addr(),
-                gen.size(), channel);
-        queueDma(channel, pkt);
+        // Create and queue a new DmaActionReq to perform an invalidation of the
+        // target region and then initiate the delayed dmaAction when
+        // invalidation is complete. Make sure we don't send an uncacheable
+        // request for a cache invalidation (that would make no sense).
+        Request::Flags inv_flag = flag & ~Request::UNCACHEABLE;
+        DmaActionReq invalidateReq = {
+            MemCmd::InvalidateReq, addr, size, event, nullptr, delay, inv_flag };
+        DmaReqState *reqState =
+            new DmaReqState(&sendDataAfterInvalidateEvent, size, addr, delay);
+        final_req = queueDmaAction(invalidateReq, reqState);
+    } else {
+        // Act on this dmaAction immediately.
+        DmaReqState* reqState = new DmaReqState(event, size, addr, delay);
+        final_req = queueDmaAction(dmaActionReq, reqState);
     }
 
     // in zero time also initiate the sending of the packets we have
@@ -235,7 +211,7 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // the requests
     sendDma();
 
-    return req;
+    return final_req;
 }
 
 /* Find the next empty channel.
@@ -323,6 +299,49 @@ DmaPort::trySendTimingReq()
 
     DPRINTF(DMA, "TransmitList: %d, inRetry: %d\n",
             transmitList.size(), inRetry);
+}
+
+void DmaPort::sendDataAfterInvalidate() {
+    if (outstandingRequests.empty())
+        return;
+
+    DmaActionReq& dmaReq = outstandingRequests.front();
+    DmaReqState *reqState =
+        new DmaReqState(dmaReq.event, dmaReq.size, dmaReq.addr, dmaReq.delay);
+    DPRINTF(DMA, "Sending DMA after invalidation for addr: %#x size: %d\n",
+            dmaReq.addr, dmaReq.size);
+    queueDmaAction(dmaReq, reqState);
+    outstandingRequests.pop_front();
+    sendDma();
+}
+
+RequestPtr DmaPort::queueDmaAction(DmaActionReq &dmaReq,
+                                   DmaReqState *reqState) {
+    /* TODO: Currently as we dynamically add channels, the channel ID is the
+     * last channel that is just added. If we switch to the fixed-number of
+     * channels model, we can let users to pick which channel they want to use,
+     * or automatically pick the empty channel. */
+    unsigned channel = findNextEmptyChannel();
+    RequestPtr req = NULL;
+    MemCmd memcmd(dmaReq.cmd);
+    for (ChunkGenerator gen(dmaReq.addr, dmaReq.size, sys->cacheLineSize());
+         !gen.done(); gen.next()) {
+        req = new Request(gen.addr(), gen.size(), dmaReq.flag, masterId);
+        req->taskId(ContextSwitchTaskId::DMA);
+        PacketPtr pkt = new Packet(req, dmaReq.cmd);
+
+        // Increment the data pointer on a write
+        if (dmaReq.data)
+            pkt->dataStatic(dmaReq.data + gen.complete());
+
+        pkt->senderState = reqState;
+
+        DPRINTF(DMA, "--Queuing %s for addr: %#x size: %d in channel %d\n",
+                memcmd.isInvalidate() ? "invalidation" : "DMA", gen.addr(),
+                gen.size(), channel);
+        queueDma(channel, pkt);
+    }
+    return req;
 }
 
 void
