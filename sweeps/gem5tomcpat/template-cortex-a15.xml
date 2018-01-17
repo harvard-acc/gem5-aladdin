@@ -203,8 +203,8 @@
       <param name="number_of_BPT" value="2"/>
       <component id="system.core0.predictor" name="PBT">
         <!-- bimode predictor has no local tables -->
-        <param name="local_predictor_size" value="0,0"/>
-        <param name="local_predictor_entries" value="0"/>
+        <param name="local_predictor_size" value="1,1"/>
+        <param name="local_predictor_entries" value="1"/>
         <param name="global_predictor_bits" value="8"/>
         <!-- taken/not taken global tables. 8 bits per entry x 2048 = 2 tables
              of 8kb each.  -->
@@ -312,7 +312,7 @@
     </component>
     <component id="system.L20" name="L20">
       <!-- all the buffer related are optional -->
-        <param name="L2_config" value="config.system.l2.size,config.system.cache_line_size,config.system.l2.assoc,config.system.l2.assoc, 2, config.system.l2.hit_latency,16,1"/>
+        <param name="L2_config" value="config.system.l2.size,config.system.cache_line_size,config.system.l2.assoc,config.system.l2.assoc, 2, config.system.l2.response_latency,16,1"/>
         <!-- the parameters are capacity,block_width, associativity, bank, throughput w.r.t. core clock, latency w.r.t. core clock,output_width, cache policy -->
         <param name="buffer_sizes" value="config.system.l2.mshrs, config.system.l2.write_buffers, 16, 16"/>
         <!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->

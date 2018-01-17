@@ -59,6 +59,8 @@ def dumpMcpatOut(stats, outFile):
             allConfs = configMatch.findall(value)
             for conf in allConfs:
                 confValue = getConfValue(conf)
+                if isinstance(confValue, types.ListType) and len(confValue) == 1:
+                    confValue = confValue[0]
                 value = re.sub("config."+ conf, str(confValue), value)
             if "," in value:
                 exprs = re.split(',', value)
