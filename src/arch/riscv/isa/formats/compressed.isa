@@ -28,35 +28,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Authors: Alec Roelke
-
-output header {{
-    /**
-     * Base class for compressed operations that work only on registers
-     */
-    class CompRegOp : public RiscvStaticInst
-    {
-      protected:
-        /// Constructor
-        CompRegOp(const char *mnem, MachInst _machInst, OpClass __opClass)
-            : RiscvStaticInst(mnem, _machInst, __opClass)
-        {}
-
-        std::string
-        generateDisassembly(Addr pc, const SymbolTable *symtab) const;
-    };
-}};
-
-output decoder {{
-    std::string
-    CompRegOp::generateDisassembly(Addr pc, const SymbolTable *symtab) const
-    {
-        std::stringstream ss;
-        ss << mnemonic << ' ' << registerName(_destRegIdx[0]) << ", " <<
-            registerName(_srcRegIdx[0]);
-        return ss.str();
-    }
-}};
-
 def format CROp(code, *opt_flags) {{
     iop = InstObjParams(name, Name, 'CompRegOp', code, opt_flags)
     header_output = BasicDeclare.subst(iop)
@@ -65,20 +36,9 @@ def format CROp(code, *opt_flags) {{
     exec_output = BasicExecute.subst(iop)
 }};
 
-def format CIOp(imm_code, code, *opt_flags) {{
+def format CIOp(imm_code, code, imm_type='int64_t', *opt_flags) {{
     regs = ['_destRegIdx[0]','_srcRegIdx[0]']
-    iop = InstObjParams(name, Name, 'ImmOp',
-        {'code': code, 'imm_code': imm_code,
-         'regs': ','.join(regs)}, opt_flags)
-    header_output = ImmDeclare.subst(iop)
-    decoder_output = ImmConstructor.subst(iop)
-    decode_block = BasicDecode.subst(iop)
-    exec_output = ImmExecute.subst(iop)
-}};
-
-def format CUIOp(imm_code, code, *opt_flags) {{
-    regs = ['_destRegIdx[0]','_srcRegIdx[0]']
-    iop = InstObjParams(name, Name, 'UImmOp',
+    iop = InstObjParams(name, Name, 'ImmOp<%s>' % imm_type,
         {'code': code, 'imm_code': imm_code,
          'regs': ','.join(regs)}, opt_flags)
     header_output = ImmDeclare.subst(iop)

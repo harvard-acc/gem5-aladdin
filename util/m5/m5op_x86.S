@@ -32,7 +32,21 @@
 
 #include <gem5/asm/generic/m5ops.h>
 
-#ifdef M5OP_ADDR
+#if defined(M5OP_ADDR) && defined(M5OP_PIC)
+/* Use the memory mapped m5op interface */
+#define TWO_BYTE_OP(name, number)         \
+        .globl name;                      \
+        .func name;                       \
+name:                                     \
+        mov m5_mem@gotpcrel(%rip), %r11;  \
+        mov (%r11), %r11;                 \
+        mov $number, %rax;                \
+        shl $8, %rax;                     \
+        mov 0(%r11, %rax, 1), %rax;       \
+        ret;                              \
+        .endfunc;
+
+#elif defined(M5OP_ADDR) && !defined(M5OP_PIC)
 /* Use the memory mapped m5op interface */
 #define TWO_BYTE_OP(name, number)         \
         .globl name;                      \
@@ -44,7 +58,6 @@ name:                                     \
         mov 0(%r11, %rax, 1), %rax;       \
         ret;                              \
         .endfunc;
-
 #else
 /* Use the magic instruction based m5op interface. This does not work
  * in virtualized environments.
@@ -67,6 +80,7 @@ TWO_BYTE_OP(m5_quiesce_ns, M5OP_QUIESCE_NS)
 TWO_BYTE_OP(m5_quiesce_cycle, M5OP_QUIESCE_CYCLE)
 TWO_BYTE_OP(m5_quiesce_time, M5OP_QUIESCE_TIME)
 TWO_BYTE_OP(m5_rpns, M5OP_RPNS)
+TWO_BYTE_OP(m5_wake_cpu, M5OP_WAKE_CPU)
 TWO_BYTE_OP(m5_exit, M5OP_EXIT)
 TWO_BYTE_OP(m5_fail, M5OP_FAIL)
 TWO_BYTE_OP(m5_init_param, M5OP_INIT_PARAM)

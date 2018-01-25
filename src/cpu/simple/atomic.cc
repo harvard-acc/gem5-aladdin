@@ -1,6 +1,6 @@
 /*
  * Copyright 2014 Google, Inc.
- * Copyright (c) 2012-2013,2015 ARM Limited
+ * Copyright (c) 2012-2013,2015,2017 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -46,7 +46,6 @@
 #include "arch/locked_mem.hh"
 #include "arch/mmapped_ipr.hh"
 #include "arch/utility.hh"
-#include "base/bigint.hh"
 #include "base/output.hh"
 #include "config/the_isa.hh"
 #include "cpu/exetrace.hh"
@@ -101,6 +100,9 @@ AtomicSimpleCPU::~AtomicSimpleCPU()
 DrainState
 AtomicSimpleCPU::drain()
 {
+    // Deschedule any power gating event (if any)
+    deschedulePowerGatingEvent();
+
     if (switchedOut())
         return DrainState::Drained;
 
@@ -163,6 +165,9 @@ AtomicSimpleCPU::drainResume()
             threadInfo[tid]->notIdleFraction = 0;
         }
     }
+
+    // Reschedule any power gating event (if any)
+    schedulePowerGatingEvent();
 }
 
 bool
@@ -222,7 +227,6 @@ AtomicSimpleCPU::activateContext(ThreadID thread_num)
     Cycles delta = ticksToCycles(threadInfo[thread_num]->thread->lastActivate -
                                  threadInfo[thread_num]->thread->lastSuspend);
     numCycles += delta;
-    ppCycles->notify(delta);
 
     if (!tickEvent.scheduled()) {
         //Make sure ticks are still on multiples of cycles
@@ -425,7 +429,7 @@ AtomicSimpleCPU::writeMem(uint8_t *data, unsigned size, Addr addr,
 
     if (data == NULL) {
         assert(size <= 64);
-        assert(flags & Request::CACHE_BLOCK_ZERO);
+        assert(flags & Request::STORE_NO_DATA);
         // This must be a cache block cleaning request
         data = zero_array;
     }
@@ -457,14 +461,11 @@ AtomicSimpleCPU::writeMem(uint8_t *data, unsigned size, Addr addr,
 
         // Now do the access.
         if (fault == NoFault) {
-            MemCmd cmd = MemCmd::WriteReq; // default
             bool do_access = true;  // flag to suppress cache access
 
             if (req->isLLSC()) {
-                cmd = MemCmd::StoreCondReq;
                 do_access = TheISA::handleLockedWrite(thread, req, dcachePort.cacheBlockMask);
             } else if (req->isSwap()) {
-                cmd = MemCmd::SwapReq;
                 if (req->isCondSwap()) {
                     assert(res);
                     req->setExtraData(*res);
@@ -472,7 +473,7 @@ AtomicSimpleCPU::writeMem(uint8_t *data, unsigned size, Addr addr,
             }
 
             if (do_access && !req->getFlags().isSet(Request::NO_ACCESS)) {
-                Packet pkt = Packet(req, cmd);
+                Packet pkt(req, Packet::makeWriteCmd(req));
                 pkt.dataStatic(data);
 
                 if (req->isMmappedIpr()) {
@@ -556,7 +557,7 @@ AtomicSimpleCPU::tick()
 
     for (int i = 0; i < width || locked; ++i) {
         numCycles++;
-        ppCycles->notify(1);
+        updateCycleCounters(BaseCPU::CPU_STATE_ON);
 
         if (!curStaticInst || !curStaticInst->isDelayedCommit()) {
             checkForInterrupts();

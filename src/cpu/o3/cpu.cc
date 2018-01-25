@@ -568,7 +568,7 @@ FullO3CPU<Impl>::tick()
     assert(drainState() != DrainState::Drained);
 
     ++numCycles;
-    ppCycles->notify(1);
+    updateCycleCounters(BaseCPU::CPU_STATE_ON);
 
 //    activity = false;
 
@@ -796,6 +796,8 @@ FullO3CPU<Impl>::haltContext(ThreadID tid)
 
     deactivateThread(tid);
     removeThread(tid);
+
+    updateCycleCounters(BaseCPU::CPU_STATE_SLEEP);
 }
 
 template <class Impl>
@@ -1031,6 +1033,9 @@ template <class Impl>
 DrainState
 FullO3CPU<Impl>::drain()
 {
+    // Deschedule any power gating event (if any)
+    deschedulePowerGatingEvent();
+
     // If the CPU isn't doing anything, then return immediately.
     if (switchedOut())
         return DrainState::Drained;
@@ -1186,6 +1191,9 @@ FullO3CPU<Impl>::drainResume()
     assert(!tickEvent.scheduled());
     if (_status == Running)
         schedule(tickEvent, nextCycle());
+
+    // Reschedule any power gating event (if any)
+    schedulePowerGatingEvent();
 }
 
 template <class Impl>
@@ -1765,7 +1773,6 @@ FullO3CPU<Impl>::wakeCPU()
         --cycles;
         idleCycles += cycles;
         numCycles += cycles;
-        ppCycles->notify(cycles);
     }
 
     schedule(tickEvent, clockEdge());

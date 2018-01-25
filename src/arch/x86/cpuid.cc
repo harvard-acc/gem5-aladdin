@@ -37,13 +37,13 @@ namespace X86ISA {
     enum StandardCpuidFunction {
         VendorAndLargestStdFunc,
         FamilyModelStepping,
-        CacheAndTLBDescriptors,
-        ProcessorSerialNumber,
-        CoreAndCacheTopology,
-        Reserved5,
-        Reserved6,
+        CacheAndTLB,
+        SerialNumber,
+        CacheParams,
+        MonitorMwait,
+        ThermalPowerMgmt,
         ExtendedFeatures,
-        NumStandardCpuidFuncs,
+        NumStandardCpuidFuncs
     };
 
     enum ExtendedCpuidFunctions {
@@ -270,12 +270,12 @@ namespace CpuidCacheParams {
                 result = CpuidResult(0x00020f51, 0x00000805,
                                      0xe7dbfbff, 0x04000209);
                 break;
-              case CoreAndCacheTopology:
+              case CacheParams:
                 result = getCacheParameters(tc, index);
                 break;
               case ExtendedFeatures:
-                // No extended features are supported.
-                result = CpuidResult(0x0, 0x0, 0x0, 0x0);
+                result = CpuidResult(0x00000000, 0x01800000,
+                                     0x00000000, 0x00000000);
                 break;
               default:
                 warn("x86 cpuid family 0x0000: unimplemented function %u",

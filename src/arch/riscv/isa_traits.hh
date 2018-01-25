@@ -57,13 +57,8 @@ namespace RiscvISA
 
 using namespace LittleEndianGuest;
 
-// Riscv does NOT have a delay slot
-#define ISA_HAS_DELAY_SLOT 0
-
 const Addr PageShift = 12;
 const Addr PageBytes = ULL(1) << PageShift;
-
-const ExtMachInst NoopMachInst = 0x00000013;
 
 // Memory accesses can be unaligned (at least for double-word memory accesses)
 const bool HasUnalignedMemAcc = true;

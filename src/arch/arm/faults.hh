@@ -50,7 +50,7 @@
 #include "arch/arm/miscregs.hh"
 #include "arch/arm/pagetable.hh"
 #include "arch/arm/types.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "sim/faults.hh"
 #include "sim/full_system.hh"
 
@@ -72,6 +72,8 @@ class ArmFault : public FaultBase
     ExceptionLevel fromEL;  // Source exception level
     ExceptionLevel toEL;  // Target exception level
     OperatingMode fromMode;  // Source operating mode
+
+    bool hypRouted; // True if the fault has been routed to Hypervisor
 
     Addr getVector(ThreadContext *tc);
     Addr getVector64(ThreadContext *tc);
@@ -173,7 +175,7 @@ class ArmFault : public FaultBase
 
     ArmFault(ExtMachInst _machInst = 0, uint32_t _iss = 0) :
         machInst(_machInst), issRaw(_iss), from64(false), to64(false),
-        fromEL(EL0), toEL(EL0), fromMode(MODE_UNDEFINED) {}
+        fromEL(EL0), toEL(EL0), fromMode(MODE_UNDEFINED), hypRouted(false) {}
 
     // Returns the actual syndrome register to use based on the target
     // exception level
@@ -545,6 +547,15 @@ class SystemError : public ArmFaultVals<SystemError>
     bool routeToHyp(ThreadContext *tc) const override;
 };
 
+/// System error (AArch64 only)
+class SoftwareBreakpoint : public ArmFaultVals<SoftwareBreakpoint>
+{
+  public:
+    SoftwareBreakpoint(ExtMachInst _mach_inst, uint32_t _iss);
+
+    bool routeToHyp(ThreadContext *tc) const override;
+};
+
 // A fault that flushes the pipe, excluding the faulting instructions
 class ArmSev : public ArmFaultVals<ArmSev>
 {
@@ -583,6 +594,7 @@ template<> ArmFault::FaultVals ArmFaultVals<SecureMonitorTrap>::vals;
 template<> ArmFault::FaultVals ArmFaultVals<PCAlignmentFault>::vals;
 template<> ArmFault::FaultVals ArmFaultVals<SPAlignmentFault>::vals;
 template<> ArmFault::FaultVals ArmFaultVals<SystemError>::vals;
+template<> ArmFault::FaultVals ArmFaultVals<SoftwareBreakpoint>::vals;
 template<> ArmFault::FaultVals ArmFaultVals<ArmSev>::vals;
 
 

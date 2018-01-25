@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2016 ARM Limited
+ * Copyright (c) 2013-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -44,7 +44,7 @@
 
 #include "mem/snoop_filter.hh"
 
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/trace.hh"
 #include "debug/SnoopFilter.hh"
 #include "sim/system.hh"
@@ -215,10 +215,13 @@ SnoopFilter::lookupSnoop(const Packet* cpkt)
     // ReadEx and Writes require both invalidation and exlusivity, while reads
     // require neither. Writebacks on the other hand require exclusivity but
     // not the invalidation. Previously Writebacks did not generate upward
-    // snoops so this was never an aissue. Now that Writebacks generate snoops
-    // we need to special case for Writebacks.
+    // snoops so this was never an issue. Now that Writebacks generate snoops
+    // we need a special case for Writebacks. Additionally cache maintenance
+    // operations can generate snoops as they clean and/or invalidate all
+    // caches down to the specified point of reference.
     assert(cpkt->isWriteback() || cpkt->req->isUncacheable() ||
-           (cpkt->isInvalidate() == cpkt->needsWritable()));
+           (cpkt->isInvalidate() == cpkt->needsWritable()) ||
+           cpkt->req->isCacheMaintenance());
     if (cpkt->isInvalidate() && !sf_item.requested) {
         // Early clear of the holder, if no other request is currently going on
         // @todo: This should possibly be updated even though we do not filter
@@ -359,10 +362,22 @@ SnoopFilter::updateResponse(const Packet* cpkt, const SlavePort& slave_port)
     panic_if(!(sf_item.requested & slave_mask), "SF value %x.%x missing "\
              "request bit\n", sf_item.requested, sf_item.holder);
 
-    // Update the residency of the cache line.
-    sf_item.holder |=  slave_mask;
     sf_item.requested &= ~slave_mask;
-    assert(sf_item.holder | sf_item.requested);
+    // Update the residency of the cache line.
+
+    if (cpkt->req->isCacheMaintenance()) {
+        // A cache clean response does not carry any data so it
+        // shouldn't change the holders, unless it is invalidating.
+        if (cpkt->isInvalidate()) {
+            sf_item.holder &= ~slave_mask;
+        }
+        eraseIfNullEntry(sf_it);
+    } else {
+        // Any other response implies that a cache above will have the
+        // block.
+        sf_item.holder |= slave_mask;
+        assert(sf_item.holder | sf_item.requested);
+    }
     DPRINTF(SnoopFilter, "%s:   new SF value %x.%x\n",
             __func__, sf_item.requested, sf_item.holder);
 }

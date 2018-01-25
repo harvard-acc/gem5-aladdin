@@ -62,12 +62,7 @@
 #include "params/CheckerCPU.hh"
 #include "sim/eventq.hh"
 
-// forward declarations
-namespace TheISA
-{
-    class TLB;
-}
-
+class BaseTLB;
 template <class>
 class BaseDynInst;
 class ThreadContext;
@@ -140,8 +135,8 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     ThreadContext *tc;
 
-    TheISA::TLB *itb;
-    TheISA::TLB *dtb;
+    BaseTLB *itb;
+    BaseTLB *dtb;
 
     Addr dbg_vtophys(Addr addr);
 
@@ -166,8 +161,8 @@ class CheckerCPU : public BaseCPU, public ExecContext
     // Primary thread being run.
     SimpleThread *thread;
 
-    TheISA::TLB* getITBPtr() { return itb; }
-    TheISA::TLB* getDTBPtr() { return dtb; }
+    BaseTLB* getITBPtr() { return itb; }
+    BaseTLB* getDTBPtr() { return dtb; }
 
     virtual Counter totalInsts() const override
     {
@@ -185,13 +180,6 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     void serialize(CheckpointOut &cp) const override;
     void unserialize(CheckpointIn &cp) override;
-
-    // These functions are only used in CPU models that split
-    // effective address computation from the actual memory access.
-    void setEA(Addr EA) override
-    { panic("CheckerCPU::setEA() not implemented\n"); }
-    Addr getEA() const  override
-    { panic("CheckerCPU::getEA() not implemented\n"); }
 
     // The register accessor methods provide the index of the
     // instruction's operand (e.g., 0 or 1), not the architectural

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013 ARM Limited
+ * Copyright (c) 2012-2013,2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -56,7 +56,7 @@
 #include <climits>
 
 #include "base/flags.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/types.hh"
 #include "cpu/inst_seq.hh"
 #include "sim/core.hh"
@@ -87,7 +87,7 @@ typedef uint16_t MasterID;
 class Request
 {
   public:
-    typedef uint32_t FlagsType;
+    typedef uint64_t FlagsType;
     typedef uint8_t ArchFlagsType;
     typedef ::Flags<FlagsType> Flags;
 
@@ -182,12 +182,28 @@ class Request
         /** The request is a page table walk */
         PT_WALK                     = 0x20000000,
 
+        /** The request invalidates a memory location */
+        INVALIDATE                  = 0x0000000100000000,
+        /** The request cleans a memory location */
+        CLEAN                       = 0x0000000200000000,
+
+        /** The request targets the point of unification */
+        DST_POU                     = 0x0000001000000000,
+
+        /** The request targets the point of coherence */
+        DST_POC                     = 0x0000002000000000,
+
+        /** Bits to define the destination of a request */
+        DST_BITS                    = 0x0000003000000000,
+
         /**
          * These flags are *not* cleared when a Request object is
          * reused (assigned a new address).
          */
         STICKY_FLAGS = INST_FETCH
     };
+    static const FlagsType STORE_NO_DATA = CACHE_BLOCK_ZERO |
+        CLEAN | INVALIDATE;
 
     /** Master Ids that are statically allocated
      * @{*/
@@ -790,6 +806,17 @@ class Request
     }
 
     /**
+     * Accessor functions for the destination of a memory request. The
+     * destination flag can specify a point of reference for the
+     * operation (e.g. a cache block clean to the the point of
+     * unification). At the moment the destination is only used by the
+     * cache maintenance operations.
+     */
+    bool isToPOU() const { return _flags.isSet(DST_POU); }
+    bool isToPOC() const { return _flags.isSet(DST_POC); }
+    Flags getDest() const { return _flags & DST_BITS; }
+
+    /**
      * Accessor functions for the memory space configuration flags and used by
      * GPU ISAs such as the Heterogeneous System Architecture (HSA). Note that
      * these are for testing only; setting extraFlags should be done via
@@ -869,6 +896,23 @@ class Request
     {
         return _memSpaceConfigFlags.isSet(ARG_SEGMENT);
     }
+
+    /**
+     * Accessor functions to determine whether this request is part of
+     * a cache maintenance operation. At the moment three operations
+     * are supported:
+
+     * 1) A cache clean operation updates all copies of a memory
+     * location to the point of reference,
+     * 2) A cache invalidate operation invalidates all copies of the
+     * specified block in the memory above the point of reference,
+     * 3) A clean and invalidate operation is a combination of the two
+     * operations.
+     * @{ */
+    bool isCacheClean() const { return _flags.isSet(CLEAN); }
+    bool isCacheInvalidate() const { return _flags.isSet(INVALIDATE); }
+    bool isCacheMaintenance() const { return _flags.isSet(CLEAN|INVALIDATE); }
+    /** @} */
 };
 
 #endif // __MEM_REQUEST_HH__

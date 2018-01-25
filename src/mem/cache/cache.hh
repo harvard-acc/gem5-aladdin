@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 ARM Limited
+ * Copyright (c) 2012-2017 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -54,7 +54,7 @@
 
 #include <unordered_set>
 
-#include "base/misc.hh" // fatal, panic, and warn
+#include "base/logging.hh" // fatal, panic, and warn
 #include "enums/Clusivity.hh"
 #include "mem/cache/base.hh"
 #include "mem/cache/blk.hh"
@@ -89,6 +89,8 @@ class Cache : public BaseCache
       protected:
 
         virtual bool recvTimingSnoopResp(PacketPtr pkt);
+
+        virtual bool tryTiming(PacketPtr pkt);
 
         virtual bool recvTimingReq(PacketPtr pkt);
 
@@ -449,6 +451,14 @@ class Cache : public BaseCache
      * @return The writeback request for the block.
      */
     PacketPtr writebackBlk(CacheBlk *blk);
+
+    /**
+     * Create a writeclean request for the given block.
+     * @param blk The block to write clean
+     * @param dest The destination of this clean operation
+     * @return The write clean packet for the block.
+     */
+    PacketPtr writecleanBlk(CacheBlk *blk, Request::Flags dest, PacketId id);
 
     /**
      * Create a CleanEvict request for the given block.

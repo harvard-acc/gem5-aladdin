@@ -460,7 +460,7 @@ out << "${{dm.ident}} = " << printAddress(m_${{dm.ident}}) << " ";''')
 
         if self.isMachineType:
             code('#include <functional>')
-            code('#include "base/misc.hh"')
+            code('#include "base/logging.hh"')
             code('#include "mem/ruby/common/Address.hh"')
             code('#include "mem/ruby/common/TypeDefines.hh"')
             code('struct MachineID;')
@@ -523,10 +523,6 @@ int ${{self.c_ident}}_base_count(const ${{self.c_ident}}& obj);
 ''')
 
             for enum in self.enums.itervalues():
-                if enum.ident == "DMA":
-                    code('''
-MachineID map_Address_to_DMA(const Addr &addr);
-''')
                 code('''
 
 MachineID get${{enum.ident}}MachineID(NodeID RubyNode);
@@ -561,7 +557,7 @@ std::ostream& operator<<(std::ostream& out, const ${{self.c_ident}}& obj);
 #include <iostream>
 #include <string>
 
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "mem/protocol/${{self.c_ident}}.hh"
 
 using namespace std;
@@ -734,6 +730,7 @@ ${{self.c_ident}}_base_number(const ${{self.c_ident}}& obj)
                     code('    base += ${{enum.ident}}_Controller::getNumControllers();')
                 else:
                     code('    base += 0;')
+                code('    M5_FALLTHROUGH;')
                 code('  case ${{self.c_ident}}_${{enum.ident}}:')
             code('    break;')
             code.dedent()
@@ -773,16 +770,6 @@ ${{self.c_ident}}_base_count(const ${{self.c_ident}}& obj)
 ''')
 
             for enum in self.enums.itervalues():
-                if enum.ident == "DMA":
-                    code('''
-MachineID
-map_Address_to_DMA(const Addr &addr)
-{
-      MachineID dma = {MachineType_DMA, 0};
-      return dma;
-}
-''')
-
                 code('''
 
 MachineID

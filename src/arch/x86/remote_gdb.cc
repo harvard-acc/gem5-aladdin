@@ -64,17 +64,18 @@
 using namespace std;
 using namespace X86ISA;
 
-RemoteGDB::RemoteGDB(System *_system, ThreadContext *c) :
-    BaseRemoteGDB(_system, c), regCache32(this), regCache64(this)
+RemoteGDB::RemoteGDB(System *_system, ThreadContext *c, int _port) :
+    BaseRemoteGDB(_system, c, _port), regCache32(this), regCache64(this)
 {}
 
 bool
 RemoteGDB::acc(Addr va, size_t len)
 {
     if (FullSystem) {
-        Walker *walker = context->getDTBPtr()->getWalker();
+        Walker *walker = dynamic_cast<TLB *>(
+            context()->getDTBPtr())->getWalker();
         unsigned logBytes;
-        Fault fault = walker->startFunctional(context, va, logBytes,
+        Fault fault = walker->startFunctional(context(), va, logBytes,
                                               BaseTLB::Read);
         if (fault != NoFault)
             return false;
@@ -83,19 +84,18 @@ RemoteGDB::acc(Addr va, size_t len)
         if ((va & ~mask(logBytes)) == (endVa & ~mask(logBytes)))
             return true;
 
-        fault = walker->startFunctional(context, endVa, logBytes,
+        fault = walker->startFunctional(context(), endVa, logBytes,
                                         BaseTLB::Read);
         return fault == NoFault;
     } else {
-        TlbEntry entry;
-        return context->getProcessPtr()->pTable->lookup(va, entry);
+        return context()->getProcessPtr()->pTable->lookup(va) != nullptr;
     }
 }
 
-RemoteGDB::BaseGdbRegCache*
+BaseGdbRegCache*
 RemoteGDB::gdbRegs()
 {
-    HandyM5Reg m5reg = context->readMiscRegNoEffect(MISCREG_M5_REG);
+    HandyM5Reg m5reg = context()->readMiscRegNoEffect(MISCREG_M5_REG);
     if (m5reg.submode == SixtyFourBitMode)
         return &regCache64;
     else

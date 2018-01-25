@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2015 ARM Limited
+ * Copyright (c) 2011-2015, 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,6 +51,7 @@
 #ifndef __MEM_COHERENT_XBAR_HH__
 #define __MEM_COHERENT_XBAR_HH__
 
+#include <unordered_map>
 #include <unordered_set>
 
 #include "mem/snoop_filter.hh"
@@ -263,6 +264,13 @@ class CoherentXBar : public BaseXBar
     std::unordered_set<RequestPtr> outstandingSnoop;
 
     /**
+     * Store the outstanding cache maintenance that we are expecting
+     * snoop responses from so we can determine when we received all
+     * snoop responses and if any of the agents satisfied the request.
+     */
+    std::unordered_map<PacketId, PacketPtr> outstandingCMO;
+
+    /**
      * Keep a pointer to the system to be allow to querying memory system
      * properties.
      */
@@ -277,6 +285,9 @@ class CoherentXBar : public BaseXBar
 
     /** Is this crossbar the point of coherency? **/
     const bool pointOfCoherency;
+
+    /** Is this crossbar the point of unification? **/
+    const bool pointOfUnification;
 
     /**
      * Upstream caches need this packet until true is returned, so
@@ -394,6 +405,29 @@ class CoherentXBar : public BaseXBar
      * forwarding it, or responding.
      */
     bool sinkPacket(const PacketPtr pkt) const;
+
+    /**
+     * Determine if the crossbar should forward the packet, as opposed to
+     * responding to it.
+     */
+    bool forwardPacket(const PacketPtr pkt);
+
+    /**
+     * Determine if the packet's destination is the memory below
+     *
+     * The memory below is the destination for a cache mainteance
+     * operation to the Point of Coherence/Unification if this is the
+     * Point of Coherence/Unification.
+     *
+     * @param pkt The processed packet
+     *
+     * @return Whether the memory below is the destination for the packet
+     */
+    bool isDestination(const PacketPtr pkt) const
+    {
+        return (pkt->req->isToPOC() && pointOfCoherency) ||
+            (pkt->req->isToPOU() && pointOfUnification);
+    }
 
     Stats::Scalar snoops;
     Stats::Scalar snoopTraffic;

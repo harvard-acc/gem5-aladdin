@@ -407,6 +407,13 @@ if main['GCC'] or main['CLANG']:
     shared_partial_flags = ['-r', '-nostdlib']
     main.Append(PSHLINKFLAGS=shared_partial_flags)
     main.Append(PLINKFLAGS=shared_partial_flags)
+
+    # Treat warnings as errors but white list some warnings that we
+    # want to allow (e.g., deprecation warnings).
+    main.Append(CCFLAGS=['-Werror',
+                         '-Wno-error=deprecated-declarations',
+                         '-Wno-error=deprecated',
+                        ])
 else:
     print termcap.Yellow + termcap.Bold + 'Error' + termcap.Normal,
     print "Don't know what compiler options to use for your compiler."
@@ -530,6 +537,25 @@ if main['GCC']:
         if not ('FORCE_CXX11_ABI' in main and main['FORCE_CXX11_ABI']):
             main.Append(CPPFLAGS=["-D_GLIBCXX_USE_CXX11_ABI=0"])
 
+    # The address sanitizer is available for gcc >= 4.8
+    if GetOption('with_asan'):
+        if GetOption('with_ubsan') and \
+                compareVersions(env['GCC_VERSION'], '4.9') >= 0:
+            env.Append(CCFLAGS=['-fsanitize=address,undefined',
+                                '-fno-omit-frame-pointer'],
+                       LINKFLAGS='-fsanitize=address,undefined')
+        else:
+            env.Append(CCFLAGS=['-fsanitize=address',
+                                '-fno-omit-frame-pointer'],
+                       LINKFLAGS='-fsanitize=address')
+    # Only gcc >= 4.9 supports UBSan, so check both the version
+    # and the command-line option before adding the compiler and
+    # linker flags.
+    elif GetOption('with_ubsan') and \
+            compareVersions(env['GCC_VERSION'], '4.9') >= 0:
+        env.Append(CCFLAGS='-fsanitize=undefined')
+        env.Append(LINKFLAGS='-fsanitize=undefined')
+
 elif main['CLANG']:
     # Check for a supported version of clang, >= 3.1 is needed to
     # support similar features as gcc 4.8. See
@@ -569,6 +595,22 @@ elif main['CLANG']:
     # On FreeBSD we need libthr.
     if sys.platform.startswith('freebsd'):
         main.Append(LIBS=['thr'])
+
+    # We require clang >= 3.1, so there is no need to check any
+    # versions here.
+    if GetOption('with_ubsan'):
+        if GetOption('with_asan'):
+            env.Append(CCFLAGS=['-fsanitize=address,undefined',
+                                '-fno-omit-frame-pointer'],
+                       LINKFLAGS='-fsanitize=address,undefined')
+        else:
+            env.Append(CCFLAGS='-fsanitize=undefined',
+                       LINKFLAGS='-fsanitize=undefined')
+
+    elif GetOption('with_asan'):
+        env.Append(CCFLAGS=['-fsanitize=address',
+                            '-fno-omit-frame-pointer'],
+                   LINKFLAGS='-fsanitize=address')
 
 else:
     print termcap.Yellow + termcap.Bold + 'Error' + termcap.Normal,

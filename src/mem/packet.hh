@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2016 ARM Limited
+ * Copyright (c) 2012-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -42,6 +42,7 @@
  *          Steve Reinhardt
  *          Ali Saidi
  *          Andreas Hansson
+ *          Nikos Nikoleris
  */
 
 /**
@@ -59,7 +60,7 @@
 #include "base/cast.hh"
 #include "base/compiler.hh"
 #include "base/flags.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/printable.hh"
 #include "base/types.hh"
 #include "mem/request.hh"
@@ -69,6 +70,7 @@ class Packet;
 typedef Packet *PacketPtr;
 typedef uint8_t* PacketDataPtr;
 typedef std::list<PacketPtr> PacketList;
+typedef uint64_t PacketId;
 
 class MemCmd
 {
@@ -88,6 +90,7 @@ class MemCmd
         WriteResp,
         WritebackDirty,
         WritebackClean,
+        WriteClean,            // writes dirty data below without evicting
         CleanEvict,
         SoftPFReq,
         HardPFReq,
@@ -113,6 +116,10 @@ class MemCmd
         MessageResp,
         MemFenceReq,
         MemFenceResp,
+        CleanSharedReq,
+        CleanSharedResp,
+        CleanInvalidReq,
+        CleanInvalidResp,
         // Error responses
         // @TODO these should be classified as responses rather than
         // requests; coding them as requests initially for backwards
@@ -139,6 +146,7 @@ class MemCmd
         IsWrite,        //!< Data flows from requester to responder
         IsUpgrade,
         IsInvalidate,
+        IsClean,        //!< Cleans any existing dirty blocks
         NeedsWritable,  //!< Requires writable copy to complete in-cache
         IsRequest,      //!< Issued by requester
         IsResponse,     //!< Issue by responder
@@ -194,6 +202,7 @@ class MemCmd
     bool needsResponse() const     { return testCmdAttrib(NeedsResponse); }
     bool isInvalidate() const      { return testCmdAttrib(IsInvalidate); }
     bool isEviction() const        { return testCmdAttrib(IsEviction); }
+    bool isClean() const           { return testCmdAttrib(IsClean); }
     bool fromCache() const         { return testCmdAttrib(FromCache); }
 
     /**
@@ -252,7 +261,7 @@ class Packet : public Printable
 
     enum : FlagsType {
         // Flags to transfer across when copying a packet
-        COPY_FLAGS             = 0x0000000F,
+        COPY_FLAGS             = 0x0000003F,
 
         // Does this packet have sharers (which means it should not be
         // considered writable) or not. See setHasSharers below.
@@ -270,6 +279,14 @@ class Packet : public Printable
         // Snoop co-ordination flag to indicate that a cache is
         // responding to a snoop. See setCacheResponding below.
         CACHE_RESPONDING       = 0x00000008,
+
+        // The writeback/writeclean should be propagated further
+        // downstream by the receiver
+        WRITE_THROUGH          = 0x00000010,
+
+        // Response co-ordination flag for cache maintenance
+        // operations
+        SATISFIED              = 0x00000020,
 
         /// Are the 'addr' and 'size' fields valid?
         VALID_ADDR             = 0x00000100,
@@ -299,6 +316,8 @@ class Packet : public Printable
 
     /// The command field of the packet.
     MemCmd cmd;
+
+    const PacketId id;
 
     /// A pointer to the original request.
     const RequestPtr req;
@@ -516,6 +535,7 @@ class Packet : public Printable
     bool needsResponse() const       { return cmd.needsResponse(); }
     bool isInvalidate() const        { return cmd.isInvalidate(); }
     bool isEviction() const          { return cmd.isEviction(); }
+    bool isClean() const             { return cmd.isClean(); }
     bool fromCache() const           { return cmd.fromCache(); }
     bool isWriteback() const         { return cmd.isWriteback(); }
     bool hasData() const             { return cmd.hasData(); }
@@ -618,6 +638,32 @@ class Packet : public Printable
     bool responderHadWritable() const
     { return flags.isSet(RESPONDER_HAD_WRITABLE); }
 
+    /**
+     * A writeback/writeclean cmd gets propagated further downstream
+     * by the receiver when the flag is set.
+     */
+    void setWriteThrough()
+    {
+        assert(cmd.isWrite() &&
+               (cmd.isEviction() || cmd == MemCmd::WriteClean));
+        flags.set(WRITE_THROUGH);
+    }
+    void clearWriteThrough() { flags.clear(WRITE_THROUGH); }
+    bool writeThrough() const { return flags.isSet(WRITE_THROUGH); }
+
+    /**
+     * Set when a request hits in a cache and the cache is not going
+     * to respond. This is used by the crossbar to coordinate
+     * responses for cache maintenance operations.
+     */
+    void setSatisfied()
+    {
+        assert(cmd.isClean());
+        assert(!flags.isSet(SATISFIED));
+        flags.set(SATISFIED);
+    }
+    bool satisfied() const { return flags.isSet(SATISFIED); }
+
     void setSuppressFuncError()     { flags.set(SUPPRESS_FUNC_ERROR); }
     bool suppressFuncError() const  { return flags.isSet(SUPPRESS_FUNC_ERROR); }
     void setBlockCached()          { flags.set(BLOCK_CACHED); }
@@ -700,9 +746,9 @@ class Packet : public Printable
      * not be valid. The command must be supplied.
      */
     Packet(const RequestPtr _req, MemCmd _cmd)
-        :  cmd(_cmd), req(_req), data(nullptr), addr(0), _isSecure(false),
-           size(0), headerDelay(0), snoopDelay(0), payloadDelay(0),
-           senderState(NULL)
+        :  cmd(_cmd), id((PacketId)_req), req(_req), data(nullptr), addr(0),
+           _isSecure(false), size(0), headerDelay(0), snoopDelay(0),
+           payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
             addr = req->getPaddr();
@@ -720,10 +766,10 @@ class Packet : public Printable
      * a request that is for a whole block, not the address from the
      * req.  this allows for overriding the size/addr of the req.
      */
-    Packet(const RequestPtr _req, MemCmd _cmd, int _blkSize)
-        :  cmd(_cmd), req(_req), data(nullptr), addr(0), _isSecure(false),
-           headerDelay(0), snoopDelay(0), payloadDelay(0),
-           senderState(NULL)
+    Packet(const RequestPtr _req, MemCmd _cmd, int _blkSize, PacketId _id = 0)
+        :  cmd(_cmd), id(_id ? _id : (PacketId)_req), req(_req), data(nullptr),
+           addr(0), _isSecure(false), headerDelay(0), snoopDelay(0),
+           payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
             addr = req->getPaddr() & ~(_blkSize - 1);
@@ -742,7 +788,7 @@ class Packet : public Printable
      * packet should allocate its own data.
      */
     Packet(const PacketPtr pkt, bool clear_flags, bool alloc_data)
-        :  cmd(pkt->cmd), req(pkt->req),
+        :  cmd(pkt->cmd), id(pkt->id), req(pkt->req),
            data(nullptr),
            addr(pkt->addr), _isSecure(pkt->_isSecure), size(pkt->size),
            bytesValid(pkt->bytesValid),
@@ -797,7 +843,12 @@ class Packet : public Printable
             return MemCmd::StoreCondReq;
         else if (req->isSwap())
             return MemCmd::SwapReq;
-        else
+        else if (req->isCacheInvalidate()) {
+          return req->isCacheClean() ? MemCmd::CleanInvalidReq :
+              MemCmd::InvalidateReq;
+        } else if (req->isCacheClean()) {
+            return MemCmd::CleanSharedReq;
+        } else
             return MemCmd::WriteReq;
     }
 

@@ -1398,6 +1398,7 @@ TableWalker::memAttrsAArch64(ThreadContext *tc, TlbEntry &te,
           case 0x1 ... 0x3: // Normal Memory, Inner Write-through transient
           case 0x9 ... 0xb: // Normal Memory, Inner Write-through non-transient
             warn_if(!attr_hi, "Unpredictable behavior");
+            M5_FALLTHROUGH;
           case 0x4:         // Device-nGnRE memory or
                             // Normal memory, Inner Non-cacheable
           case 0x8:         // Device-nGRE memory or
@@ -1789,8 +1790,8 @@ TableWalker::doL1DescriptorWrapper()
         if (!currState->doingStage2) {
             statWalkServiceTime.sample(curTick() - currState->startTime);
             DPRINTF(TLBVerbose, "calling translateTiming again\n");
-            currState->fault = tlb->translateTiming(currState->req, currState->tc,
-                currState->transState, currState->mode);
+            tlb->translateTiming(currState->req, currState->tc,
+                                 currState->transState, currState->mode);
             statWalksShortTerminatedAtLevel[0]++;
         }
 
@@ -1834,8 +1835,8 @@ TableWalker::doL2DescriptorWrapper()
         if (!currState->doingStage2) {
             statWalkServiceTime.sample(curTick() - currState->startTime);
             DPRINTF(TLBVerbose, "calling translateTiming again\n");
-            currState->fault = tlb->translateTiming(currState->req,
-                currState->tc, currState->transState, currState->mode);
+            tlb->translateTiming(currState->req, currState->tc,
+                                 currState->transState, currState->mode);
             statWalksShortTerminatedAtLevel[1]++;
         }
     }
@@ -1914,9 +1915,8 @@ TableWalker::doLongDescriptorWrapper(LookupLevel curr_lookup_level)
         if (!currState->doingStage2) {
             DPRINTF(TLBVerbose, "calling translateTiming again\n");
             statWalkServiceTime.sample(curTick() - currState->startTime);
-            currState->fault = tlb->translateTiming(currState->req, currState->tc,
-                                                    currState->transState,
-                                                    currState->mode);
+            tlb->translateTiming(currState->req, currState->tc,
+                                 currState->transState, currState->mode);
             statWalksLongTerminatedAtLevel[(unsigned) curr_lookup_level]++;
         }
 

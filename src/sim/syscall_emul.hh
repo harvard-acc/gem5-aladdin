@@ -93,10 +93,11 @@
 #include <memory>
 #include <string>
 
+#include "arch/generic/tlb.hh"
 #include "arch/utility.hh"
 #include "base/intmath.hh"
 #include "base/loader/object_file.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/trace.hh"
 #include "base/types.hh"
 #include "config/the_isa.hh"
@@ -1284,11 +1285,23 @@ SyscallReturn
 cloneFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
 {
     int index = 0;
+
     TheISA::IntReg flags = p->getSyscallArg(tc, index);
     TheISA::IntReg newStack = p->getSyscallArg(tc, index);
     Addr ptidPtr = p->getSyscallArg(tc, index);
+
+#if THE_ISA == RISCV_ISA
+    /**
+     * Linux kernel 4.15 sets CLONE_BACKWARDS flag for RISC-V.
+     * The flag defines the list of clone() arguments in the following
+     * order: flags -> newStack -> ptidPtr -> tlsPtr -> ctidPtr
+     */
+    Addr tlsPtr M5_VAR_USED = p->getSyscallArg(tc, index);
+    Addr ctidPtr = p->getSyscallArg(tc, index);
+#else
     Addr ctidPtr = p->getSyscallArg(tc, index);
     Addr tlsPtr M5_VAR_USED = p->getSyscallArg(tc, index);
+#endif
 
     if (((flags & OS::TGT_CLONE_SIGHAND)&& !(flags & OS::TGT_CLONE_VM)) ||
         ((flags & OS::TGT_CLONE_THREAD) && !(flags & OS::TGT_CLONE_SIGHAND)) ||
@@ -1383,7 +1396,7 @@ cloneFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
     ctc->setMiscReg(TheISA::MISCREG_ASI, TheISA::ASI_PRIMARY);
     for (int y = 8; y < 32; y++)
         ctc->setIntReg(y, tc->readIntReg(y));
-#elif THE_ISA == ARM_ISA or THE_ISA == X86_ISA
+#elif THE_ISA == ARM_ISA or THE_ISA == X86_ISA or THE_ISA == RISCV_ISA
     TheISA::copyRegs(tc, ctc);
 #endif
 
@@ -1773,8 +1786,7 @@ prlimitFunc(SyscallDesc *desc, int callnum, Process *process,
     Addr o = process->getSyscallArg(tc, index);
     if (o != 0)
     {
-        TypedBufferArg<typename OS::rlimit> rlp(
-                process->getSyscallArg(tc, index));
+        TypedBufferArg<typename OS::rlimit> rlp(o);
         switch (resource) {
           case OS::TGT_RLIMIT_STACK:
             // max stack size in bytes: make up a number (8MB for now)

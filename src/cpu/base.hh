@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013 ARM Limited
+ * Copyright (c) 2011-2013, 2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -63,6 +63,7 @@
 #include "sim/full_system.hh"
 #include "sim/insttracer.hh"
 #include "sim/probe/pmu.hh"
+#include "sim/probe/probe.hh"
 #include "sim/system.hh"
 #include "debug/Mwait.hh"
 
@@ -277,7 +278,7 @@ class BaseCPU : public MemObject
     virtual void suspendContext(ThreadID thread_num);
 
     /// Notify the CPU that the indicated context is now halted.
-    virtual void haltContext(ThreadID thread_num) {}
+    virtual void haltContext(ThreadID thread_num);
 
    /// Given a Thread Context pointer return the thread num
    int findContext(ThreadContext *tc);
@@ -306,6 +307,11 @@ class BaseCPU : public MemObject
     void regProbePoints() override;
 
     void registerThreadContexts();
+
+    // Functions to deschedule and reschedule the events to enter the
+    // power gating sleep before and after checkpoiting respectively.
+    void deschedulePowerGatingEvent();
+    void schedulePowerGatingEvent();
 
     /**
      * Prepare for another CPU to take over execution.
@@ -484,6 +490,7 @@ class BaseCPU : public MemObject
      */
     virtual void probeInstCommit(const StaticInstPtr &inst);
 
+   protected:
     /**
      * Helper method to instantiate probe points belonging to this
      * object.
@@ -492,9 +499,6 @@ class BaseCPU : public MemObject
      * @return A unique_ptr to the new probe point.
      */
     ProbePoints::PMUUPtr pmuProbePoint(const char *name);
-
-    /** CPU cycle counter */
-    ProbePoints::PMUUPtr ppCycles;
 
     /**
      * Instruction commit probe point.
@@ -514,9 +518,58 @@ class BaseCPU : public MemObject
     /** Retired branches (any type) */
     ProbePoints::PMUUPtr ppRetiredBranches;
 
+    /** CPU cycle counter even if any thread Context is suspended*/
+    ProbePoints::PMUUPtr ppAllCycles;
+
+    /** CPU cycle counter, only counts if any thread contexts is active **/
+    ProbePoints::PMUUPtr ppActiveCycles;
+
+    /**
+     * ProbePoint that signals transitions of threadContexts sets.
+     * The ProbePoint reports information through it bool parameter.
+     * - If the parameter is true then the last enabled threadContext of the
+     * CPU object was disabled.
+     * - If the parameter is false then a threadContext was enabled, all the
+     * remaining threadContexts are disabled.
+     */
+    ProbePointArg<bool> *ppSleeping;
     /** @} */
 
+    enum CPUState {
+        CPU_STATE_ON,
+        CPU_STATE_SLEEP,
+        CPU_STATE_WAKEUP
+    };
 
+    Cycles previousCycle;
+    CPUState previousState;
+
+    /** base method keeping track of cycle progression **/
+    inline void updateCycleCounters(CPUState state)
+    {
+        uint32_t delta = curCycle() - previousCycle;
+
+        if (previousState == CPU_STATE_ON) {
+            ppActiveCycles->notify(delta);
+        }
+
+        switch (state)
+        {
+          case CPU_STATE_WAKEUP:
+            ppSleeping->notify(false);
+            break;
+          case CPU_STATE_SLEEP:
+            ppSleeping->notify(true);
+            break;
+          default:
+            break;
+        }
+
+        ppAllCycles->notify(delta);
+
+        previousCycle = curCycle();
+        previousState = state;
+    }
 
     // Function tracing
   private:
@@ -573,7 +626,7 @@ class BaseCPU : public MemObject
   public:
     void armMonitor(ThreadID tid, Addr address);
     bool mwait(ThreadID tid, PacketPtr pkt);
-    void mwaitAtomic(ThreadID tid, ThreadContext *tc, TheISA::TLB *dtb);
+    void mwaitAtomic(ThreadID tid, ThreadContext *tc, BaseTLB *dtb);
     AddressMonitor *getCpuAddrMonitor(ThreadID tid)
     {
         assert(tid < numThreads);
@@ -583,6 +636,14 @@ class BaseCPU : public MemObject
     bool waitForRemoteGDB() const;
 
     Cycles syscallRetryLatency;
+
+  // Enables CPU to enter power gating on a configurable cycle count
+  protected:
+    void enterPwrGating();
+
+    const Cycles pwrGatingLatency;
+    const bool powerGatingOnIdle;
+    EventFunctionWrapper enterPwrGatingEvent;
 };
 
 #endif // THE_ISA == NULL_ISA

@@ -4,7 +4,7 @@
 #include <string>
 #include <sstream>
 
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/stats/info.hh"
 #include "base/stats/output.hh"
 

@@ -30,6 +30,7 @@
 
 import array
 import bisect
+import functools
 import imp
 import marshal
 import os
@@ -59,56 +60,104 @@ from m5.util import code_formatter, compareVersions
 ########################################################################
 # Code for adding source files of various types
 #
-# When specifying a source file of some type, a set of guards can be
-# specified for that file.  When get() is used to find the files, if
-# get specifies a set of filters, only files that match those filters
-# will be accepted (unspecified filters on files are assumed to be
-# false).  Current filters are:
-#     main -- specifies the gem5 main() function
-#     skip_lib -- do not put this file into the gem5 library
-#     skip_no_python -- do not put this file into a no_python library
-#       as it embeds compiled Python
-#     <unittest> -- unit tests use filters based on the unit test name
-#
-# A parent can now be specified for a source file and default filter
-# values will be retrieved recursively from parents (children override
-# parents).
-#
-def guarded_source_iterator(sources, **guards):
-    '''Iterate over a set of sources, gated by a set of guards.'''
-    for src in sources:
-        for flag,value in guards.iteritems():
-            # if the flag is found and has a different value, skip
-            # this file
-            if src.all_guards.get(flag, False) != value:
-                break
-        else:
-            yield src
+# When specifying a source file of some type, a set of tags can be
+# specified for that file.
+
+class SourceFilter(object):
+    def __init__(self, predicate):
+        self.predicate = predicate
+
+    def __or__(self, other):
+        return SourceFilter(lambda tags: self.predicate(tags) or
+                                         other.predicate(tags))
+
+    def __and__(self, other):
+        return SourceFilter(lambda tags: self.predicate(tags) and
+                                         other.predicate(tags))
+
+def with_tags_that(predicate):
+    '''Return a list of sources with tags that satisfy a predicate.'''
+    return SourceFilter(predicate)
+
+def with_any_tags(*tags):
+    '''Return a list of sources with any of the supplied tags.'''
+    return SourceFilter(lambda stags: len(set(tags) & stags) > 0)
+
+def with_all_tags(*tags):
+    '''Return a list of sources with all of the supplied tags.'''
+    return SourceFilter(lambda stags: set(tags) <= stags)
+
+def with_tag(tag):
+    '''Return a list of sources with the supplied tag.'''
+    return SourceFilter(lambda stags: tag in stags)
+
+def without_tags(*tags):
+    '''Return a list of sources without any of the supplied tags.'''
+    return SourceFilter(lambda stags: len(set(tags) & stags) == 0)
+
+def without_tag(tag):
+    '''Return a list of sources with the supplied tag.'''
+    return SourceFilter(lambda stags: tag not in stags)
+
+source_filter_factories = {
+    'with_tags_that': with_tags_that,
+    'with_any_tags': with_any_tags,
+    'with_all_tags': with_all_tags,
+    'with_tag': with_tag,
+    'without_tags': without_tags,
+    'without_tag': without_tag,
+}
+
+Export(source_filter_factories)
+
+class SourceList(list):
+    def apply_filter(self, f):
+        def match(source):
+            return f.predicate(source.tags)
+        return SourceList(filter(match, self))
+
+    def __getattr__(self, name):
+        func = source_filter_factories.get(name, None)
+        if not func:
+            raise AttributeError
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return self.apply_filter(func(*args, **kwargs))
+        return wrapper
 
 class SourceMeta(type):
     '''Meta class for source files that keeps track of all files of a
-    particular type and has a get function for finding all functions
-    of a certain type that match a set of guards'''
+    particular type.'''
     def __init__(cls, name, bases, dict):
         super(SourceMeta, cls).__init__(name, bases, dict)
-        cls.all = []
-
-    def get(cls, **guards):
-        '''Find all files that match the specified guards.  If a source
-        file does not specify a flag, the default is False'''
-        for s in guarded_source_iterator(cls.all, **guards):
-            yield s
+        cls.all = SourceList()
 
 class SourceFile(object):
     '''Base object that encapsulates the notion of a source file.
     This includes, the source node, target node, various manipulations
-    of those.  A source file also specifies a set of guards which
-    describing which builds the source file applies to.  A parent can
-    also be specified to get default guards from'''
+    of those.  A source file also specifies a set of tags which
+    describing arbitrary properties of the source file.'''
     __metaclass__ = SourceMeta
-    def __init__(self, source, parent=None, **guards):
-        self.guards = guards
-        self.parent = parent
+
+    static_objs = {}
+    shared_objs = {}
+
+    def __init__(self, source, tags=None, add_tags=None):
+        if tags is None:
+            tags='gem5 lib'
+        if isinstance(tags, basestring):
+            tags = set([tags])
+        if not isinstance(tags, set):
+            tags = set(tags)
+        self.tags = tags
+
+        if add_tags:
+            if isinstance(add_tags, basestring):
+                add_tags = set([add_tags])
+            if not isinstance(add_tags, set):
+                add_tags = set(add_tags)
+            self.tags |= add_tags
 
         tnode = source
         if not isinstance(source, SCons.Node.FS.File):
@@ -120,6 +169,18 @@ class SourceFile(object):
         for base in type(self).__mro__:
             if issubclass(base, SourceFile):
                 base.all.append(self)
+
+    def static(self, env):
+        key = (self.tnode, env['OBJSUFFIX'])
+        if not key in self.static_objs:
+            self.static_objs[key] = env.StaticObject(self.tnode)
+        return self.static_objs[key]
+
+    def shared(self, env):
+        key = (self.tnode, env['OBJSUFFIX'])
+        if not key in self.shared_objs:
+            self.shared_objs[key] = env.SharedObject(self.tnode)
+        return self.shared_objs[key]
 
     @property
     def filename(self):
@@ -142,16 +203,6 @@ class SourceFile(object):
 
         return self.basename[:index], self.basename[index+1:]
 
-    @property
-    def all_guards(self):
-        '''find all guards for this object getting default values
-        recursively from its parents'''
-        guards = {}
-        if self.parent:
-            guards.update(self.parent.guards)
-        guards.update(self.guards)
-        return guards
-
     def __lt__(self, other): return self.filename < other.filename
     def __le__(self, other): return self.filename <= other.filename
     def __gt__(self, other): return self.filename > other.filename
@@ -159,32 +210,30 @@ class SourceFile(object):
     def __eq__(self, other): return self.filename == other.filename
     def __ne__(self, other): return self.filename != other.filename
 
-    @staticmethod
-    def done():
-        def disabled(cls, name, *ignored):
-            raise RuntimeError("Additional SourceFile '%s'" % name,\
-                  "declared, but targets deps are already fixed.")
-        SourceFile.__init__ = disabled
-
-
 class Source(SourceFile):
-    current_group = None
-    source_groups = { None : [] }
+    ungrouped_tag = 'No link group'
+    source_groups = set()
+
+    _current_group_tag = ungrouped_tag
+
+    @staticmethod
+    def link_group_tag(group):
+        return 'link group: %s' % group
 
     @classmethod
     def set_group(cls, group):
-        if not group in Source.source_groups:
-            Source.source_groups[group] = []
-        Source.current_group = group
+        new_tag = Source.link_group_tag(group)
+        Source._current_group_tag = new_tag
+        Source.source_groups.add(group)
+
+    def _add_link_group_tag(self):
+        self.tags.add(Source._current_group_tag)
 
     '''Add a c/c++ source file to the build'''
-    def __init__(self, source, Werror=True, **guards):
-        '''specify the source file, and any guards'''
-        super(Source, self).__init__(source, **guards)
-
-        self.Werror = Werror
-
-        Source.source_groups[Source.current_group].append(self)
+    def __init__(self, source, tags=None, add_tags=None):
+        '''specify the source file, and any tags'''
+        super(Source, self).__init__(source, tags, add_tags)
+        self._add_link_group_tag()
 
 class PySource(SourceFile):
     '''Add a python source file to the named package'''
@@ -193,9 +242,9 @@ class PySource(SourceFile):
     tnodes = {}
     symnames = {}
 
-    def __init__(self, package, source, **guards):
-        '''specify the python package, the source file, and any guards'''
-        super(PySource, self).__init__(source, **guards)
+    def __init__(self, package, source, tags=None, add_tags=None):
+        '''specify the python package, the source file, and any tags'''
+        super(PySource, self).__init__(source, tags, add_tags)
 
         modname,ext = self.extname
         assert ext == 'py'
@@ -235,10 +284,10 @@ class SimObject(PySource):
     fixed = False
     modnames = []
 
-    def __init__(self, source, **guards):
-        '''Specify the source file and any guards (automatically in
+    def __init__(self, source, tags=None, add_tags=None):
+        '''Specify the source file and any tags (automatically in
         the m5.objects package)'''
-        super(SimObject, self).__init__('m5.objects', source, **guards)
+        super(SimObject, self).__init__('m5.objects', source, tags, add_tags)
         if self.fixed:
             raise AttributeError, "Too late to call SimObject now."
 
@@ -247,9 +296,9 @@ class SimObject(PySource):
 class ProtoBuf(SourceFile):
     '''Add a Protocol Buffer to build'''
 
-    def __init__(self, source, **guards):
-        '''Specify the source file, and any guards'''
-        super(ProtoBuf, self).__init__(source, **guards)
+    def __init__(self, source, tags=None, add_tags=None):
+        '''Specify the source file, and any tags'''
+        super(ProtoBuf, self).__init__(source, tags, add_tags)
 
         # Get the file name and the extension
         modname,ext = self.extname
@@ -267,20 +316,29 @@ class UnitTest(object):
     def __init__(self, target, *sources, **kwargs):
         '''Specify the target name and any sources.  Sources that are
         not SourceFiles are evalued with Source().  All files are
-        guarded with a guard of the same name as the UnitTest
-        target.'''
+        tagged with the name of the UnitTest target.'''
 
-        srcs = []
+        srcs = SourceList()
         for src in sources:
             if not isinstance(src, SourceFile):
-                src = Source(src, skip_lib=True)
-            src.guards[target] = True
+                src = Source(src, tags=str(target))
             srcs.append(src)
 
         self.sources = srcs
         self.target = target
         self.main = kwargs.get('main', False)
-        UnitTest.all.append(self)
+        self.all.append(self)
+
+class GTest(UnitTest):
+    '''Create a unit test based on the google test framework.'''
+    all = []
+    def __init__(self, *args, **kwargs):
+        isFilter = lambda arg: isinstance(arg, SourceFilter)
+        self.filters = filter(isFilter, args)
+        args = filter(lambda a: not isFilter(a), args)
+        super(GTest, self).__init__(*args, **kwargs)
+        self.dir = Dir('.')
+        self.skip_lib = kwargs.pop('skip_lib', False)
 
 # Children should have access
 Export('Source')
@@ -288,6 +346,7 @@ Export('PySource')
 Export('SimObject')
 Export('ProtoBuf')
 Export('UnitTest')
+Export('GTest')
 
 ########################################################################
 #
@@ -770,7 +829,7 @@ if env['HAVE_PROTOBUF']:
                                Transform("PROTOC")))
 
         # Add the C++ source file
-        Source(proto.cc_file, **proto.guards)
+        Source(proto.cc_file, tags=proto.tags)
 elif ProtoBuf.all:
     print 'Got protobuf to build, but lacks support!'
     Exit(1)
@@ -936,7 +995,7 @@ EmbeddedPython embedded_${sym}(
 for source in PySource.all:
     env.Command(source.cpp, source.tnode,
                 MakeAction(embedPyFile, Transform("EMBED PY")))
-    Source(source.cpp, skip_no_python=True)
+    Source(source.cpp, tags=source.tags, add_tags='python')
 
 ########################################################################
 #
@@ -945,7 +1004,7 @@ for source in PySource.all:
 #
 
 # List of constructed environments to pass back to SConstruct
-date_source = Source('base/date.cc', skip_lib=True)
+date_source = Source('base/date.cc', tags=[])
 
 # Function to create a new build environment as clone of current
 # environment 'env' with modified object suffix and optional stripped
@@ -962,125 +1021,54 @@ def makeEnv(env, label, objsfx, strip=False, disable_partial=False, **kwargs):
     new_env.Label = label
     new_env.Append(**kwargs)
 
-    if env['GCC']:
-        # The address sanitizer is available for gcc >= 4.8
-        if GetOption('with_asan'):
-            if GetOption('with_ubsan') and \
-                    compareVersions(env['GCC_VERSION'], '4.9') >= 0:
-                new_env.Append(CCFLAGS=['-fsanitize=address,undefined',
-                                        '-fno-omit-frame-pointer'])
-                new_env.Append(LINKFLAGS='-fsanitize=address,undefined')
-            else:
-                new_env.Append(CCFLAGS=['-fsanitize=address',
-                                        '-fno-omit-frame-pointer'])
-                new_env.Append(LINKFLAGS='-fsanitize=address')
-        # Only gcc >= 4.9 supports UBSan, so check both the version
-        # and the command-line option before adding the compiler and
-        # linker flags.
-        elif GetOption('with_ubsan') and \
-                compareVersions(env['GCC_VERSION'], '4.9') >= 0:
-            new_env.Append(CCFLAGS='-fsanitize=undefined')
-            new_env.Append(LINKFLAGS='-fsanitize=undefined')
-
-
-    if env['CLANG']:
-        # We require clang >= 3.1, so there is no need to check any
-        # versions here.
-        if GetOption('with_ubsan'):
-            if GetOption('with_asan'):
-                new_env.Append(CCFLAGS=['-fsanitize=address,undefined',
-                                        '-fno-omit-frame-pointer'])
-                new_env.Append(LINKFLAGS='-fsanitize=address,undefined')
-            else:
-                new_env.Append(CCFLAGS='-fsanitize=undefined')
-                new_env.Append(LINKFLAGS='-fsanitize=undefined')
-
-        elif GetOption('with_asan'):
-            new_env.Append(CCFLAGS=['-fsanitize=address',
-                                    '-fno-omit-frame-pointer'])
-            new_env.Append(LINKFLAGS='-fsanitize=address')
-
-    werror_env = new_env.Clone()
-    # Treat warnings as errors but white list some warnings that we
-    # want to allow (e.g., deprecation warnings).
-    werror_env.Append(CCFLAGS=['-Werror',
-                               '-Wno-error=deprecated-declarations',
-                               '-Wno-error=deprecated',
-                               '-Wno-unused-local-typedefs'
-                               ])
-
-    def make_obj(source, static, extra_deps = None):
-        '''This function adds the specified source to the correct
-        build environment, and returns the corresponding SCons Object
-        nodes'''
-
-        if source.Werror:
-            env = werror_env
-        else:
-            env = new_env
-
-        if static:
-            obj = env.StaticObject(source.tnode)
-        else:
-            obj = env.SharedObject(source.tnode)
-
-        if extra_deps:
-            env.Depends(obj, extra_deps)
-
-        return obj
-
-    lib_guards = {'main': False, 'skip_lib': False}
+    lib_sources = Source.all.with_tag('gem5 lib')
 
     # Without Python, leave out all Python content from the library
     # builds.  The option doesn't affect gem5 built as a program
     if GetOption('without_python'):
-        lib_guards['skip_no_python'] = False
+        lib_sources = lib_sources.without_tag('python')
 
     static_objs = []
     shared_objs = []
-    for s in guarded_source_iterator(Source.source_groups[None], **lib_guards):
-        static_objs.append(make_obj(s, True))
-        shared_objs.append(make_obj(s, False))
 
-    partial_objs = []
-    for group, all_srcs in Source.source_groups.iteritems():
-        # If these are the ungrouped source files, skip them.
-        if not group:
-            continue
+    for s in lib_sources.with_tag(Source.ungrouped_tag):
+        static_objs.append(s.static(new_env))
+        shared_objs.append(s.shared(new_env))
 
-        # Get a list of the source files compatible with the current guards.
-        srcs = [ s for s in guarded_source_iterator(all_srcs, **lib_guards) ]
-        # If there aren't any left, skip this group.
+    for group in Source.source_groups:
+        srcs = lib_sources.with_tag(Source.link_group_tag(group))
         if not srcs:
             continue
+
+        group_static = [ s.static(new_env) for s in srcs ]
+        group_shared = [ s.shared(new_env) for s in srcs ]
 
         # If partial linking is disabled, add these sources to the build
         # directly, and short circuit this loop.
         if disable_partial:
-            for s in srcs:
-                static_objs.append(make_obj(s, True))
-                shared_objs.append(make_obj(s, False))
+            static_objs.extend(group_static)
+            shared_objs.extend(group_shared)
             continue
 
         # Set up the static partially linked objects.
-        source_objs = [ make_obj(s, True) for s in srcs ]
         file_name = new_env.subst("${OBJPREFIX}lib${OBJSUFFIX}.partial")
         target = File(joinpath(group, file_name))
-        partial = env.PartialStatic(target=target, source=source_objs)
-        static_objs.append(partial)
+        partial = env.PartialStatic(target=target, source=group_static)
+        static_objs.extend(partial)
 
         # Set up the shared partially linked objects.
-        source_objs = [ make_obj(s, False) for s in srcs ]
         file_name = new_env.subst("${SHOBJPREFIX}lib${SHOBJSUFFIX}.partial")
         target = File(joinpath(group, file_name))
-        partial = env.PartialShared(target=target, source=source_objs)
-        shared_objs.append(partial)
+        partial = env.PartialShared(target=target, source=group_shared)
+        shared_objs.extend(partial)
 
-    static_date = make_obj(date_source, static=True, extra_deps=static_objs)
-    static_objs.append(static_date)
+    static_date = date_source.static(new_env)
+    new_env.Depends(static_date, static_objs)
+    static_objs.extend(static_date)
 
-    shared_date = make_obj(date_source, static=False, extra_deps=shared_objs)
-    shared_objs.append(shared_date)
+    shared_date = date_source.shared(new_env)
+    new_env.Depends(shared_date, shared_objs)
+    shared_objs.extend(shared_date)
 
     # First make a library of everything but main() so other programs can
     # link against m5.
@@ -1088,16 +1076,34 @@ def makeEnv(env, label, objsfx, strip=False, disable_partial=False, **kwargs):
     shared_lib = new_env.SharedLibrary(libname, shared_objs)
 
     # Now link a stub with main() and the static library.
-    main_objs = [ make_obj(s, True) for s in Source.get(main=True) ]
+    main_objs = [ s.static(new_env) for s in Source.all.with_tag('main') ]
 
     for test in UnitTest.all:
-        flags = { test.target : True }
-        test_sources = Source.get(**flags)
-        test_objs = [ make_obj(s, static=True) for s in test_sources ]
+        test_sources = Source.all.with_tag(str(test.target))
+        test_objs = [ s.static(new_env) for s in test_sources ]
         if test.main:
             test_objs += main_objs
         path = 'unittest/%s.%s' % (test.target, label)
         new_env.Program(path, test_objs + static_objs)
+
+    gtest_env = new_env.Clone()
+    gtest_env.Append(LIBS=gtest_env['GTEST_LIBS'])
+    gtest_env.Append(CPPFLAGS=gtest_env['GTEST_CPPFLAGS'])
+    gtestlib_sources = Source.all.with_tag('gtest lib')
+    gtest_out_dir = Dir(new_env['BUILDDIR']).Dir('unittests.%s' % label)
+    for test in GTest.all:
+        test_sources = list(test.sources)
+        if not test.skip_lib:
+            test_sources += gtestlib_sources
+        for f in test.filters:
+            test_sources += Source.all.apply_filter(f)
+        test_objs = [ s.static(gtest_env) for s in test_sources ]
+        test_binary = gtest_env.Program(
+            test.dir.File('%s.%s' % (test.target, label)), test_objs)
+
+        AlwaysBuild(gtest_env.Command(
+            gtest_out_dir.File("%s/%s.xml" % (test.dir, test.target)),
+            test_binary, "${SOURCES[0]} --gtest_output=xml:${TARGETS[0]}"))
 
     progname = exename
     if strip:

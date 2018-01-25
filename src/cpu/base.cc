@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012,2016 ARM Limited
+ * Copyright (c) 2011-2012,2016-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,10 +51,10 @@
 #include <sstream>
 #include <string>
 
-#include "arch/tlb.hh"
+#include "arch/generic/tlb.hh"
 #include "base/cprintf.hh"
 #include "base/loader/symtab.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/output.hh"
 #include "base/trace.hh"
 #include "cpu/checker/cpu.hh"
@@ -133,10 +133,14 @@ BaseCPU::BaseCPU(Params *p, bool is_checker)
       _switchedOut(p->switched_out), _cacheLineSize(p->system->cacheLineSize()),
       interrupts(p->interrupts), profileEvent(NULL),
       numThreads(p->numThreads), system(p->system),
+      previousCycle(0), previousState(CPU_STATE_SLEEP),
       functionTraceStream(nullptr), currentFunctionStart(0),
       currentFunctionEnd(0), functionEntryTick(0),
       addressMonitor(p->numThreads),
-      syscallRetryLatency(p->syscallRetryLatency)
+      syscallRetryLatency(p->syscallRetryLatency),
+      pwrGatingLatency(p->pwr_gating_latency),
+      powerGatingOnIdle(p->power_gating_on_idle),
+      enterPwrGatingEvent([this]{ enterPwrGating(); }, name())
 {
     // if Python did not provide a valid ID, do it here
     if (_cpuId == -1 ) {
@@ -309,7 +313,7 @@ BaseCPU::mwait(ThreadID tid, PacketPtr pkt)
 }
 
 void
-BaseCPU::mwaitAtomic(ThreadID tid, ThreadContext *tc, TheISA::TLB *dtb)
+BaseCPU::mwaitAtomic(ThreadID tid, ThreadContext *tc, BaseTLB *dtb)
 {
     assert(tid < numThreads);
     AddressMonitor &monitor = addressMonitor[tid];
@@ -361,6 +365,9 @@ BaseCPU::startup()
         new CPUProgressEvent(this, params()->progress_interval);
     }
 
+    if (_switchedOut)
+        ClockedObject::pwrState(Enums::PwrState::OFF);
+
     // Assumption CPU start to operate instantaneously without any latency
     if (ClockedObject::pwrState() == Enums::PwrState::UNDEFINED)
         ClockedObject::pwrState(Enums::PwrState::ON);
@@ -379,12 +386,16 @@ BaseCPU::pmuProbePoint(const char *name)
 void
 BaseCPU::regProbePoints()
 {
-    ppCycles = pmuProbePoint("Cycles");
+    ppAllCycles = pmuProbePoint("Cycles");
+    ppActiveCycles = pmuProbePoint("ActiveCycles");
 
     ppRetiredInsts = pmuProbePoint("RetiredInsts");
     ppRetiredLoads = pmuProbePoint("RetiredLoads");
     ppRetiredStores = pmuProbePoint("RetiredStores");
     ppRetiredBranches = pmuProbePoint("RetiredBranches");
+
+    ppSleeping = new ProbePointArg<bool>(this->getProbeManager(),
+                                         "Sleeping");
 }
 
 void
@@ -472,6 +483,30 @@ BaseCPU::registerThreadContexts()
     }
 }
 
+void
+BaseCPU::deschedulePowerGatingEvent()
+{
+    if (enterPwrGatingEvent.scheduled()){
+        deschedule(enterPwrGatingEvent);
+    }
+}
+
+void
+BaseCPU::schedulePowerGatingEvent()
+{
+    for (auto tc : threadContexts) {
+        if (tc->status() == ThreadContext::Active)
+            return;
+    }
+
+    if (ClockedObject::pwrState() == Enums::PwrState::CLK_GATED &&
+        powerGatingOnIdle) {
+        assert(!enterPwrGatingEvent.scheduled());
+        // Schedule a power gating event when clock gated for the specified
+        // amount of time
+        schedule(enterPwrGatingEvent, clockEdge(pwrGatingLatency));
+    }
+}
 
 int
 BaseCPU::findContext(ThreadContext *tc)
@@ -487,8 +522,13 @@ BaseCPU::findContext(ThreadContext *tc)
 void
 BaseCPU::activateContext(ThreadID thread_num)
 {
+    // Squash enter power gating event while cpu gets activated
+    if (enterPwrGatingEvent.scheduled())
+        deschedule(enterPwrGatingEvent);
     // For any active thread running, update CPU power state to active (ON)
     ClockedObject::pwrState(Enums::PwrState::ON);
+
+    updateCycleCounters(CPU_STATE_WAKEUP);
 }
 
 void
@@ -501,8 +541,30 @@ BaseCPU::suspendContext(ThreadID thread_num)
         }
     }
 
+    // All CPU thread are suspended, update cycle count
+    updateCycleCounters(CPU_STATE_SLEEP);
+
     // All CPU threads suspended, enter lower power state for the CPU
     ClockedObject::pwrState(Enums::PwrState::CLK_GATED);
+
+    // If pwrGatingLatency is set to 0 then this mechanism is disabled
+    if (powerGatingOnIdle) {
+        // Schedule power gating event when clock gated for pwrGatingLatency
+        // cycles
+        schedule(enterPwrGatingEvent, clockEdge(pwrGatingLatency));
+    }
+}
+
+void
+BaseCPU::haltContext(ThreadID thread_num)
+{
+    updateCycleCounters(BaseCPU::CPU_STATE_SLEEP);
+}
+
+void
+BaseCPU::enterPwrGating(void)
+{
+    ClockedObject::pwrState(Enums::PwrState::OFF);
 }
 
 void
@@ -516,6 +578,9 @@ BaseCPU::switchOut()
     // Flush all TLBs in the CPU to avoid having stale translations if
     // it gets switched in later.
     flushTLBs();
+
+    // Go to the power gating state
+    ClockedObject::pwrState(Enums::PwrState::OFF);
 }
 
 void
@@ -527,6 +592,12 @@ BaseCPU::takeOverFrom(BaseCPU *oldCPU)
     assert(oldCPU != this);
     _pid = oldCPU->getPid();
     _taskId = oldCPU->taskId();
+    // Take over the power state of the switchedOut CPU
+    ClockedObject::pwrState(oldCPU->pwrState());
+
+    previousState = oldCPU->previousState;
+    previousCycle = oldCPU->previousCycle;
+
     _switchedOut = false;
 
     ThreadID size = threadContexts.size();

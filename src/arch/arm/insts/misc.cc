@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2012-2013 ARM Limited
+ * Copyright (c) 2010, 2012-2013, 2017 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -259,10 +259,9 @@ MiscRegRegImmOp::generateDisassembly(Addr pc, const SymbolTable *symtab) const
 {
     std::stringstream ss;
     printMnemonic(ss);
-    printIntReg(ss, dest);
+    printMiscReg(ss, dest);
     ss << ", ";
     printIntReg(ss, op1);
-    ccprintf(ss, ", #%d", imm);
     return ss.str();
 }
 
@@ -273,8 +272,7 @@ RegMiscRegImmOp::generateDisassembly(Addr pc, const SymbolTable *symtab) const
     printMnemonic(ss);
     printIntReg(ss, dest);
     ss << ", ";
-    printIntReg(ss, op1);
-    ccprintf(ss, ", #%d", imm);
+    printMiscReg(ss, op1);
     return ss.str();
 }
 
@@ -319,6 +317,16 @@ RegImmRegShiftOp::generateDisassembly(Addr pc, const SymbolTable *symtab) const
     printIntReg(ss, dest);
     ccprintf(ss, ", #%d, ", imm);
     printShiftOperand(ss, op1, true, shiftAmt, INTREG_ZERO, shiftType);
+    printIntReg(ss, op1);
+    return ss.str();
+}
+
+std::string
+MiscRegRegImmMemOp::generateDisassembly(Addr pc,
+                                        const SymbolTable *symtab) const
+{
+    std::stringstream ss;
+    printMnemonic(ss);
     printIntReg(ss, op1);
     return ss.str();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012,2015 ARM Limited
+ * Copyright (c) 2010-2012, 2015, 2017 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -45,14 +45,13 @@
 
 #include "arch/kernel_stats.hh"
 #include "arch/stacktrace.hh"
-#include "arch/tlb.hh"
 #include "arch/utility.hh"
 #include "arch/vtophys.hh"
 #include "base/cp_annotate.hh"
 #include "base/cprintf.hh"
 #include "base/inifile.hh"
 #include "base/loader/symtab.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "base/pollevent.hh"
 #include "base/trace.hh"
 #include "base/types.hh"
@@ -215,6 +214,7 @@ BaseSimpleCPU::haltContext(ThreadID thread_num)
 {
     // for now, these are equivalent
     suspendContext(thread_num);
+    updateCycleCounters(BaseCPU::CPU_STATE_SLEEP);
 }
 
 
@@ -474,13 +474,13 @@ BaseSimpleCPU::setupFetchRequest(Request *req)
     SimpleThread* thread = t_info.thread;
 
     Addr instAddr = thread->instAddr();
+    Addr fetchPC = (instAddr & PCMask) + t_info.fetchOffset;
 
     // set up memory request for instruction fetch
-    DPRINTF(Fetch, "Fetch: PC:%08p\n", instAddr);
+    DPRINTF(Fetch, "Fetch: Inst PC:%08p, Fetch PC:%08p\n", instAddr, fetchPC);
 
-    Addr fetchPC = (instAddr & PCMask) + t_info.fetchOffset;
-    req->setVirt(0, fetchPC, sizeof(MachInst), Request::INST_FETCH, instMasterId(),
-            instAddr);
+    req->setVirt(0, fetchPC, sizeof(MachInst), Request::INST_FETCH,
+                 instMasterId(), instAddr);
 }
 
 

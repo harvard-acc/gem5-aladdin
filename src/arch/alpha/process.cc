@@ -34,10 +34,11 @@
 #include "arch/alpha/isa_traits.hh"
 #include "base/loader/elf_object.hh"
 #include "base/loader/object_file.hh"
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "cpu/thread_context.hh"
 #include "debug/Loader.hh"
 #include "mem/page_table.hh"
+#include "params/Process.hh"
 #include "sim/aux_vector.hh"
 #include "sim/byteswap.hh"
 #include "sim/process_impl.hh"
@@ -48,8 +49,11 @@ using namespace AlphaISA;
 using namespace std;
 
 AlphaProcess::AlphaProcess(ProcessParams *params, ObjectFile *objFile)
-    : Process(params, objFile)
+    : Process(params,
+              new EmulationPageTable(params->name, params->pid, PageBytes),
+      objFile)
 {
+    fatal_if(params->useArchPT, "Arch page tables not implemented.");
     Addr brk_point = objFile->dataBase() + objFile->dataSize() +
                      objFile->bssSize();
     brk_point = roundUp(brk_point, PageBytes);

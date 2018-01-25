@@ -42,7 +42,7 @@
 #include <memory>
 #include <string>
 
-#include "base/misc.hh"
+#include "base/logging.hh"
 #include "params/Process.hh"
 #include "sim/fd_entry.hh"
 
@@ -131,8 +131,7 @@ FDArray::restoreFileOffsets()
      * possible to guarantee that the simulation will proceed as it should
      * have in the same way that it would have proceeded sans checkpoints.
      */
-    void (*seek)(std::shared_ptr<FileFDEntry>)
-        = [] (std::shared_ptr<FileFDEntry> ffd)
+    auto seek = [] (std::shared_ptr<FileFDEntry> ffd)
     {
         if (lseek(ffd->getSimFD(), ffd->getFileOffset(), SEEK_SET) < 0)
             fatal("Unable to seek to location in %s", ffd->getFileName());

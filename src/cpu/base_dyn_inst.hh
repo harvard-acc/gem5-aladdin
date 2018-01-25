@@ -124,6 +124,7 @@ class BaseDynInst : public ExecContext, public RefCounted
     };
 
     enum Flags {
+        NotAnInst,
         TranslationStarted,
         TranslationCompleted,
         PossibleLoadViolation,
@@ -132,10 +133,6 @@ class BaseDynInst : public ExecContext, public RefCounted
         RecordResult,
         Predicate,
         PredTaken,
-        /** Whether or not the effective address calculation is completed.
-         *  @todo: Consider if this is necessary or not.
-         */
-        EACalcDone,
         IsStrictlyOrdered,
         ReqMade,
         MemOpDone,
@@ -245,12 +242,6 @@ class BaseDynInst : public ExecContext, public RefCounted
     // Need a copy of main request pointer to verify on writes.
     RequestPtr reqToVerify;
 
-  private:
-    /** Instruction effective address.
-     *  @todo: Consider if this is necessary or not.
-     */
-    Addr instEffAddr;
-
   protected:
     /** Flattened register index of the destination registers of this
      *  instruction.
@@ -283,6 +274,9 @@ class BaseDynInst : public ExecContext, public RefCounted
     /** Whether or not the memory operation is done. */
     bool memOpDone() const { return instFlags[MemOpDone]; }
     void memOpDone(bool f) { instFlags[MemOpDone] = f; }
+
+    bool notAnInst() const { return instFlags[NotAnInst]; }
+    void setNotAnInst() { instFlags[NotAnInst] = true; }
 
 
     ////////////////////////////////////////////
@@ -859,15 +853,6 @@ class BaseDynInst : public ExecContext, public RefCounted
     ThreadContext *tcBase() { return thread->getTC(); }
 
   public:
-    /** Sets the effective address. */
-    void setEA(Addr ea) { instEffAddr = ea; instFlags[EACalcDone] = true; }
-
-    /** Returns the effective address. */
-    Addr getEA() const { return instEffAddr; }
-
-    /** Returns whether or not the eff. addr. calculation has been completed. */
-    bool doneEACalc() { return instFlags[EACalcDone]; }
-
     /** Returns whether or not the eff. addr. source registers are ready. */
     bool eaSrcsReady();
 

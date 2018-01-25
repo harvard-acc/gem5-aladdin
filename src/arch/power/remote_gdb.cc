@@ -151,8 +151,8 @@
 using namespace std;
 using namespace PowerISA;
 
-RemoteGDB::RemoteGDB(System *_system, ThreadContext *tc)
-    : BaseRemoteGDB(_system, tc), regCache(this)
+RemoteGDB::RemoteGDB(System *_system, ThreadContext *tc, int _port)
+    : BaseRemoteGDB(_system, tc, _port), regCache(this)
 {
 }
 
@@ -162,16 +162,13 @@ RemoteGDB::RemoteGDB(System *_system, ThreadContext *tc)
 bool
 RemoteGDB::acc(Addr va, size_t len)
 {
-    TlbEntry entry;
-    //Check to make sure the first byte is mapped into the processes address
-    //space.  At the time of this writing, the acc() check is used when
-    //processing the MemR/MemW packets before actually asking the translating
-    //port proxy to read/writeBlob.  I (bgs) am not convinced the first byte
-    //check is enough.
-    if (FullSystem)
-        panic("acc not implemented for POWER FS!");
-    else
-        return context->getProcessPtr()->pTable->lookup(va, entry);
+    // Check to make sure the first byte is mapped into the processes address
+    // space.  At the time of this writing, the acc() check is used when
+    // processing the MemR/MemW packets before actually asking the translating
+    // port proxy to read/writeBlob.  I (bgs) am not convinced the first byte
+    // check is enough.
+    panic_if(FullSystem, "acc not implemented for POWER FS!");
+    return context()->getProcessPtr()->pTable->lookup(va) != nullptr;
 }
 
 void
@@ -216,8 +213,9 @@ RemoteGDB::PowerGdbRegCache::setRegs(ThreadContext *context) const
     context->setIntReg(INTREG_XER, betoh(r.xer));
 }
 
-RemoteGDB::BaseGdbRegCache*
-RemoteGDB::gdbRegs() {
+BaseGdbRegCache*
+RemoteGDB::gdbRegs()
+{
     return &regCache;
 }
 

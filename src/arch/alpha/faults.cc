@@ -196,14 +196,14 @@ ItbPageFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
     }
 
     Process *p = tc->getProcessPtr();
-    TlbEntry entry;
-    bool success = p->pTable->lookup(pc, entry);
-    if (!success) {
-        panic("Tried to execute unmapped address %#x.\n", pc);
-    } else {
-        VAddr vaddr(pc);
-        tc->getITBPtr()->insert(vaddr.page(), entry);
-    }
+    const EmulationPageTable::Entry *pte = p->pTable->lookup(pc);
+    panic_if(!pte, "Tried to execute unmapped address %#x.\n", pc);
+
+    VAddr vaddr(pc);
+    TlbEntry entry(p->pTable->pid(), vaddr.page(), pte->paddr,
+                   pte->flags & EmulationPageTable::Uncacheable,
+                   pte->flags & EmulationPageTable::ReadOnly);
+    dynamic_cast<TLB *>(tc->getITBPtr())->insert(vaddr.page(), entry);
 }
 
 void
@@ -215,17 +215,14 @@ NDtbMissFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
     }
 
     Process *p = tc->getProcessPtr();
-    TlbEntry entry;
-    bool success = p->pTable->lookup(vaddr, entry);
-    if (!success) {
-        if (p->fixupStackFault(vaddr))
-            success = p->pTable->lookup(vaddr, entry);
-    }
-    if (!success) {
-        panic("Tried to access unmapped address %#x.\n", (Addr)vaddr);
-    } else {
-        tc->getDTBPtr()->insert(vaddr.page(), entry);
-    }
+    const EmulationPageTable::Entry *pte = p->pTable->lookup(vaddr);
+    if (!pte && p->fixupStackFault(vaddr))
+        pte = p->pTable->lookup(vaddr);
+    panic_if(!pte, "Tried to access unmapped address %#x.\n", (Addr)vaddr);
+    TlbEntry entry(p->pTable->pid(), vaddr.page(), pte->paddr,
+                   pte->flags & EmulationPageTable::Uncacheable,
+                   pte->flags & EmulationPageTable::ReadOnly);
+    dynamic_cast<TLB *>(tc->getDTBPtr())->insert(vaddr.page(), entry);
 }
 
 } // namespace AlphaISA

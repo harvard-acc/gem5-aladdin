@@ -38,13 +38,14 @@
  */
 
 #include "base/imgwriter.hh"
-#include "base/bmpwriter.hh"
-#include "base/misc.hh"
 
+#include "base/bmpwriter.hh"
+#include "base/logging.hh"
 #include "config/use_png.hh"
 
 #if USE_PNG
 #include "base/pngwriter.hh"
+
 #endif
 
 std::unique_ptr<ImgWriter>
@@ -58,7 +59,7 @@ createImgWriter(Enums::ImageFormat type, const FrameBuffer *fb)
         // gem5 will try PNG first, and it will fallback to BMP if not
         // available.
 
-        /* FALLTHROUGH */
+        M5_FALLTHROUGH;
 #if USE_PNG
       case Enums::Png:
         return std::unique_ptr<PngWriter>(new PngWriter(fb));

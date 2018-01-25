@@ -78,7 +78,6 @@
 #endif
 
 class BaseRemoteGDB;
-class GDBListener;
 class KvmVM;
 class ObjectFile;
 class ThreadContext;
@@ -618,7 +617,6 @@ class System : public MemObject
 
   public:
     std::vector<BaseRemoteGDB *> remoteGDB;
-    std::vector<GDBListener *> gdbListen;
     bool breakpoint();
 
   public:

@@ -168,8 +168,8 @@ def config_mem(options, system):
     opt_mem_ranks = getattr(options, "mem_ranks", None)
 
     if opt_mem_type == "HMC_2500_1x32":
-        HMChost = HMC.config_host_hmc(options, system)
-        HMC.config_hmc(options, system, HMChost.hmc_host)
+        HMChost = HMC.config_hmc_host_ctrl(options, system)
+        HMC.config_hmc_dev(options, system, HMChost.hmc_host)
         subsystem = system.hmc_dev
         xbar = system.hmc_dev.xbar
     else:
@@ -240,6 +240,9 @@ def config_mem(options, system):
     for i in xrange(len(subsystem.mem_ctrls)):
         if opt_mem_type == "HMC_2500_1x32":
             subsystem.mem_ctrls[i].port = xbar[i/4].master
+            # Set memory device size. There is an independent controller for
+            # each vault. All vaults are same size.
+            subsystem.mem_ctrls[i].device_size = options.hmc_dev_vault_size
         else:
             if options.record_dram_traffic:
                 monitor = CommMonitor()

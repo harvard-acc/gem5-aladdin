@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2012-2013, 2015-2016 ARM Limited
+ * Copyright (c) 2010, 2012-2013, 2015-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -228,6 +228,12 @@ class ArmSystem : public System
      */
     const AddrRange &m5opRange() const { return _m5opRange; }
 
+    /**
+     * Returns a valid ArmSystem pointer if using ARM ISA, it fails
+     * otherwise.
+     */
+    static ArmSystem* getArmSystem(ThreadContext *tc);
+
     /** Returns true if the system of a specific thread context implements the
      * Security Extensions
      */
@@ -253,8 +259,11 @@ class ArmSystem : public System
      */
     static ExceptionLevel highestEL(ThreadContext *tc);
 
-    /** Returns the reset address if the highest implemented exception level for
-     * the system of a specific thread context is 64 bits (ARMv8)
+    /** Return true if the system implements a specific exception level */
+    static bool haveEL(ThreadContext *tc, ExceptionLevel el);
+
+    /** Returns the reset address if the highest implemented exception level
+     * for the system of a specific thread context is 64 bits (ARMv8)
      */
     static Addr resetAddr64(ThreadContext *tc);
 
