@@ -267,8 +267,11 @@ namespace CpuidCacheParams {
                         stringToRegister(vendorString + 8));
                 break;
               case FamilyModelStepping:
+                // gem5 has incomplete support for SSSE3 - in particular,
+                // several instructions (palign) used by strcmp_ssse3, which
+                // can cause code to take the wrong path.
                 result = CpuidResult(0x00020f51, 0x00000805,
-                                     0xe7dbfbff, 0x04000209);
+                                     0xe7dbfbff, 0x04000009);
                 break;
               case CacheParams:
                 result = getCacheParameters(tc, index);
