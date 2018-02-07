@@ -9,14 +9,14 @@ RUN apt-get update && apt-get install -y \
   tmux \
   vim \
   cmake \
-  wget
+  wget \
+  ack-grep
 
 RUN pip install --upgrade pip
 
 # Install gem5 dependencies.
 RUN apt-get update -qq
 RUN apt-get install -y m4 \
-      libz-dev \
       libprotobuf-dev \
       protobuf-compiler \
       libsqlite3-dev \
@@ -53,6 +53,14 @@ RUN wget -q http://releases.llvm.org/3.4.2/cfe-3.4.2.src.tar.gz && \
     cd build && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
     make -j8 && \
+    make install
+
+# Install a newer version of ZLIB from source.
+RUN wget -q https://www.zlib.net/zlib-1.2.11.tar.gz && \
+    tar -xf zlib-1.2.11.tar.gz && \
+    cd zlib-1.2.11 && \
+    ./configure && \
+    make && \
     make install
 
 # Install libconfuse 3.2.1 from source.
