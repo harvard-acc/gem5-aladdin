@@ -312,9 +312,9 @@
     </component>
     <component id="system.L20" name="L20">
       <!-- all the buffer related are optional -->
-        <param name="L2_config" value="config.system.l2.size,config.system.cache_line_size,config.system.l2.assoc,config.system.l2.assoc, 2, config.system.l2.response_latency,16,1"/>
+        <param name="L2_config" value="config.system.l2.size|1024,config.system.cache_line_size|32,config.system.l2.assoc|1,config.system.l2.assoc|1, 2, config.system.l2.response_latency|1,16,1"/>
         <!-- the parameters are capacity,block_width, associativity, bank, throughput w.r.t. core clock, latency w.r.t. core clock,output_width, cache policy -->
-        <param name="buffer_sizes" value="config.system.l2.mshrs, config.system.l2.write_buffers, 16, 16"/>
+        <param name="buffer_sizes" value="config.system.l2.mshrs|16, config.system.l2.write_buffers|16, 16, 16"/>
         <!-- cache controller buffer sizes: miss_buffer_size(MSHR),fill_buffer_size,prefetch_buffer_size,wb_buffer_size-->
         <param name="clockrate" value="1e-6/config.system.cpu_clk_domain.clock"/>
         <param name="vdd" value="0"/><!-- 0 means using ITRS default vdd -->

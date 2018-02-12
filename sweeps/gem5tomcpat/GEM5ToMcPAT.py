@@ -58,10 +58,13 @@ def dumpMcpatOut(stats, outFile):
         if 'config' in value:
             allConfs = configMatch.findall(value)
             for conf in allConfs:
-                confValue = getConfValue(conf)
-                if isinstance(confValue, types.ListType) and len(confValue) == 1:
-                    confValue = confValue[0]
-                value = re.sub("config."+ conf, str(confValue), value)
+                confValue, found = getConfValue(conf)
+                if found == False:
+                    value = re.sub("config."+ conf + "\|", "", value)
+                else:
+                    if isinstance(confValue, types.ListType) and len(confValue) == 1:
+                        confValue = confValue[0]
+                    value = re.sub("config."+ conf + "(\|[0-9]*\.?[0-9]+)?", str(confValue), value)
             if "," in value:
                 exprs = re.split(',', value)
                 for i in range(len(exprs)):
@@ -101,6 +104,7 @@ def getConfValue(confStr):
     spltConf = re.split('\.', confStr)
     currConf = gem5_config
     currHierarchy = ""
+    found = True
     for x in spltConf:
         currHierarchy += x
         if x not in currConf:
@@ -108,16 +112,18 @@ def getConfValue(confStr):
                 # This is mostly for system.cpu* as system.cpu is an array.
                 # This could be made better
                 if x not in currConf[0]:
-                    print "%s does not exist in config" % currHierarchy
+                    found = False
+                    #print "%s does not exist in config" % currHierarchy
                 else:
                     currConf = currConf[0][x]
             else:
-                    print "***WARNING: %s does not exist in config.***" % currHierarchy
-                    print "\t Please use the right config param in your McPAT template file"
+                    found = False
+                    #print "***WARNING: %s does not exist in config.***" % currHierarchy
+                    #print "\t Please use the right config param in your McPAT template file"
         else:
             currConf = currConf[x]
         currHierarchy += "."
-    return currConf
+    return currConf, found
 
 def generate_segments(myfile):
     """ Return a buffer of lines for a stats dump. """
