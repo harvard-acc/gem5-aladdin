@@ -263,7 +263,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
       mem_flag = "--mem-latency=0ns --mem-type=simple_mem "
       perfect_l1_flag = "--is_perfect_cache=1 --is_perfect_bus=1"
     else:
-      mem_flag = "--mem-type=DDR3_1600_x64 "
+      mem_flag = "--mem-type=DDR3_1600_8x8 "
       perfect_l1_flag = ""
 
     if benchmark["exec_cmd"]:
@@ -286,7 +286,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
           "--prefetcher-type=stride",
           mem_flag,
           "--sys-clock=" + sys_clock,
-          "--cpu-type=timing ",
+          "--cpu-type=DerivO3CPU ",
           "--caches",
           l2cache_flag,
           "--cacheline_size=%d " % benchmark["cache_line_sz"],
