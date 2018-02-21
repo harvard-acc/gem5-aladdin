@@ -252,6 +252,8 @@ if options.accel_cfg_file:
     datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
     datapath.enableAcp = config.getboolean(accel, "enable_acp")
     datapath.useAcpCache = True
+    datapath.acpCacheLatency = config.getint(accel, "acp_cache_latency")
+    datapath.acpCacheMSHRs = config.getint(accel, "acp_cache_mshrs")
     datapath.useAladdinDebugger = options.aladdin_debugger
     if memory_type == "cache":
       datapath.cacheSize = config.get(accel, "cache_size")
