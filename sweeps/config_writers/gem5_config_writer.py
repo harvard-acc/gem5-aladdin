@@ -112,32 +112,33 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     """ Write the gem5.cfg file. """
     output_dir = os.path.join(sweep_dir, "outputs")
     benchmark_name = benchmark["name"]
+    benchmark_name_section = benchmark["name"].replace("-", "")
     output_prefix = os.path.join(output_dir, benchmark_name)
 
     config_writer = ConfigParser.SafeConfigParser(DEFAULTS)
-    config_writer.add_section(benchmark_name)
+    config_writer.add_section(benchmark_name_section)
     # Add the non sweepable parameters.
-    self.addGlobalSweepParams(sweep, benchmark_name, config_writer)
-    config_writer.set(benchmark_name, "accelerator_id", str(benchmark["main_id"]))
-    config_writer.set(benchmark_name, "bench_name", output_prefix)
-    config_writer.set(benchmark_name, "trace_file_name",
+    self.addGlobalSweepParams(sweep, benchmark_name_section, config_writer)
+    config_writer.set(benchmark_name_section, "accelerator_id", str(benchmark["main_id"]))
+    config_writer.set(benchmark_name_section, "bench_name", output_prefix)
+    config_writer.set(benchmark_name_section, "trace_file_name",
                       os.path.join(sweep_dir, "..", "inputs", "dynamic_trace.gz"))
-    config_writer.set(benchmark_name, "config_file_name",
+    config_writer.set(benchmark_name_section, "config_file_name",
                       os.path.join(sweep_dir, "%s.cfg" % benchmark_name))
     cacti_configs = self.getCactiConfigPaths(benchmark_name, sweep_dir)
-    config_writer.set(benchmark_name, "cacti_cache_config", cacti_configs["cache"])
-    config_writer.set(benchmark_name, "cacti_tlb_config", cacti_configs["tlb"])
+    config_writer.set(benchmark_name_section, "cacti_cache_config", cacti_configs["cache"])
+    config_writer.set(benchmark_name_section, "cacti_tlb_config", cacti_configs["tlb"])
 
     # These DB options shouldn't ever be used unless the user has set up a SQL
     # server, in which case they should set these themselves.
-    config_writer.set(benchmark_name, "use_db", "False")
-    config_writer.set(benchmark_name, "experiment_name", "")
+    config_writer.set(benchmark_name_section, "use_db", "False")
+    config_writer.set(benchmark_name_section, "experiment_name", "")
 
     # Add all sweepable parameters.
     output_params = [param for param in datatypes.Benchmark.sweepable_params]
     for param in output_params:
       value = benchmark[param.name]
-      config_writer.set(benchmark_name, param.name, param.format(value))
+      config_writer.set(benchmark_name_section, param.name, param.format(value))
 
     output_file = os.path.join(sweep_dir, "gem5.cfg")
     with open(output_file, "w") as f:
