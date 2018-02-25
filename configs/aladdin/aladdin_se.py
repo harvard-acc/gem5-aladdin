@@ -252,6 +252,7 @@ if options.accel_cfg_file:
     datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
     datapath.enableAcp = config.getboolean(accel, "enable_acp")
     datapath.useAcpCache = True
+    datapath.acpCacheSize = config.get(accel, "acp_cache_size")
     datapath.acpCacheLatency = config.getint(accel, "acp_cache_latency")
     datapath.acpCacheMSHRs = config.getint(accel, "acp_cache_mshrs")
     datapath.useAladdinDebugger = options.aladdin_debugger
@@ -273,9 +274,9 @@ if options.accel_cfg_file:
           accel, "tlb_max_outstanding_walks")
       datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
     elif memory_type == "spad" and options.ruby:
-      # If the memory_type is spad, Aladdin will initiate a 1-way cache for every
-      # datapath, though this cache will not be used in simulation.
-      # Since Ruby doesn't support 1-way cache, so set the assoc to 2.
+      # If the memory_type is spad, Aladdin will initialize a 2-way cache for
+      # every datapath, although this cache will not be used in simulation.
+      # Ruby doesn't support direct-mapped caches, so set the assoc to 2.
       datapath.cacheAssoc = 2
     if (memory_type != "cache" and memory_type != "spad"):
       fatal("Aladdin configuration file specified invalid memory type %s for "
