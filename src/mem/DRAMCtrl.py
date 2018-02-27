@@ -1183,3 +1183,125 @@ class HBM_1000_4H_1x64(HBM_1000_4H_1x128):
 
     # self refresh exit time
     tXS = '65ns'
+
+# A single LPDDR4 x32 interface (one command/address bus), with
+# default timings based on LPDDR4-3200 in a 2x16 configuration.
+# Micron MT53B384M64D4 datasheet, page 237.
+class LPDDR4_3200_2x16(DRAMCtrl):
+    # No DLL for LPDDR4
+    dll = False
+
+    # size of device, arbitrary
+    device_size = '1024MB'
+
+    # Actual device has two x16 channels. For GEM5, treat them as
+    # separate devices.
+    device_bus_width = 16
+
+    # LPDDR4 supports BL16 and BL32, or both, but we will assume a MC that
+    # supports only 16
+    burst_length = 16
+
+    # Each device has a page (row buffer) size of 2KB
+    device_rowbuffer_size = '2kB'
+
+    # 2x16 configuration
+    devices_per_rank = 2
+
+    # Use two ranks
+    ranks_per_channel = 2
+
+    # LPDDR4 has 8 banks
+    banks_per_rank = 8
+
+    # 1600 MHz
+    tCK = '0.625ns'
+
+    # MAX(4 CK, 18 ns)
+    tRCD = '18ns'
+
+    # 28 CK read latency, 14 CK write latency
+    # This is a guess.  Current JEDEC spec does not specify
+    tCL = '17.5ns'
+
+    # MAX(3 CK, 42 ns)
+    tRAS = '42ns'
+
+    # MAX(4 CK, 18 ns)
+    tWR = '18ns'
+
+    # MAX(8 CK, 7.5ns)
+    tRTP = '7.5ns'
+
+    # MAX(3 CK, 18ns) for one bank.
+    # MAX(3 CK, 21ns) for all banks.
+    tRP = '18ns'
+
+    # 16 beats translates to 8 clocks
+    tBURST = '5ns'
+
+    # LPDDR4, 4Gb
+    tRFC = '180ns'
+    tREFI = '3.904us'  # 8K commands in 32ms refresh window
+
+    # MAX(8 CK, 10ns)
+    tWTR = '10ns'
+
+    # Default same rank rd-to-wr bus turnaround to 2 CK
+    tRTW = '1.25ns'
+
+    # Default different rank bus delay to 2 CK
+    tCS = '1.25ns'
+
+    # Activate to activate, MAX(4 CK, 10ns)
+    tRRD = '10ns'
+
+    # Irrespective of size, tXAW is 40 ns
+    tXAW = '40ns'
+    activation_limit = 4
+
+    # Time to exit self-refresh mode with locked DLL, tRFC + 7.5 ns
+    tXSDLL = '187.5ns'
+
+    # MAX(5 CK, 7.5ns)
+    tXP = '7.5ns'
+
+    # Power modeling parameters
+    IDD0 = '10mA'
+    IDD02 = '60mA'
+
+    # Precharge power-down current: No distinction between slow and fast exit.
+    IDD2P0 = '1.2mA'
+    IDD2P02 = '1.4mA'
+    IDD2P1 = '1.2mA'
+    IDD2P12 = '1.4mA'
+
+    IDD2N = '1.2mA'
+    IDD2N2 = '36mA'
+
+    # Active powerdown - No distinction between slow and fast.
+    IDD3P0 = '1.2mA'
+    IDD3P02 = '10mA'
+    IDD3P1 = '1.2mA'
+    IDD3P12 = '10mA'
+
+    # Active standby current.
+    IDD3N = '3.6mA'
+    IDD3N2 = '38mA'
+
+    # Burst read/write current.
+    IDD4R = '3.6mA'
+    IDD4R2 = '500mA'
+    IDD4W = '3.6mA'
+    IDD4W2 = '400mA'
+
+    # Refresh current.
+    IDD5 = '40mA'
+    IDD52 = '175mA'
+
+    # Self-refresh current (45C).
+    IDD6 = '0.4mA'
+    IDD62 = '1.5mA'
+
+    VDD = '1.8V'
+    VDD2 = '1.1V'
