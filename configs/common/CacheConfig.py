@@ -102,18 +102,17 @@ def config_cache(options, system):
 
     if options.l2cache:
         # Provide a clock for the L2 and the L1-to-L2 bus here as they
-        # are not connected using addTwoLevelCacheHierarchy. Use the
-        # same clock as the CPUs, and set the L1-to-L2 bus width to 32
-        # bytes (256 bits).
+        # are not connected using addTwoLevelCacheHierarchy. Use the system bus
+        # clock domain, and set the L1-to-L2 bus width to 32 bytes (256 bits).
         l2cache_size = options.l2_size
-        system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
+        system.l2 = l2_cache_class(clk_domain=system.clk_domain,
                                    size=l2cache_size,
                                    assoc=options.l2_assoc,
                                    data_latency=options.l2_hit_latency,
                                    tag_latency=options.l2_hit_latency,
                                    response_latency=options.l2_hit_latency)
 
-        system.tol2bus = L2XBar(clk_domain = system.cpu_clk_domain)
+        system.tol2bus = L2XBar(clk_domain = system.clk_domain)
         system.l2.cpu_side = system.tol2bus.master
         system.l2.mem_side = system.membus.slave
 
