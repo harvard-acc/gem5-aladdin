@@ -814,6 +814,8 @@ if main['USE_PYTHON']:
             print "Error: can't find library %s required by python" % lib
             Exit(1)
 
+main.Prepend(CPPPATH=Dir('ext/fp16/include/'))
+
 # On Solaris you need to use libsocket for socket ops
 if not conf.CheckLibWithHeader(None, 'sys/socket.h', 'C++', 'accept(0,0,0);'):
    if not conf.CheckLibWithHeader('socket', 'sys/socket.h', 'C++', 'accept(0,0,0);'):

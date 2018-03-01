@@ -48,6 +48,7 @@ format WarnUnimpl {
             }
             0x16: pextrd_pextrq_Ed_or_Eq_Vdq_Ib();
             0x17: extractps_Ed_Vdq_Ib();
+            0x1D: Inst::VCVTPS2PH(Wo, Vo, Ib);
             0x20: pinsrb_Vdq_Rd_or_Rq_or_Mb_Ib();
             0x21: insertps_Vdq_Udq_or_Md_Ib();
             0x22: pinsrd_pinsrq_Vdq_Ed_or_Eq_Ib();

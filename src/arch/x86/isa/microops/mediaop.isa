@@ -1312,8 +1312,16 @@ let {{
                 uint64_t i;
             };
 
-            assert(destSize == 4 || destSize == 8);
-            assert(srcSize == 4 || srcSize == 8);
+            // Half precision conversions are only supported to/from single
+            // precision values.
+            if (srcSize == 2) {
+                assert(destSize == 4);
+            } else if (destSize == 2) {
+                assert(srcSize == 4);
+            } else {
+                assert(destSize == 4 || destSize == 8);
+                assert(srcSize == 4 || srcSize == 8);
+            }
             int srcSizeBits = srcSize * 8;
             int destSizeBits = destSize * 8;
             int items;
@@ -1338,7 +1346,9 @@ let {{
                 uint64_t argBits = bits(FpSrcReg1_uqw, srcHiIndex, srcLoIndex);
                 double arg;
 
-                if (srcSize == 4) {
+                if (srcSize == 2) {
+                    arg = fp16_ieee_to_fp32_value(argBits);
+                } else if (srcSize == 4) {
                     floatInt fi;
                     fi.i = argBits;
                     arg = fi.f;
@@ -1347,7 +1357,9 @@ let {{
                     di.i = argBits;
                     arg = di.d;
                 }
-                if (destSize == 4) {
+                if (destSize == 2) {
+                    argBits = fp16_ieee_from_fp32_value((float)arg);
+                } else if (destSize == 4) {
                     floatInt fi;
                     fi.f = arg;
                     argBits = fi.i;

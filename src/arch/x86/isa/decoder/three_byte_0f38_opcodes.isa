@@ -46,6 +46,7 @@
             0x0A: psignd_Vdq_Wdq();
             0x0B: pmulhrsw_Vdq_Wdq();
             0x10: pblendvb_Vdq_Wdq();
+            0x13: Inst::VCVTPH2PS(Vo, Wo);
             0x14: blendvps_Vdq_Wdq();
             0x15: blendvpd_Vdq_Wdq();
             0x17: ptest_Vdq_Wdq();

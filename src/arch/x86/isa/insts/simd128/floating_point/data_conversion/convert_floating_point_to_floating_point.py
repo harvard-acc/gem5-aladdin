@@ -106,4 +106,46 @@ def macroop CVTPD2PS_XMM_P {
     cvtf2f xmml, ufp2, destSize=4, srcSize=8, ext=2
     lfpimm xmmh, 0
 };
+
+# F16C extension: packed single precision -> packed half precision.
+
+def macroop VCVTPS2PH_XMM_XMM_I {
+    cvtf2f xmml, xmmlm, destSize=2, srcSize=4, ext=0
+    cvtf2f xmml, xmmhm, destSize=2, srcSize=4, ext=2
+    lfpimm xmmh, 0
+};
+
+def macroop VCVTPS2PH_M_XMM_I {
+    cvtf2f t7, xmmlm, destSize=2, srcSize=4, ext=0
+    cvtf2f t7, xmmhm, destSize=2, srcSize=4, ext=2
+    stfp t7, seg, sib, disp, dataSize=4
+};
+
+def macroop VCVTPS2PH_P_XMM_I {
+    rdip t7
+    cvtf2f t0, xmmlm, destSize=2, srcSize=4, ext=0
+    cvtf2f t0, xmmhm, destSize=2, srcSize=4, ext=2
+    stfp t0, seg, riprel, disp, dataSize=4
+};
+
+# F16C extension: packed half precision -> packed single precision.
+
+def macroop VCVTPH2PS_XMM_XMM {
+    cvtf2f xmmh, xmmlm, destSize=4, srcSize=2, ext=2
+    cvtf2f xmml, xmmlm, destSize=4, srcSize=2, ext=0
+};
+
+def macroop VCVTPH2PS_XMM_M {
+    ldfp ufp1, seg, sib, "DISPLACEMENT", dataSize=8
+    cvtf2f xmmh, ufp1, destSize=4, srcSize=2, ext=2
+    cvtf2f xmml, ufp1, destSize=4, srcSize=2, ext=0
+};
+
+def macroop VCVTPH2PS_XMM_P {
+    rdip t7
+    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    cvtf2f xmmh, ufp1, destSize=4, srcSize=2, ext=2
+    cvtf2f xmml, ufp1, destSize=4, srcSize=2, ext=0
+};
+
 '''

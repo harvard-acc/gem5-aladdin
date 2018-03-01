@@ -125,6 +125,7 @@ output exec {{
 #include "mem/request.hh"
 #include "sim/pseudo_inst.hh"
 #include "sim/sim_exit.hh"
+#include "fp16.h"
 
 using namespace X86ISA;
 using namespace std;
