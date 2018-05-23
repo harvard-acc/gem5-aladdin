@@ -145,4 +145,38 @@ def create_system(options, full_system, system, dma_ports, ruby_system):
         cpu_sequencers.append(spad_seq)
         topology.addController(spad_cntrl)
 
+        # ACP port
+        acp_dummy_ic = L1Cache(size = '256B',
+                               assoc = 2,
+                               start_index_bit = block_size_bits,
+                               is_icache = True)
+        acp_dummy_dc = L1Cache(size = '256B',
+                               assoc = 2,
+                               start_index_bit = block_size_bits,
+                               is_icache = False)
+        acp_cntrl = ACP_Controller(version = i,
+                                   l2_select_num_bits = l2_bits,
+                                   ruby_system = ruby_system)
+
+        acp_seq = RubySequencer(version = i,
+                                icache = acp_dummy_ic,
+                                dcache = acp_dummy_dc,
+                                #clk_domain = clk_domain,
+                                #transitions_per_cycle = options.ports,
+                                ruby_system = ruby_system)
+
+        acp_cntrl.sequencer = acp_seq
+        setattr(ruby_system, "acp_cntrl_acc%d" % i, acp_cntrl)
+
+        # Add controllers and sequencers to the appropriate lists
+        cpu_sequencers.append(acp_seq)
+        topology.addController(acp_cntrl)
+
+        # Connect the ACP controller and the network
+        acp_cntrl.mandatoryQueue = MessageBuffer()
+        acp_cntrl.requestToL2 = MessageBuffer()
+        acp_cntrl.requestToL2.master = ruby_system.network.slave
+        acp_cntrl.responseFromL2 = MessageBuffer(ordered = True)
+        acp_cntrl.responseFromL2.slave = ruby_system.network.master
+
     return (cpu_sequencers, dir_cntrls, topology)

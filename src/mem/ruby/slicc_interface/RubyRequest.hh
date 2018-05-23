@@ -152,6 +152,10 @@ class RubyRequest : public Message
     const int& getSize() const { return m_Size; }
     const PrefetchBit& getPrefetch() const { return m_Prefetch; }
 
+    void writeData(DataBlock &block) const {
+      block.setData(data, getOffset(m_PhysicalAddress), m_Size);
+    }
+
     void print(std::ostream& out) const;
     bool functionalRead(Packet *pkt);
     bool functionalWrite(Packet *pkt);

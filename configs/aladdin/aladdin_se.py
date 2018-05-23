@@ -325,7 +325,7 @@ if options.ruby:
         sys.exit(1)
 
     Ruby.create_system(options, False, system)
-    assert(options.num_cpus + 2*len(system.find_all(HybridDatapath)[0]) ==
+    assert(options.num_cpus + 3*len(system.find_all(HybridDatapath)[0]) ==
            len(system.ruby._cpu_ports))
 
     system.ruby.clk_domain = SrcClockDomain(clock = options.ruby_clock,
@@ -350,8 +350,9 @@ if options.ruby:
 
     if options.accel_cfg_file:
         for i,datapath in enumerate(datapaths):
-            datapath.cache_port = system.ruby._cpu_ports[options.num_cpus+2*i].slave
-            datapath.spad_port = system.ruby._cpu_ports[options.num_cpus+2*i+1].slave
+            datapath.cache_port = system.ruby._cpu_ports[options.num_cpus+3*i].slave
+            datapath.spad_port = system.ruby._cpu_ports[options.num_cpus+3*i+1].slave
+            datapath.acp_port = system.ruby._cpu_ports[options.num_cpus+3*i+2].slave
 
 else:
     system.membus = SystemXBar(width=options.xbar_width)

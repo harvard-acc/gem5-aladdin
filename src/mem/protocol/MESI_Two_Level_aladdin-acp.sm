@@ -1,0 +1,244 @@
+/*
+ * Copyright (c) 2009-2012 Mark D. Hill and David A. Wood
+ * Copyright (c) 2010-2012 Advanced Micro Devices, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met: redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer;
+ * redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution;
+ * neither the name of the copyright holders nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+machine(MachineType:ACP, "ACP Controller")
+: Sequencer * sequencer;
+  int l2_select_num_bits;
+  Cycles request_latency := 1;
+
+  MessageBuffer * responseFromL2, network="From", virtual_network="1",
+        vnet_type="response";
+  MessageBuffer * requestToL2, network="To", virtual_network="0",
+        vnet_type="request";
+  MessageBuffer * mandatoryQueue;
+{
+  state_declaration(State, desc="ACP states", default="ACP_State_READY") {
+    READY, AccessPermission:Invalid, desc="Ready to accept a new request";
+    BUSY_RD, AccessPermission:Busy, desc="Busy: currently processing a request";
+    BUSY_WR, AccessPermission:Busy, desc="Busy: currently processing a request";
+  }
+
+  enumeration(Event, desc="ACP events") {
+    ReadRequest,  desc="A new read request";
+    WriteRequest, desc="A new write request";
+    Data,         desc="Data from an ACP read";
+    Ack,          desc="An ACP write completed";
+  }
+
+  structure(TBE, desc="...") {
+    State TBEState,    desc="Transient state";
+    DataBlock DataBlk, desc="Data";
+  }
+
+  structure(TBETable, external = "yes") {
+    TBE lookup(Addr);
+    void allocate(Addr);
+    void deallocate(Addr);
+    bool isPresent(Addr);
+  }
+
+  void set_tbe(TBE b);
+  void unset_tbe();
+  void wakeUpAllBuffers();
+
+  TBETable TBEs, template="<ACP_TBE>", constructor="m_number_of_TBEs";
+
+  int l2_select_low_bit, default="RubySystem::getBlockSizeBits()";
+
+  // needed for writeCallback to work. The data stored here is ignored
+  DataBlock temp_store_data;
+
+  Tick clockEdge();
+  MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+
+  State getState(TBE tbe, Addr addr) {
+    if (is_valid(tbe)) {
+        return tbe.TBEState;
+    } else {
+        return State:READY;
+    }
+  }
+
+  void setState(TBE tbe, Addr addr, State state) {
+    if (is_valid(tbe)) {
+        tbe.TBEState := state;
+    }
+  }
+
+  AccessPermission getAccessPermission(Addr addr) {
+    return AccessPermission:NotPresent;
+  }
+
+  void setAccessPermission(Addr addr, State state) {
+  }
+
+  void functionalRead(Addr addr, Packet *pkt) {
+    error("ACP does not support functional read.");
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+    error("ACP does not support functional write.");
+  }
+
+  out_port(requestToL2_out, RequestMsg, requestToL2, desc="...");
+
+  in_port(acpRequestQueue_in, RubyRequest, mandatoryQueue, desc="...") {
+    if (acpRequestQueue_in.isReady(clockEdge())) {
+      peek(acpRequestQueue_in, RubyRequest) {
+        if (in_msg.Type == RubyRequestType:LD ) {
+          trigger(Event:ReadRequest, in_msg.LineAddress, TBEs[in_msg.LineAddress]);
+        } else if (in_msg.Type == RubyRequestType:ST) {
+          trigger(Event:WriteRequest, in_msg.LineAddress, TBEs[in_msg.LineAddress]);
+        } else {
+          error("Invalid request type");
+        }
+      }
+    }
+  }
+
+  in_port(acpResponseQueue_in, ResponseMsg, responseFromL2, desc="...") {
+    if (acpResponseQueue_in.isReady(clockEdge())) {
+      peek(acpResponseQueue_in, ResponseMsg) {
+        if (in_msg.Type == CoherenceResponseType:ACK) {
+          trigger(Event:Ack, makeLineAddress(in_msg.addr),
+                  TBEs[makeLineAddress(in_msg.addr)]);
+        } else if (in_msg.Type == CoherenceResponseType:DATA) {
+          trigger(Event:Data, makeLineAddress(in_msg.addr),
+                  TBEs[makeLineAddress(in_msg.addr)]);
+        } else {
+          error("Invalid response type");
+        }
+      }
+    }
+  }
+
+  action(s_sendReadRequest, "s", desc="Send an ACP read request to the L2") {
+    peek(acpRequestQueue_in,  RubyRequest) {
+      enqueue(requestToL2_out, RequestMsg, request_latency) {
+        out_msg.addr := in_msg.LineAddress;
+        out_msg.Type := CoherenceRequestType:ACP_READ;
+        out_msg.Requestor := machineID;
+        out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                          l2_select_low_bit, l2_select_num_bits, intToID(0)));
+        out_msg.MessageSize := MessageSizeType:Writeback_Control;
+      }
+    }
+  }
+
+  action(s_sendWriteRequest, "\s", desc="Send an ACP write request to the L2") {
+    peek(acpRequestQueue_in, RubyRequest) {
+      enqueue(requestToL2_out, RequestMsg, request_latency) {
+          out_msg.addr := in_msg.LineAddress;
+          out_msg.Type := CoherenceRequestType:ACP_WRITE;
+          out_msg.Requestor := machineID;
+          out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                            l2_select_low_bit, l2_select_num_bits, intToID(0)));
+          out_msg.MessageSize := MessageSizeType:Data;
+          // must write the data to the message so the L2 will have the right data
+          in_msg.writeData(out_msg.DataBlk);
+          out_msg.Offset := getOffset(in_msg.PhysicalAddress);
+          out_msg.Size := in_msg.Size;
+        }
+      }
+  }
+
+  action(a_writeCallback, "a", desc="Notify ACP controller that write request completed") {
+    // To make Ruby happy. We already wrote the data to L2
+    sequencer.writeCallback(address, temp_store_data, false, MachineType:ACP);
+  }
+
+  action(r_readCallback, "r", desc="Notify sequencer the load completed") {
+    sequencer.readCallback(address, tbe.DataBlk, false, MachineType:ACP);
+  }
+
+  action(t_updateTBEData, "t", desc="Update TBE Data") {
+    assert(is_valid(tbe));
+    peek(acpResponseQueue_in, ResponseMsg) {
+        tbe.DataBlk := in_msg.DataBlk;
+    }
+  }
+
+  action(v_allocateTBE, "v", desc="Allocate TBE entry") {
+    TBEs.allocate(address);
+    set_tbe(TBEs[address]);
+  }
+
+  action(w_deallocateTBE, "w", desc="Deallocate TBE entry") {
+    TBEs.deallocate(address);
+    unset_tbe();
+  }
+
+  action(p_popRequestQueue, "p", desc="Pop request queue") {
+    acpRequestQueue_in.dequeue(clockEdge());
+  }
+
+  action(p_popResponseQueue, "\p", desc="Pop request queue") {
+    acpResponseQueue_in.dequeue(clockEdge());
+  }
+
+  action(zz_stallAndWaitRequestQueue, "zz", desc="...") {
+    stall_and_wait(acpRequestQueue_in, address);
+  }
+
+  action(wkad_wakeUpAllDependents, "wkad", desc="wake-up all dependents") {
+    wakeUpAllBuffers();
+  }
+
+  transition(READY, ReadRequest, BUSY_RD) {
+    v_allocateTBE;
+    s_sendReadRequest;
+    p_popRequestQueue;
+  }
+
+  transition(READY, WriteRequest, BUSY_WR) {
+    v_allocateTBE;
+    s_sendWriteRequest;
+    p_popRequestQueue;
+  }
+
+  transition(BUSY_RD, Data, READY) {
+    t_updateTBEData;
+    r_readCallback;
+    w_deallocateTBE;
+    p_popResponseQueue;
+    wkad_wakeUpAllDependents;
+  }
+
+  transition(BUSY_WR, Ack, READY) {
+    a_writeCallback;
+    w_deallocateTBE;
+    p_popResponseQueue;
+    wkad_wakeUpAllDependents;
+  }
+
+  transition({BUSY_RD,BUSY_WR}, {ReadRequest,WriteRequest}) {
+     zz_stallAndWaitRequestQueue;
+  }
+
+}
