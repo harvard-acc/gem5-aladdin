@@ -166,6 +166,9 @@
                     0x07: m5rpns({{
                         Rax = PseudoInst::rpns(xc->tcBase());
                     }}, IsNonSpeculative);
+                    0x09: m5wakecpu({{
+                        PseudoInst::wakeCPU(xc->tcBase(), Rdi);
+                    }}, IsNonSpeculative);
                     0x21: m5exit({{
                         PseudoInst::m5exit(xc->tcBase(), Rdi);
                     }}, IsNonSpeculative);
