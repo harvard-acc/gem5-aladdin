@@ -72,6 +72,7 @@
 #define M5OP_ADD_SYMBOL         0x53
 #define M5OP_PANIC              0x54
 
+#define M5OP_GET_CPUID          0x56
 #define M5OP_RESERVED2          0x56 // Reserved for user
 #define M5OP_RESERVED3          0x57 // Reserved for user
 #define M5OP_RESERVED4          0x58 // Reserved for user
@@ -128,6 +129,7 @@
     M5OP(m5_panic, M5OP_PANIC, 0);                              \
     M5OP(m5_work_begin, M5OP_WORK_BEGIN, 0);                    \
     M5OP(m5_work_end, M5OP_WORK_END, 0);                        \
+    M5OP(m5_get_cpuid, M5OP_GET_CPUID, 0);                      \
     M5OP(m5_dist_toggle_sync, M5OP_DIST_TOGGLE_SYNC, 0);
 
 #define M5OP_FOREACH_ANNOTATION                      \

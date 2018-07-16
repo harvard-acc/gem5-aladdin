@@ -197,8 +197,10 @@ pseudoInst(ThreadContext *tc, uint8_t func, uint8_t subfunc)
         workend(tc, args[0], args[1]);
         break;
 
+      case M5OP_GET_CPUID:
+        return getCpuid(tc);
+
       case M5OP_ANNOTATE:
-      case M5OP_RESERVED2:
       case M5OP_RESERVED3:
       case M5OP_RESERVED4:
       case M5OP_RESERVED5:
@@ -714,6 +716,11 @@ workend(ThreadContext *tc, uint64_t workid, uint64_t threadid)
             exitSimLoop("work items exit count reached");
         }
     }
+}
+
+// Return the id of the simulated CPU that is running this thread.
+uint64_t getCpuid(ThreadContext* tc) {
+    return tc->getCpuPtr()->cpuId();
 }
 
 } // namespace PseudoInst
