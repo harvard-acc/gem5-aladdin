@@ -994,11 +994,11 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     jj_popL1RequestQueue;
   }
 
-  transition({IS, ISS, IS_A, ISS_A}, L1_GETX) {
+  transition({IS, ISS, IS_A, ISS_A}, {L1_GETX, ACP_READ, ACP_WRITE}) {
     zz_stallAndWaitL1RequestQueue;
   }
 
-  transition({IM, IM_A}, {L1_GETX, L1_GETS, L1_GET_INSTR}) {
+  transition({IM, IM_A}, {L1_GETX, L1_GETS, L1_GET_INSTR, ACP_READ, ACP_WRITE}) {
     zz_stallAndWaitL1RequestQueue;
   }
 
