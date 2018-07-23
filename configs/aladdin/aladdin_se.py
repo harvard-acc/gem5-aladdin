@@ -365,7 +365,13 @@ for i in xrange(np):
     elif len(multiprocesses) == 1:
         system.cpu[i].workload = multiprocesses[0]
     else:
-        system.cpu[i].workload = multiprocesses[i]
+        # If the number of CPUs is greater than the number of processes,
+        # assign the first workload to the remaining CPUs (as the condition
+        # above us did).
+        if i >= len(multiprocesses):
+            system.cpu[i].workload = multiprocesses[0]
+        else:
+            system.cpu[i].workload = multiprocesses[i]
 
     if options.simpoint_profile:
         system.cpu[i].simpoint_profile = True
