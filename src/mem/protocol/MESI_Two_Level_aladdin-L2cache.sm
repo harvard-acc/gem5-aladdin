@@ -355,8 +355,6 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
               trigger(Event:Mem_Data, in_msg.addr, cache_entry, tbe);
           } else if(in_msg.Type == CoherenceResponseType:MEMORY_ACK) {
               trigger(Event:Mem_Ack, in_msg.addr, cache_entry, tbe);
-          } else if(in_msg.Type == CoherenceResponseType:INV) {
-              trigger(Event:MEM_Inv, in_msg.addr, cache_entry, tbe);
           } else {
             error("unknown message type");
           }
@@ -376,32 +374,36 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
                 in_msg.addr, getState(tbe, cache_entry, in_msg.addr),
                 in_msg.Requestor, in_msg.Type, in_msg.Destination);
 
-        assert(machineIDToMachineType(in_msg.Requestor) == MachineType:L1Cache ||
-               machineIDToMachineType(in_msg.Requestor) == MachineType:ACP);
-        assert(in_msg.Destination.isElement(machineID));
+        if (machineIDToMachineType(in_msg.Requestor) != MachineType:Directory) {
+          assert(machineIDToMachineType(in_msg.Requestor) == MachineType:L1Cache ||
+                 machineIDToMachineType(in_msg.Requestor) == MachineType:ACP);
+          assert(in_msg.Destination.isElement(machineID));
 
-        if (is_valid(cache_entry)) {
-          // The L2 contains the block, so proceeded with handling the request
-          trigger(L1Cache_request_type_to_event(in_msg.Type, in_msg.addr,
-                                                in_msg.Requestor, cache_entry),
-                  in_msg.addr, cache_entry, tbe);
-        } else {
-          if (L2cache.cacheAvail(in_msg.addr)) {
-            // L2 does't have the line, but we have space for it in the L2
+          if (is_valid(cache_entry)) {
+            // The L2 contains the block, so proceeded with handling the request
             trigger(L1Cache_request_type_to_event(in_msg.Type, in_msg.addr,
                                                   in_msg.Requestor, cache_entry),
                     in_msg.addr, cache_entry, tbe);
           } else {
-            // No room in the L2, so we need to make room before handling the request
-            Entry L2cache_entry := getCacheEntry(L2cache.cacheProbe(in_msg.addr));
-            if (isDirty(L2cache_entry)) {
-              trigger(Event:L2_Replacement, L2cache.cacheProbe(in_msg.addr),
-                      L2cache_entry, TBEs[L2cache.cacheProbe(in_msg.addr)]);
+            if (L2cache.cacheAvail(in_msg.addr)) {
+              // L2 does't have the line, but we have space for it in the L2
+              trigger(L1Cache_request_type_to_event(in_msg.Type, in_msg.addr,
+                                                    in_msg.Requestor, cache_entry),
+                      in_msg.addr, cache_entry, tbe);
             } else {
-              trigger(Event:L2_Replacement_clean, L2cache.cacheProbe(in_msg.addr),
-                      L2cache_entry, TBEs[L2cache.cacheProbe(in_msg.addr)]);
+              // No room in the L2, so we need to make room before handling the request
+              Entry L2cache_entry := getCacheEntry(L2cache.cacheProbe(in_msg.addr));
+              if (isDirty(L2cache_entry)) {
+                trigger(Event:L2_Replacement, L2cache.cacheProbe(in_msg.addr),
+                        L2cache_entry, TBEs[L2cache.cacheProbe(in_msg.addr)]);
+              } else {
+                trigger(Event:L2_Replacement_clean, L2cache.cacheProbe(in_msg.addr),
+                        L2cache_entry, TBEs[L2cache.cacheProbe(in_msg.addr)]);
+              }
             }
           }
+        } else if (in_msg.Type == CoherenceRequestType:INV) {
+          trigger(Event:MEM_Inv, in_msg.addr, cache_entry, tbe);
         }
       }
     }
@@ -890,11 +892,11 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition({IM, IS, ISS, IM_A, IS_A, ISS_A, SS_MB, MT_MB, MT_IIB, MT_IB, MT_SB}, MEM_Inv) {
-    zn_recycleResponseNetwork;
+    zz_stallAndWaitL1RequestQueue;
   }
 
   transition({I_I, S_I, M_I, MT_I, MCT_I, NP}, MEM_Inv) {
-    o_popIncomingResponseQueue;
+    jj_popL1RequestQueue;
   }
 
 

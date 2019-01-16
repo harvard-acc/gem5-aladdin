@@ -3,6 +3,6 @@ include "RubySlicc_interfaces.slicc";
 include "MESI_Two_Level_aladdin-msg.sm";
 include "MESI_Two_Level_aladdin-L1cache.sm";
 include "MESI_Two_Level_aladdin-L2cache.sm";
-include "MESI_Two_Level-dir.sm";
+include "MESI_Two_Level_aladdin-dir.sm";
 include "MESI_Two_Level-dma.sm";
 include "MESI_Two_Level_aladdin-acp.sm";

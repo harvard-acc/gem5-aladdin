@@ -181,6 +181,8 @@ def create_system(options, full_system, system, dma_ports, ruby_system):
         dir_cntrl.requestToDir.slave = ruby_system.network.master
         dir_cntrl.responseToDir = MessageBuffer()
         dir_cntrl.responseToDir.slave = ruby_system.network.master
+        dir_cntrl.requestFromDir = MessageBuffer()
+        dir_cntrl.requestFromDir.master = ruby_system.network.slave
         dir_cntrl.responseFromDir = MessageBuffer()
         dir_cntrl.responseFromDir.master = ruby_system.network.slave
         dir_cntrl.responseFromMemory = MessageBuffer()
