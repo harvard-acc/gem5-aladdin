@@ -1235,7 +1235,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
 
   transition(M_I, Fwd_ACP_READ, SINK_WB_ACK) {
     dt_sendDataToRequestor_fromTBE;
-    d2_sendDataToL2;
+    d2t_sendDataToL2_fromTBE;
     l_popRequestQueue;
   }
 
