@@ -508,6 +508,40 @@ CacheMemory::regStats()
 
     m_demand_accesses = m_demand_hits + m_demand_misses;
 
+    m_read_hits
+        .name(name() + ".read_hits")
+        .desc("Number of cache read hits")
+        ;
+
+    m_read_misses
+        .name(name() + ".read_misses")
+        .desc("Number of cache read misses")
+        ;
+
+    m_read_accesses
+        .name(name() + ".read_accesses")
+        .desc("Number of cache read accesses")
+        ;
+
+    m_read_accesses = m_read_hits + m_read_misses;
+
+    m_write_hits
+        .name(name() + ".write_hits")
+        .desc("Number of cache write hits")
+        ;
+
+    m_write_misses
+        .name(name() + ".write_misses")
+        .desc("Number of cache write misses")
+        ;
+
+    m_write_accesses
+        .name(name() + ".write_accesses")
+        .desc("Number of cache write accesses")
+        ;
+
+    m_write_accesses = m_write_hits + m_write_misses;
+
     m_sw_prefetches
         .name(name() + ".total_sw_prefetches")
         .desc("Number of software prefetches")

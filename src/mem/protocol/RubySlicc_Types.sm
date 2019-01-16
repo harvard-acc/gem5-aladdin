@@ -214,6 +214,10 @@ structure (CacheMemory, external = "yes") {
 
   Scalar demand_misses;
   Scalar demand_hits;
+  Scalar read_misses;
+  Scalar read_hits;
+  Scalar write_misses;
+  Scalar write_hits;
 }
 
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {

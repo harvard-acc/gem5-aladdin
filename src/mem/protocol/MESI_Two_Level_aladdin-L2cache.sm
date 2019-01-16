@@ -91,17 +91,17 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     // L2 events
 
     // events initiated by the local L1s
-    L1_GET_INSTR,            desc="a L1I GET INSTR request for a block maped to us";
-    L1_GETS,                 desc="a L1D GETS request for a block maped to us";
-    L1_GETX,                 desc="a L1D GETX request for a block maped to us";
-    L1_UPGRADE,              desc="a L1D GETX request for a block maped to us";
+    L1_GET_INSTR,            desc="a L1I GET INSTR request for a block mapped to us";
+    L1_GETS,                 desc="a L1D GETS request for a block mapped to us";
+    L1_GETX,                 desc="a L1D GETX request for a block mapped to us";
+    L1_UPGRADE,              desc="a L1D GETX request for a block mapped to us";
 
     L1_PUTX,                 desc="L1 replacing data";
     L1_PUTX_old,             desc="L1 replacing data, but no longer sharer";
 
     // events initiated by ACP
-    ACP_READ,                desc="an ACP read request for a block maped to us";
-    ACP_WRITE,                desc="an ACP write request for a block maped to us";
+    ACP_READ,                desc="an ACP read request for a block mapped to us";
+    ACP_WRITE,                desc="an ACP write request for a block mapped to us";
 
     // events initiated by this L2
     L2_Replacement,          desc="L2 Replacement", format="!r";
@@ -773,6 +773,22 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
       ++L2cache.demand_hits;
   }
 
+  action(uu_readMiss, "\urm", desc="Read misses") {
+      ++L2cache.read_misses;
+  }
+
+  action(uu_readHit, "\urh", desc="Read hits") {
+      ++L2cache.read_hits;
+  }
+
+  action(uu_writeMiss, "\uwm", desc="Write misses") {
+      ++L2cache.write_misses;
+  }
+
+  action(uu_writeHit, "\uwh", desc="Write hits") {
+      ++L2cache.write_hits;
+  }
+
   action(hh_store_hit, "\h", desc="ACP write to the L2 cacheline") {
     assert(is_valid(cache_entry));
     peek(L1RequestL2Network_in, RequestMsg) {
@@ -894,6 +910,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ss_recordGetSL1ID;
     a_issueFetchToMemory;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
@@ -905,6 +922,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ss_recordGetSL1ID;
     a_issueFetchToMemory;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
@@ -916,6 +934,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     xx_recordGetXL1ID;
     a_issueFetchToMemory;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
@@ -926,6 +945,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ss_recordGetSL1ID;
     a_issueFetchToMemory;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
@@ -936,6 +956,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ra_recordAcpRequest;
     a_issueFetchToMemory;
     uu_profileMiss;
+    uu_writeMiss;
     jj_popL1RequestQueue;
   }
 
@@ -967,6 +988,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     nn_addSharer;
     ss_recordGetSL1ID;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
@@ -998,12 +1020,14 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     nn_addSharer;
     ss_recordGetSL1ID;
     uu_profileMiss;
+    uu_readMiss;
     jj_popL1RequestQueue;
   }
 
   transition(IM_A, Mem_Data, M) {
     m_writeDataToCache;
     ht_store_hit;
+    uu_writeHit;
     at_sendAckToAcceleratorTBE;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
@@ -1016,6 +1040,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     nn_addSharer;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1025,6 +1050,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     fwm_sendFwdInvToSharersMinusRequestor;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1033,6 +1059,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ts_sendInvAckToUpgrader;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1040,6 +1067,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ds_sendSharedDataToRequestor;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1049,6 +1077,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     i_allocateTBE;
     ra_recordAcpRequest;
     hh_store_hit;
+    uu_writeHit;
     jj_popL1RequestQueue;
   }
 
@@ -1068,6 +1097,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     d_sendDataToRequestor;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1076,6 +1106,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     nn_addSharer;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1083,6 +1114,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     dd_sendExclusiveDataToRequestor;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1090,6 +1122,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     ds_sendSharedDataToRequestor;
     set_setMRU;
     uu_profileHit;
+    uu_readHit;
     jj_popL1RequestQueue;
   }
 
@@ -1097,6 +1130,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     set_setMRU;
     hh_store_hit;
     aa_sendAckToAccelerator;
+    uu_writeHit;
     jj_popL1RequestQueue;
   }
 
@@ -1114,6 +1148,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
 
   // transitions from MT
+  // These do NOT need to read the data array because it is assumed data is stale.
 
   transition(MT, L1_GETX, MT_MB) {
     b_forwardRequestToExclusive;
@@ -1141,6 +1176,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     i_allocateTBE;
     ra_recordAcpRequest;
     uu_profileMiss;
+    uu_writeMiss;
     set_setMRU;
     jj_popL1RequestQueue;
   }
@@ -1257,6 +1293,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   transition(MT_MB, {WB_Data, WB_Data_clean}, M) {
     m_writeDataToCache;
     ht_store_hit;
+    uu_writeHit;
     at_sendAckToAcceleratorTBE;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
