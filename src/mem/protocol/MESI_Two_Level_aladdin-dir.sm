@@ -236,9 +236,11 @@ machine(MachineType:Directory, "MESI Two Level directory protocol")
     if (memQueue_in.isReady(clockEdge())) {
       peek(memQueue_in, MemoryMsg) {
         if (in_msg.Type == MemoryRequestType:MEMORY_READ) {
-          trigger(Event:Memory_Data, in_msg.addr, TBEs[in_msg.addr]);
+          trigger(Event:Memory_Data, makeLineAddress(in_msg.addr),
+                  TBEs[makeLineAddress(in_msg.addr)]);
         } else if (in_msg.Type == MemoryRequestType:MEMORY_WB) {
-          trigger(Event:Memory_Ack, in_msg.addr, TBEs[in_msg.addr]);
+          trigger(Event:Memory_Ack, makeLineAddress(in_msg.addr),
+                  TBEs[makeLineAddress(in_msg.addr)]);
         } else {
           DPRINTF(RubySlicc, "%s\n", in_msg.Type);
           error("Invalid message");
