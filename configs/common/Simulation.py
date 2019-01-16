@@ -79,9 +79,14 @@ def setCPUClass(options):
             CPUClass = TmpClass
             TmpClass, test_mem_mode = getCPUClass(options.restore_with_cpu)
     elif options.fast_forward:
-        CPUClass = TmpClass
-        TmpClass = AtomicSimpleCPU
-        test_mem_mode = 'atomic'
+        if options.ruby:
+            CPUClass = TmpClass
+            TmpClass = TimingSimpleCPU
+            test_mem_mode = 'timing'
+        else:
+            CPUClass = TmpClass
+            TmpClass = AtomicSimpleCPU
+            test_mem_mode = 'atomic'
 
     # Ruby only supports atomic accesses in noncaching mode
     if test_mem_mode == 'atomic' and options.ruby:
