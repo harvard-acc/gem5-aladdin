@@ -107,7 +107,7 @@ Check::initiatePrefetch()
     }
 
     // Prefetches are assumed to be 0 sized
-    Request *req = new Request(m_address, 0, flags,
+    RequestPtr req = std::make_shared<Request>(m_address, 0, flags,
             m_tester_ptr->masterId(), curTick(), m_pc);
     req->setContext(index);
 
@@ -127,7 +127,6 @@ Check::initiatePrefetch()
     } else {
         // If the packet did not issue, must delete
         delete pkt->senderState;
-        delete pkt->req;
         delete pkt;
 
         DPRINTF(RubyTest,
@@ -146,7 +145,7 @@ Check::initiateFlush()
 
     Request::Flags flags;
 
-    Request *req = new Request(m_address, CHECK_SIZE, flags,
+    RequestPtr req = std::make_shared<Request>(m_address, CHECK_SIZE, flags,
             m_tester_ptr->masterId(), curTick(), m_pc);
 
     Packet::Command cmd;
@@ -179,8 +178,8 @@ Check::initiateAction()
     Addr writeAddr(m_address + m_store_count);
 
     // Stores are assumed to be 1 byte-sized
-    Request *req = new Request(writeAddr, 1, flags, m_tester_ptr->masterId(),
-                               curTick(), m_pc);
+    RequestPtr req = std::make_shared<Request>(
+        writeAddr, 1, flags, m_tester_ptr->masterId(), curTick(), m_pc);
 
     req->setContext(index);
     Packet::Command cmd;
@@ -209,13 +208,12 @@ Check::initiateAction()
         DPRINTF(RubyTest, "status before action update: %s\n",
                 (TesterStatus_to_string(m_status)).c_str());
         m_status = TesterStatus_Action_Pending;
-        DPRINTF(RubyTest, "Check %s, State=Action_Pending\n", m_address);
+        DPRINTF(RubyTest, "Check %#x, State=Action_Pending\n", m_address);
     } else {
         // If the packet did not issue, must delete
         // Note: No need to delete the data, the packet destructor
         // will delete it
         delete pkt->senderState;
-        delete pkt->req;
         delete pkt;
 
         DPRINTF(RubyTest, "failed to initiate action - sequencer not ready\n");
@@ -244,7 +242,7 @@ Check::initiateCheck()
     }
 
     // Checks are sized depending on the number of bytes written
-    Request *req = new Request(m_address, CHECK_SIZE, flags,
+    RequestPtr req = std::make_shared<Request>(m_address, CHECK_SIZE, flags,
                                m_tester_ptr->masterId(), curTick(), m_pc);
 
     req->setContext(index);
@@ -263,13 +261,12 @@ Check::initiateCheck()
         DPRINTF(RubyTest, "status before check update: %s\n",
                 TesterStatus_to_string(m_status).c_str());
         m_status = TesterStatus_Check_Pending;
-        DPRINTF(RubyTest, "Check %s, State=Check_Pending\n", m_address);
+        DPRINTF(RubyTest, "Check %#x, State=Check_Pending\n", m_address);
     } else {
         // If the packet did not issue, must delete
         // Note: No need to delete the data, the packet destructor
         // will delete it
         delete pkt->senderState;
-        delete pkt->req;
         delete pkt;
 
         DPRINTF(RubyTest, "failed to initiate check - cpu port not ready\n");
@@ -301,10 +298,10 @@ Check::performCallback(NodeID proc, SubBlock* data, Cycles curTime)
         m_store_count++;
         if (m_store_count == CHECK_SIZE) {
             m_status = TesterStatus_Ready;
-            DPRINTF(RubyTest, "Check %s, State=Ready\n", m_address);
+            DPRINTF(RubyTest, "Check %#x, State=Ready\n", m_address);
         } else {
             m_status = TesterStatus_Idle;
-            DPRINTF(RubyTest, "Check %s, State=Idle store_count: %d\n",
+            DPRINTF(RubyTest, "Check %#x, State=Idle store_count: %d\n",
                     m_address, m_store_count);
         }
         DPRINTF(RubyTest, "Action callback return data now %d\n",
@@ -314,7 +311,7 @@ Check::performCallback(NodeID proc, SubBlock* data, Cycles curTime)
         // Perform load/check
         for (int byte_number=0; byte_number<CHECK_SIZE; byte_number++) {
             if (uint8_t(m_value + byte_number) != data->getByte(byte_number)) {
-                panic("Action/check failure: proc: %d address: %s data: %s "
+                panic("Action/check failure: proc: %d address: %#x data: %s "
                       "byte_number: %d m_value+byte_number: %d byte: %d %s"
                       "Time: %d\n",
                       proc, address, data, byte_number,
@@ -329,7 +326,7 @@ Check::performCallback(NodeID proc, SubBlock* data, Cycles curTime)
         m_tester_ptr->incrementCheckCompletions();
 
         m_status = TesterStatus_Idle;
-        DPRINTF(RubyTest, "Check %s, State=Idle\n", m_address);
+        DPRINTF(RubyTest, "Check %#x, State=Idle\n", m_address);
         pickValue();
 
     } else {
@@ -349,7 +346,7 @@ Check::changeAddress(Addr address)
     assert(m_status == TesterStatus_Idle || m_status == TesterStatus_Ready);
     m_status = TesterStatus_Idle;
     m_address = address;
-    DPRINTF(RubyTest, "Check %s, State=Idle\n", m_address);
+    DPRINTF(RubyTest, "Check %#x, State=Idle\n", m_address);
     m_store_count = 0;
 }
 
@@ -367,7 +364,7 @@ Check::pickInitiatingNode()
     assert(m_status == TesterStatus_Idle || m_status == TesterStatus_Ready);
     m_status = TesterStatus_Idle;
     m_initiatingNode = (random_mt.random(0, m_num_writers - 1));
-    DPRINTF(RubyTest, "Check %s, State=Idle, picked initiating node %d\n",
+    DPRINTF(RubyTest, "Check %#x, State=Idle, picked initiating node %d\n",
             m_address, m_initiatingNode);
     m_store_count = 0;
 }

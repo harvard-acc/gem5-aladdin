@@ -1,4 +1,4 @@
-# Copyright (c) 2015 ARM Limited
+# Copyright (c) 2015, 2018 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -38,6 +38,8 @@
 #
 # Authors: Ron Dreslinski
 #          Andreas Hansson
+
+from __future__ import print_function
 
 import optparse
 import random
@@ -81,6 +83,8 @@ parser.add_option("-c", "--caches", type="string", default="2:2:1",
                   help="Colon-separated cache hierarchy specification, "
                   "see script comments for details "
                   "[default: %default]")
+parser.add_option("--noncoherent-cache", action="store_true",
+                  help="Adds a non-coherent, last-level cache")
 parser.add_option("-t", "--testers", type="string", default="1:1:0:2",
                   help="Colon-separated tester hierarchy specification, "
                   "see script comments for details "
@@ -107,7 +111,7 @@ parser.add_option("--sys-clock", action="store", type="string",
 (options, args) = parser.parse_args()
 
 if args:
-     print "Error: script doesn't take any positional arguments"
+     print("Error: script doesn't take any positional arguments")
      sys.exit(1)
 
 # Get the total number of testers
@@ -137,41 +141,41 @@ if options.random:
           if numtesters(cachespec, testerspec) < block_size:
                break
 
-     print "Generated random tree -c", ':'.join(map(str, cachespec)), \
-         "-t", ':'.join(map(str, testerspec))
+     print("Generated random tree -c", ':'.join(map(str, cachespec)),
+         "-t", ':'.join(map(str, testerspec)))
 else:
      try:
           cachespec = [int(x) for x in options.caches.split(':')]
           testerspec = [int(x) for x in options.testers.split(':')]
      except:
-          print "Error: Unable to parse caches or testers option"
+          print("Error: Unable to parse caches or testers option")
           sys.exit(1)
 
      if len(cachespec) < 1:
-          print "Error: Must have at least one level of caches"
+          print("Error: Must have at least one level of caches")
           sys.exit(1)
 
      if len(cachespec) != len(testerspec) - 1:
-          print "Error: Testers must have one element more than caches"
+          print("Error: Testers must have one element more than caches")
           sys.exit(1)
 
      if testerspec[-1] == 0:
-          print "Error: Must have testers at the uppermost level"
+          print("Error: Must have testers at the uppermost level")
           sys.exit(1)
 
      for t in testerspec:
           if t < 0:
-               print "Error: Cannot have a negative number of testers"
+               print("Error: Cannot have a negative number of testers")
                sys.exit(1)
 
      for c in cachespec:
           if c < 1:
-               print "Error: Must have 1 or more caches at each level"
+               print("Error: Must have 1 or more caches at each level")
                sys.exit(1)
 
      if numtesters(cachespec, testerspec) > block_size:
-          print "Error: Limited to %s testers because of false sharing" \
-              % (block_size)
+          print("Error: Limited to %s testers because of false sharing"
+              % (block_size))
           sys.exit(1)
 
 # Define a prototype L1 cache that we scale for all successive levels
@@ -280,7 +284,7 @@ def make_cache_level(ncaches, prototypes, level, next_cache):
                cache.mem_side = xbar.slave
      else:
           if not next_cache:
-               print "Error: No next-level cache at top level"
+               print("Error: No next-level cache at top level")
                sys.exit(1)
 
           if ntesters > 1:
@@ -297,10 +301,19 @@ def make_cache_level(ncaches, prototypes, level, next_cache):
 # Top level call to create the cache hierarchy, bottom up
 make_cache_level(cachespec, cache_proto, len(cachespec), None)
 
-# Connect the lowest level crossbar to the memory
+# Connect the lowest level crossbar to the last-level cache and memory
+# controller
 last_subsys = getattr(system, 'l%dsubsys0' % len(cachespec))
-last_subsys.xbar.master = system.physmem.port
 last_subsys.xbar.point_of_coherency = True
+if options.noncoherent_cache:
+     system.llc = NoncoherentCache(size = '16MB', assoc = 16, tag_latency = 10,
+                                   data_latency = 10, sequential_access = True,
+                                   response_latency = 20, tgts_per_mshr = 8,
+                                   mshrs = 64)
+     last_subsys.xbar.master = system.llc.cpu_side
+     system.llc.mem_side = system.physmem.port
+else:
+     last_subsys.xbar.master = system.physmem.port
 
 root = Root(full_system = False, system = system)
 if options.atomic:
@@ -318,4 +331,4 @@ m5.instantiate()
 # Simulate until program terminates
 exit_event = m5.simulate(options.maxtick)
 
-print 'Exiting @ tick', m5.curTick(), 'because', exit_event.getCause()
+print('Exiting @ tick', m5.curTick(), 'because', exit_event.getCause())

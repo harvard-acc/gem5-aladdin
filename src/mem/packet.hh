@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 ARM Limited
+ * Copyright (c) 2012-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -63,6 +63,7 @@
 #include "base/logging.hh"
 #include "base/printable.hh"
 #include "base/types.hh"
+#include "config/the_isa.hh"
 #include "mem/request.hh"
 #include "sim/core.hh"
 
@@ -93,6 +94,7 @@ class MemCmd
         WriteClean,            // writes dirty data below without evicting
         CleanEvict,
         SoftPFReq,
+        SoftPFExReq,
         HardPFReq,
         SoftPFResp,
         HardPFResp,
@@ -320,14 +322,14 @@ class Packet : public Printable
     const PacketId id;
 
     /// A pointer to the original request.
-    const RequestPtr req;
+    RequestPtr req;
 
   private:
    /**
-    * A pointer to the data being transfered.  It can be differnt
-    * sizes at each level of the heirarchy so it belongs in the
+    * A pointer to the data being transferred. It can be different
+    * sizes at each level of the hierarchy so it belongs to the
     * packet, not request. This may or may not be populated when a
-    * responder recieves the packet. If not populated it memory should
+    * responder receives the packet. If not populated memory should
     * be allocated.
     */
     PacketDataPtr data;
@@ -346,6 +348,9 @@ class Packet : public Printable
      * Track the bytes found that satisfy a functional read.
      */
     std::vector<bool> bytesValid;
+
+    // Quality of Service priority value
+    uint8_t _qosValue;
 
   public:
 
@@ -549,6 +554,12 @@ class Packet : public Printable
     bool isPrint() const             { return cmd.isPrint(); }
     bool isFlush() const             { return cmd.isFlush(); }
 
+    bool isWholeLineWrite(unsigned blk_size)
+    {
+        return (cmd == MemCmd::WriteReq || cmd == MemCmd::WriteLineReq) &&
+            getOffset(blk_size) == 0 && getSize() == blk_size;
+    }
+
     //@{
     /// Snoop flags
     /**
@@ -670,6 +681,25 @@ class Packet : public Printable
     bool isBlockCached() const     { return flags.isSet(BLOCK_CACHED); }
     void clearBlockCached()        { flags.clear(BLOCK_CACHED); }
 
+    /**
+     * QoS Value getter
+     * Returns 0 if QoS value was never set (constructor default).
+     *
+     * @return QoS priority value of the packet
+     */
+    inline uint8_t qosValue() const { return _qosValue; }
+
+    /**
+     * QoS Value setter
+     * Interface for setting QoS priority value of the packet.
+     *
+     * @param qos_value QoS priority value
+     */
+    inline void qosValue(const uint8_t qos_value)
+    { _qosValue = qos_value; }
+
+    inline MasterID masterId() const { return req->masterId(); }
+
     // Network error conditions... encapsulate them as methods since
     // their encoding keeps changing (from result field to command
     // field, etc.)
@@ -745,9 +775,10 @@ class Packet : public Printable
      * first, but the Requests's physical address and size fields need
      * not be valid. The command must be supplied.
      */
-    Packet(const RequestPtr _req, MemCmd _cmd)
-        :  cmd(_cmd), id((PacketId)_req), req(_req), data(nullptr), addr(0),
-           _isSecure(false), size(0), headerDelay(0), snoopDelay(0),
+    Packet(const RequestPtr &_req, MemCmd _cmd)
+        :  cmd(_cmd), id((PacketId)_req.get()), req(_req),
+           data(nullptr), addr(0), _isSecure(false), size(0),
+           _qosValue(0), headerDelay(0), snoopDelay(0),
            payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
@@ -766,10 +797,11 @@ class Packet : public Printable
      * a request that is for a whole block, not the address from the
      * req.  this allows for overriding the size/addr of the req.
      */
-    Packet(const RequestPtr _req, MemCmd _cmd, int _blkSize, PacketId _id = 0)
-        :  cmd(_cmd), id(_id ? _id : (PacketId)_req), req(_req), data(nullptr),
-           addr(0), _isSecure(false), headerDelay(0), snoopDelay(0),
-           payloadDelay(0), senderState(NULL)
+    Packet(const RequestPtr &_req, MemCmd _cmd, int _blkSize, PacketId _id = 0)
+        :  cmd(_cmd), id(_id ? _id : (PacketId)_req.get()), req(_req),
+           data(nullptr), addr(0), _isSecure(false),
+           _qosValue(0), headerDelay(0),
+           snoopDelay(0), payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
             addr = req->getPaddr() & ~(_blkSize - 1);
@@ -792,6 +824,7 @@ class Packet : public Printable
            data(nullptr),
            addr(pkt->addr), _isSecure(pkt->_isSecure), size(pkt->size),
            bytesValid(pkt->bytesValid),
+           _qosValue(pkt->qosValue()),
            headerDelay(pkt->headerDelay),
            snoopDelay(0),
            payloadDelay(pkt->payloadDelay),
@@ -823,10 +856,12 @@ class Packet : public Printable
      * Generate the appropriate read MemCmd based on the Request flags.
      */
     static MemCmd
-    makeReadCmd(const RequestPtr req)
+    makeReadCmd(const RequestPtr &req)
     {
         if (req->isLLSC())
             return MemCmd::LoadLockedReq;
+        else if (req->isPrefetchEx())
+            return MemCmd::SoftPFExReq;
         else if (req->isPrefetch())
             return MemCmd::SoftPFReq;
         else
@@ -837,11 +872,11 @@ class Packet : public Printable
      * Generate the appropriate write MemCmd based on the Request flags.
      */
     static MemCmd
-    makeWriteCmd(const RequestPtr req)
+    makeWriteCmd(const RequestPtr &req)
     {
         if (req->isLLSC())
             return MemCmd::StoreCondReq;
-        else if (req->isSwap())
+        else if (req->isSwap() || req->isAtomic())
             return MemCmd::SwapReq;
         else if (req->isCacheInvalidate()) {
           return req->isCacheClean() ? MemCmd::CleanInvalidReq :
@@ -857,13 +892,13 @@ class Packet : public Printable
      * Fine-tune the MemCmd type if it's not a vanilla read or write.
      */
     static PacketPtr
-    createRead(const RequestPtr req)
+    createRead(const RequestPtr &req)
     {
         return new Packet(req, makeReadCmd(req));
     }
 
     static PacketPtr
-    createWrite(const RequestPtr req)
+    createWrite(const RequestPtr &req)
     {
         return new Packet(req, makeWriteCmd(req));
     }
@@ -873,18 +908,6 @@ class Packet : public Printable
      */
     ~Packet()
     {
-        // Delete the request object if this is a request packet which
-        // does not need a response, because the requester will not get
-        // a chance. If the request packet needs a response then the
-        // request will be deleted on receipt of the response
-        // packet. We also make sure to never delete the request for
-        // express snoops, even for cases when responses are not
-        // needed (CleanEvict and Writeback), since the snoop packet
-        // re-uses the same request.
-        if (req && isRequest() && !needsResponse() &&
-            !isExpressSnoop()) {
-            delete req;
-        }
         deleteData();
     }
 
@@ -1048,12 +1071,15 @@ class Packet : public Printable
     template <typename T>
     T get(ByteOrder endian) const;
 
+#if THE_ISA != NULL_ISA
     /**
      * Get the data in the packet byte swapped from guest to host
      * endian.
      */
     template <typename T>
-    T get() const;
+    T get() const
+        M5_DEPRECATED_MSG("The memory system should be ISA independent.");
+#endif
 
     /** Set the value in the data pointer to v as big endian. */
     template <typename T>
@@ -1070,9 +1096,25 @@ class Packet : public Printable
     template <typename T>
     void set(T v, ByteOrder endian);
 
+#if THE_ISA != NULL_ISA
     /** Set the value in the data pointer to v as guest endian. */
     template <typename T>
-    void set(T v);
+    void set(T v)
+        M5_DEPRECATED_MSG("The memory system should be ISA independent.");
+#endif
+
+    /**
+     * Get the data in the packet byte swapped from the specified
+     * endianness and zero-extended to 64 bits.
+     */
+    uint64_t getUintX(ByteOrder endian) const;
+
+    /**
+     * Set the value in the word w after truncating it to the length
+     * of the packet and then byteswapping it to the desired
+     * endianness.
+     */
+    void setUintX(uint64_t w, ByteOrder endian);
 
     /**
      * Copy data into the packet from the provided pointer.
@@ -1102,8 +1144,8 @@ class Packet : public Printable
     }
 
     /**
-     * Copy data from the packet to the provided block pointer, which
-     * is aligned to the given block size.
+     * Copy data from the packet to the memory at the provided pointer.
+     * @param p Pointer to which data will be copied.
      */
     void
     writeData(uint8_t *p) const
@@ -1112,7 +1154,10 @@ class Packet : public Printable
     }
 
     /**
-     * Copy data from the packet to the memory at the provided pointer.
+     * Copy data from the packet to the provided block pointer, which
+     * is aligned to the given block size.
+     * @param blk_data Pointer to block to which data will be copied.
+     * @param blkSize Block size in bytes.
      */
     void
     writeDataToBlock(uint8_t *blk_data, int blkSize) const
@@ -1149,7 +1194,6 @@ class Packet : public Printable
 
     /** @} */
 
-  private: // Private data accessor methods
     /** Get the data in the packet without byte swapping. */
     template <typename T>
     T getRaw() const;
@@ -1169,14 +1213,14 @@ class Packet : public Printable
      * accordingly.
      */
     bool
-    checkFunctional(PacketPtr other)
+    trySatisfyFunctional(PacketPtr other)
     {
         // all packets that are carrying a payload should have a valid
         // data pointer
-        return checkFunctional(other, other->getAddr(), other->isSecure(),
-                               other->getSize(),
-                               other->hasData() ?
-                               other->getPtr<uint8_t>() : NULL);
+        return trySatisfyFunctional(other, other->getAddr(), other->isSecure(),
+                                    other->getSize(),
+                                    other->hasData() ?
+                                    other->getPtr<uint8_t>() : NULL);
     }
 
     /**
@@ -1207,8 +1251,8 @@ class Packet : public Printable
      * memory value.
      */
     bool
-    checkFunctional(Printable *obj, Addr base, bool is_secure, int size,
-                    uint8_t *_data);
+    trySatisfyFunctional(Printable *obj, Addr base, bool is_secure, int size,
+                         uint8_t *_data);
 
     /**
      * Push label for PrintReq (safe to call unconditionally).

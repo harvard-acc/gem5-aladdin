@@ -60,7 +60,7 @@ unameFunc(SyscallDesc *desc, int callnum, Process *process,
 SyscallReturn
 getresuidFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
 {
-    const IntReg id = htog(100);
+    const uint64_t id = htog(100);
     int index = 0;
     Addr ruid = p->getSyscallArg(tc, index);
     Addr euid = p->getSyscallArg(tc, index);
@@ -68,20 +68,20 @@ getresuidFunc(SyscallDesc *desc, int num, Process *p, ThreadContext *tc)
     // Handle the EFAULT case
     // Set the ruid
     if (ruid) {
-        BufferArg ruidBuff(ruid, sizeof(IntReg));
-        memcpy(ruidBuff.bufferPtr(), &id, sizeof(IntReg));
+        BufferArg ruidBuff(ruid, sizeof(uint64_t));
+        memcpy(ruidBuff.bufferPtr(), &id, sizeof(uint64_t));
         ruidBuff.copyOut(tc->getMemProxy());
     }
     // Set the euid
     if (euid) {
-        BufferArg euidBuff(euid, sizeof(IntReg));
-        memcpy(euidBuff.bufferPtr(), &id, sizeof(IntReg));
+        BufferArg euidBuff(euid, sizeof(uint64_t));
+        memcpy(euidBuff.bufferPtr(), &id, sizeof(uint64_t));
         euidBuff.copyOut(tc->getMemProxy());
     }
     // Set the suid
     if (suid) {
-        BufferArg suidBuff(suid, sizeof(IntReg));
-        memcpy(suidBuff.bufferPtr(), &id, sizeof(IntReg));
+        BufferArg suidBuff(suid, sizeof(uint64_t));
+        memcpy(suidBuff.bufferPtr(), &id, sizeof(uint64_t));
         suidBuff.copyOut(tc->getMemProxy());
     }
     return 0;
@@ -91,8 +91,8 @@ SyscallDesc SparcLinuxProcess::syscall32Descs[] = {
     /*   0 */ SyscallDesc("restart_syscall", unimplementedFunc),
     /*   1 */ SyscallDesc("exit", exitFunc), // 32 bit
     /*   2 */ SyscallDesc("fork", unimplementedFunc),
-    /*   3 */ SyscallDesc("read", readFunc),
-    /*   4 */ SyscallDesc("write", writeFunc),
+    /*   3 */ SyscallDesc("read", readFunc<Sparc32Linux>),
+    /*   4 */ SyscallDesc("write", writeFunc<Sparc32Linux>),
     /*   5 */ SyscallDesc("open", openFunc<Sparc32Linux>), // 32 bit
     /*   6 */ SyscallDesc("close", closeFunc),
     /*   7 */ SyscallDesc("wait4", unimplementedFunc), // 32 bit
@@ -397,8 +397,8 @@ SyscallDesc SparcLinuxProcess::syscallDescs[] = {
     /*  0 */ SyscallDesc("restart_syscall", unimplementedFunc),
     /*  1 */ SyscallDesc("exit", exitFunc),
     /*  2 */ SyscallDesc("fork", unimplementedFunc),
-    /*  3 */ SyscallDesc("read", readFunc),
-    /*  4 */ SyscallDesc("write", writeFunc),
+    /*  3 */ SyscallDesc("read", readFunc<SparcLinux>),
+    /*  4 */ SyscallDesc("write", writeFunc<SparcLinux>),
     /*  5 */ SyscallDesc("open", openFunc<SparcLinux>),
     /*  6 */ SyscallDesc("close", closeFunc),
     /*  7 */ SyscallDesc("wait4", unimplementedFunc),

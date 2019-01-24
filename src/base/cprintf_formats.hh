@@ -312,32 +312,6 @@ format_integer(std::ostream &out, unsigned char data, Format &fmt)
 inline void
 format_integer(std::ostream &out, signed char data, Format &fmt)
 { _format_integer(out, (int)data, fmt); }
-#if 0
-inline void
-format_integer(std::ostream &out, short data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, unsigned short data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, int data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, unsigned int data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, long data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, unsigned long data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, long long data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-inline void
-format_integer(std::ostream &out, unsigned long long data, Format &fmt)
-{ _format_integer(out, data, fmt); }
-#endif
 
 //
 // floating point formats
@@ -362,10 +336,6 @@ template <typename T>
 inline void
 format_string(std::ostream &out, const T &data, Format &fmt)
 { _format_string(out, data, fmt); }
-
-inline void
-format_string(std::ostream &out, const std::stringstream &data, Format &fmt)
-{ _format_string(out, data.str(), fmt); }
 
 } // namespace cp
 

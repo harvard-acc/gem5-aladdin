@@ -142,7 +142,7 @@ class DmaPort : public MasterPort, public Drainable
     /** Queue up DMA packets for this DmaActionReq at cache line granularity
      * and return the last request queued.
      */
-    Request* queueDmaAction(DmaActionReq& req, DmaReqState *reqState);
+    RequestPtr queueDmaAction(DmaActionReq& req, DmaReqState *reqState);
 
   public:
     /** The device that owns this port. */

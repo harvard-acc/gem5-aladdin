@@ -29,6 +29,7 @@
  * Authors: Ali Saidi
  *          Nathan Binkert
  *          Jaidev Patwardhan
+ *          Robert Scheffel
  */
 
 #include "arch/riscv/system.hh"
@@ -44,7 +45,10 @@
 
 using namespace LittleEndianGuest;
 
-RiscvSystem::RiscvSystem(Params *p) : System(p)
+RiscvSystem::RiscvSystem(Params *p)
+    : System(p),
+      _isBareMetal(p->bare_metal),
+      _resetVect(p->reset_vect)
 {
 }
 

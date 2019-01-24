@@ -232,7 +232,7 @@ class DataWrap : public InfoAccess
     /**
      * Copy constructor, copies are not allowed.
      */
-    DataWrap(const DataWrap &stat) {}
+    DataWrap(const DataWrap &stat) = delete;
 
     /**
      * Can't copy stats.
@@ -2090,6 +2090,8 @@ class Node
      *
      */
     virtual std::string str() const = 0;
+
+    virtual ~Node() {};
 };
 
 /** Shared pointer to a function Node. */
@@ -2320,7 +2322,7 @@ class BinaryNode : public Node
     BinaryNode(NodePtr &a, NodePtr &b) : l(a), r(b) {}
 
     const VResult &
-    result() const
+    result() const override
     {
         Op op;
         const VResult &lvec = l->result();
@@ -2352,7 +2354,7 @@ class BinaryNode : public Node
     }
 
     Result
-    total() const
+    total() const override
     {
         const VResult &vec = this->result();
         const VResult &lvec = l->result();
@@ -2384,7 +2386,7 @@ class BinaryNode : public Node
     }
 
     size_type
-    size() const
+    size() const override
     {
         size_type ls = l->size();
         size_type rs = r->size();
@@ -2399,7 +2401,7 @@ class BinaryNode : public Node
     }
 
     std::string
-    str() const
+    str() const override
     {
         return csprintf("(%s %s %s)", l->str(), OpString<Op>::str(), r->str());
     }

@@ -57,7 +57,7 @@ DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
                  unsigned _chunkSize, unsigned _numChannels,
                  bool _invalidateOnWrite)
     : MasterPort(dev->name() + ".dma", dev),
-      device(dev), sys(s), masterId(s->getMasterId(dev->name())),
+      device(dev), sys(s), masterId(s->getMasterId(dev)),
       sendEvent([this]{ sendDma(); }, dev->name()),
       sendDataAfterInvalidateEvent([this]{ sendDataAfterInvalidate(); }, dev->name()),
       pendingCount(0), inRetry(false),
@@ -118,8 +118,7 @@ DmaPort::handleResp(PacketPtr pkt, Tick delay)
         delete state;
     }
 
-    // delete the request that we created and also the packet
-    delete pkt->req;
+    // delete the packet
     delete pkt;
 
     // we might be drained at this point, if so signal the drain event
@@ -183,7 +182,7 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
     // We're only interested in this when there will only be one request.
     // For simplicity, we return the last request, which would also be
     // the only request in that case.
-    Request* final_req = NULL;
+    RequestPtr final_req = NULL;
 
     MemCmd memcmd(cmd);
     if (invalidateOnWrite && memcmd.isWrite()) {
@@ -326,7 +325,8 @@ RequestPtr DmaPort::queueDmaAction(DmaActionReq &dmaReq,
     MemCmd memcmd(dmaReq.cmd);
     for (ChunkGenerator gen(dmaReq.addr, dmaReq.size, sys->cacheLineSize());
          !gen.done(); gen.next()) {
-        req = new Request(gen.addr(), gen.size(), dmaReq.flag, masterId);
+        req = std::make_shared<Request>(
+            gen.addr(), gen.size(), dmaReq.flag, masterId);
         req->taskId(ContextSwitchTaskId::DMA);
         PacketPtr pkt = new Packet(req, dmaReq.cmd);
 

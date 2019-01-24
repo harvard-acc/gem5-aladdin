@@ -1,4 +1,4 @@
-# Copyright (c) 2009, 2012-2013, 2015-2017 ARM Limited
+# Copyright (c) 2009, 2012-2013, 2015-2018 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -34,15 +34,17 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Authors: Ali Saidi
+#          Glenn Bergmans
 
 from m5.params import *
 from m5.SimObject import *
+from m5.util.fdthelper import *
 
 from System import System
+from ArmSemihosting import ArmSemihosting
 
 class ArmMachineType(Enum):
     map = {
-        'RealViewEB' : 827,
         'RealViewPBX' : 1901,
         'VExpress_EMM' : 2272,
         'VExpress_EMM64' : 2272,
@@ -63,21 +65,60 @@ class ArmSystem(System):
         "True if Security Extensions are implemented")
     have_virtualization = Param.Bool(False,
         "True if Virtualization Extensions are implemented")
+    have_crypto = Param.Bool(False,
+        "True if Crypto Extensions is implemented")
     have_lpae = Param.Bool(True, "True if LPAE is implemented")
+    reset_addr = Param.Addr(0x0,
+        "Reset address (ARMv8)")
+    auto_reset_addr = Param.Bool(False,
+        "Determine reset address from kernel entry point if no boot loader")
     highest_el_is_64 = Param.Bool(False,
         "True if the register width of the highest implemented exception level "
         "is 64 bits (ARMv8)")
-    reset_addr_64 = Param.Addr(0x0,
-        "Reset address if the highest implemented exception level is 64 bits "
-        "(ARMv8)")
     phys_addr_range_64 = Param.UInt8(40,
         "Supported physical address range in bits when using AArch64 (ARMv8)")
     have_large_asid_64 = Param.Bool(False,
         "True if ASID is 16 bits in AArch64 (ARMv8)")
 
+    semihosting = Param.ArmSemihosting(NULL,
+        "Enable support for the Arm semihosting by settings this parameter")
+
     m5ops_base = Param.Addr(0,
         "Base of the 64KiB PA range used for memory-mapped m5ops. Set to 0 "
         "to disable.")
+
+    def generateDeviceTree(self, state):
+        # Generate a device tree root node for the system by creating the root
+        # node and adding the generated subnodes of all children.
+        # When a child needs to add multiple nodes, this is done by also
+        # creating a node called '/' which will then be merged with the
+        # root instead of appended.
+
+        def generateMemNode(mem_range):
+            node = FdtNode("memory@%x" % long(mem_range.start))
+            node.append(FdtPropertyStrings("device_type", ["memory"]))
+            node.append(FdtPropertyWords("reg",
+                state.addrCells(mem_range.start) +
+                state.sizeCells(mem_range.size()) ))
+            return node
+
+        root = FdtNode('/')
+        root.append(state.addrCellsProperty())
+        root.append(state.sizeCellsProperty())
+
+        # Add memory nodes
+        for mem_range in self.mem_ranges:
+            root.append(generateMemNode(mem_range))
+
+        for node in self.recurseDeviceTree(state):
+            # Merge root nodes instead of adding them (for children
+            # that need to add multiple root level nodes)
+            if node.get_name() == root.get_name():
+                root.merge(node)
+            else:
+                root.append(node)
+
+        return root
 
 class GenericArmSystem(ArmSystem):
     type = 'GenericArmSystem'

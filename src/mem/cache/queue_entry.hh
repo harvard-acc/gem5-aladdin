@@ -49,9 +49,10 @@
 #ifndef __MEM_CACHE_QUEUE_ENTRY_HH__
 #define __MEM_CACHE_QUEUE_ENTRY_HH__
 
+#include "base/types.hh"
 #include "mem/packet.hh"
 
-class Cache;
+class BaseCache;
 
 /**
  * A queue entry base class, to be used by both the MSHRs and
@@ -102,7 +103,7 @@ class QueueEntry : public Packet::SenderState
      * Send this queue entry as a downstream packet, with the exact
      * behaviour depending on the specific entry type.
      */
-    virtual bool sendPacket(Cache &cache) = 0;
+    virtual bool sendPacket(BaseCache &cache) = 0;
 
 };
 

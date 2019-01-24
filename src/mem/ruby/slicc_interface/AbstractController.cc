@@ -51,7 +51,7 @@
 AbstractController::AbstractController(const Params *p)
     : MemObject(p), Consumer(this), m_version(p->version),
       m_clusterID(p->cluster_id),
-      m_masterId(p->system->getMasterId(name())), m_is_blocking(false),
+      m_masterId(p->system->getMasterId(this)), m_is_blocking(false),
       m_number_of_TBEs(p->number_of_TBEs),
       m_transitions_per_cycle(p->transitions_per_cycle),
       m_buffer_size(p->buffer_size), m_recycle_latency(p->recycle_latency),
@@ -240,8 +240,8 @@ void
 AbstractController::queueMemoryRead(const MachineID &id, Addr addr,
                                     Cycles latency)
 {
-    RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
-                                 m_masterId);
+    RequestPtr req = std::make_shared<Request>(
+        addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
 
     PacketPtr pkt = Packet::createRead(req);
     uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
@@ -264,14 +264,12 @@ void
 AbstractController::queueMemoryWrite(const MachineID &id, Addr addr,
                                      Cycles latency, const DataBlock &block)
 {
-    RequestPtr req = new Request(addr, RubySystem::getBlockSizeBytes(), 0,
-                                 m_masterId);
+    RequestPtr req = std::make_shared<Request>(
+        addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
 
     PacketPtr pkt = Packet::createWrite(req);
-    uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
-    pkt->dataDynamic(newData);
-    memcpy(newData, block.getData(0, RubySystem::getBlockSizeBytes()),
-           RubySystem::getBlockSizeBytes());
+    pkt->allocate();
+    pkt->setData(block.getData(0, RubySystem::getBlockSizeBytes()));
 
     SenderState *s = new SenderState(id);
     pkt->pushSenderState(s);
@@ -292,12 +290,11 @@ AbstractController::queueMemoryWritePartial(const MachineID &id, Addr addr,
                                             Cycles latency,
                                             const DataBlock &block, int size)
 {
-    RequestPtr req = new Request(addr, size, 0, m_masterId);
+    RequestPtr req = std::make_shared<Request>(addr, size, 0, m_masterId);
 
     PacketPtr pkt = Packet::createWrite(req);
-    uint8_t *newData = new uint8_t[size];
-    pkt->dataDynamic(newData);
-    memcpy(newData, block.getData(getOffset(addr), size), size);
+    pkt->allocate();
+    pkt->setData(block.getData(getOffset(addr), size));
 
     SenderState *s = new SenderState(id);
     pkt->pushSenderState(s);
@@ -318,7 +315,7 @@ AbstractController::functionalMemoryWrite(PacketPtr pkt)
     int num_functional_writes = 0;
 
     // Check the buffer from the controller to the memory.
-    if (memoryPort.checkFunctional(pkt)) {
+    if (memoryPort.trySatisfyFunctional(pkt)) {
         num_functional_writes++;
     }
 
@@ -356,7 +353,6 @@ AbstractController::recvTimingResp(PacketPtr pkt)
     }
 
     getMemoryQueue()->enqueue(msg, clockEdge(), cyclesToTicks(Cycles(1)));
-    delete pkt->req;
     delete pkt;
 }
 
@@ -386,7 +382,7 @@ AbstractController::MemoryPort::MemoryPort(const std::string &_name,
                                            const std::string &_label)
     : QueuedMasterPort(_name, _controller, reqQueue, snoopRespQueue),
       reqQueue(*_controller, *this, _label),
-      snoopRespQueue(*_controller, *this, _label),
+      snoopRespQueue(*_controller, *this, false, _label),
       controller(_controller)
 {
 }

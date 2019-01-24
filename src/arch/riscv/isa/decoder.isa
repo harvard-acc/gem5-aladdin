@@ -43,7 +43,8 @@ decode QUADRANT default Unknown::unknown() {
                   CIMM8<5:2> << 6;
         }}, {{
             if (machInst == 0)
-                fault = make_shared<IllegalInstFault>("zero instruction");
+                fault = make_shared<IllegalInstFault>("zero instruction",
+                                                      machInst);
             Rp2 = sp + imm;
         }}, uint64_t);
         format CompressedLoad {
@@ -106,9 +107,11 @@ decode QUADRANT default Unknown::unknown() {
             }}, {{
                 if ((RC1 == 0) != (imm == 0)) {
                     if (RC1 == 0) {
-                        fault = make_shared<IllegalInstFault>("source reg x0");
+                        fault = make_shared<IllegalInstFault>("source reg x0",
+                                                              machInst);
                     } else // imm == 0
-                        fault = make_shared<IllegalInstFault>("immediate = 0");
+                        fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                              machInst);
                 }
                 Rc1_sd = Rc1_sd + imm;
             }});
@@ -117,7 +120,10 @@ decode QUADRANT default Unknown::unknown() {
                 if (CIMM1 > 0)
                     imm |= ~((uint64_t)0x1F);
             }}, {{
-                assert(RC1 != 0);
+                if (RC1 == 0) {
+                    fault = make_shared<IllegalInstFault>("source reg x0",
+                                                          machInst);
+                }
                 Rc1_sd = (int32_t)Rc1_sd + imm;
             }});
             0x2: c_li({{
@@ -125,7 +131,10 @@ decode QUADRANT default Unknown::unknown() {
                 if (CIMM1 > 0)
                     imm |= ~((uint64_t)0x1F);
             }}, {{
-                assert(RC1 != 0);
+                if (RC1 == 0) {
+                    fault = make_shared<IllegalInstFault>("source reg x0",
+                                                          machInst);
+                }
                 Rc1_sd = imm;
             }});
             0x3: decode RC1 {
@@ -137,7 +146,10 @@ decode QUADRANT default Unknown::unknown() {
                     if (CIMM1 > 0)
                         imm |= ~((int64_t)0x1FF);
                 }}, {{
-                    assert(imm != 0);
+                    if (imm == 0) {
+                        fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                              machInst);
+                    }
                     sp_sd = sp_sd + imm;
                 }});
                 default: c_lui({{
@@ -145,8 +157,14 @@ decode QUADRANT default Unknown::unknown() {
                     if (CIMM1 > 0)
                         imm |= ~((uint64_t)0x1FFFF);
                 }}, {{
-                    assert(RC1 != 0 && RC1 != 2);
-                    assert(imm != 0);
+                    if (RC1 == 0 || RC1 == 2) {
+                        fault = make_shared<IllegalInstFault>("source reg x0",
+                                                              machInst);
+                    }
+                    if (imm == 0) {
+                        fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                              machInst);
+                    }
                     Rc1_sd = imm;
                 }});
             }
@@ -155,14 +173,20 @@ decode QUADRANT default Unknown::unknown() {
             format CIOp {
                 0x0: c_srli({{
                     imm = CIMM5 | (CIMM1 << 5);
-                    assert(imm != 0);
                 }}, {{
+                    if (imm == 0) {
+                        fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                              machInst);
+                    }
                     Rp1 = Rp1 >> imm;
                 }}, uint64_t);
                 0x1: c_srai({{
                     imm = CIMM5 | (CIMM1 << 5);
-                    assert(imm != 0);
                 }}, {{
+                    if (imm == 0) {
+                        fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                              machInst);
+                    }
                     Rp1_sd = Rp1_sd >> imm;
                 }}, uint64_t);
                 0x2: c_andi({{
@@ -212,30 +236,16 @@ decode QUADRANT default Unknown::unknown() {
                 offset |= ~((int64_t)0x7FF);
             NPC = PC + offset;
         }}, IsIndirectControl, IsUncondControl, IsCall);
-        format BOp {
+        format CBOp {
             0x6: c_beqz({{
-                int64_t offset = CIMM5<2:1> << 1 |
-                                 CIMM3<1:0> << 3 |
-                                 CIMM5<0:0> << 5 |
-                                 CIMM5<4:3> << 6;
-                if (CIMM3<2:2> > 0)
-                    offset |= ~((int64_t)0xFF);
-
                 if (Rp1 == 0)
-                    NPC = PC + offset;
+                    NPC = PC + imm;
                 else
                     NPC = NPC;
             }}, IsDirectControl, IsCondControl);
             0x7: c_bnez({{
-                int64_t offset = CIMM5<2:1> << 1 |
-                                 CIMM3<1:0> << 3 |
-                                 CIMM5<0:0> << 5 |
-                                 CIMM5<4:3> << 6;
-                if (CIMM3<2:2> > 0)
-                    offset |= ~((int64_t)0xFF);
-
                 if (Rp1 != 0)
-                    NPC = PC + offset;
+                    NPC = PC + imm;
                 else
                     NPC = NPC;
             }}, IsDirectControl, IsCondControl);
@@ -244,9 +254,15 @@ decode QUADRANT default Unknown::unknown() {
     0x2: decode COPCODE {
         0x0: CIOp::c_slli({{
             imm = CIMM5 | (CIMM1 << 5);
-            assert(imm != 0);
         }}, {{
-            assert(RC1 != 0);
+            if (imm == 0) {
+                fault = make_shared<IllegalInstFault>("immediate = 0",
+                                                      machInst);
+            }
+            if (RC1 == 0) {
+                fault = make_shared<IllegalInstFault>("source reg x0",
+                                                      machInst);
+            }
             Rc1 = Rc1 << imm;
         }}, uint64_t);
         format CompressedLoad {
@@ -264,7 +280,10 @@ decode QUADRANT default Unknown::unknown() {
                          CIMM1 << 5 |
                          CIMM5<1:0> << 6;
             }}, {{
-                assert(RC1 != 0);
+                if (RC1 == 0) {
+                    fault = make_shared<IllegalInstFault>("source reg x0",
+                                                          machInst);
+                }
                 Rc1_sd = Mem_sw;
             }}, {{
                 EA = sp + offset;
@@ -274,7 +293,10 @@ decode QUADRANT default Unknown::unknown() {
                          CIMM1 << 5 |
                          CIMM5<2:0> << 6;
             }}, {{
-                assert(RC1 != 0);
+                if (RC1 == 0) {
+                    fault = make_shared<IllegalInstFault>("source reg x0",
+                                                          machInst);
+                }
                 Rc1_sd = Mem_sd;
             }}, {{
                 EA = sp + offset;
@@ -283,22 +305,35 @@ decode QUADRANT default Unknown::unknown() {
         0x4: decode CFUNCT1 {
             0x0: decode RC2 {
                 0x0: Jump::c_jr({{
-                    assert(RC1 != 0);
+                    if (RC1 == 0) {
+                        fault = make_shared<IllegalInstFault>("source reg x0",
+                                                              machInst);
+                    }
                     NPC = Rc1;
                 }}, IsIndirectControl, IsUncondControl, IsCall);
                 default: CROp::c_mv({{
-                    assert(RC1 != 0);
+                    if (RC1 == 0) {
+                        fault = make_shared<IllegalInstFault>("source reg x0",
+                                                              machInst);
+                    }
                     Rc1 = Rc2;
                 }});
             }
             0x1: decode RC1 {
                 0x0: SystemOp::c_ebreak({{
-                    assert(RC2 == 0);
-                    fault = make_shared<BreakpointFault>();
+                    if (RC2 != 0) {
+                        fault = make_shared<IllegalInstFault>("source reg x1",
+                                                              machInst);
+                    }
+                    fault = make_shared<BreakpointFault>(xc->pcState());
                 }}, IsSerializeAfter, IsNonSpeculative, No_OpClass);
                 default: decode RC2 {
                     0x0: Jump::c_jalr({{
-                        assert(RC1 != 0);
+                        if (RC1 == 0) {
+                            fault = make_shared<IllegalInstFault>
+                                                        ("source reg x0",
+                                                         machInst);
+                        }
                         ra = NPC;
                         NPC = Rc1;
                     }}, IsIndirectControl, IsUncondControl, IsCall);
@@ -430,7 +465,7 @@ decode QUADRANT default Unknown::unknown() {
                 }});
                 0x5: decode SRTYPE {
                     0x0: srliw({{
-                        Rd = Rs1_uw >> SHAMT5;
+                        Rd_sd = (int32_t)(Rs1_uw >> SHAMT5);
                     }});
                     0x1: sraiw({{
                         Rd_sd = Rs1_sw >> SHAMT5;
@@ -742,7 +777,7 @@ decode QUADRANT default Unknown::unknown() {
                 }}, IntDivOp);
                 0x5: decode FUNCT7 {
                     0x0: srlw({{
-                        Rd_uw = Rs1_uw >> Rs2<4:0>;
+                        Rd_sd = (int32_t)(Rs1_uw >> Rs2<4:0>);
                     }});
                     0x1: divuw({{
                         if (Rs2_uw == 0) {
@@ -1232,7 +1267,10 @@ decode QUADRANT default Unknown::unknown() {
                     }}, FloatCmpOp);
                 }
                 0x20: fcvt_s_d({{
-                    assert(CONV_SGN == 1);
+                    if (CONV_SGN != 1) {
+                        fault = make_shared<IllegalInstFault>("CONV_SGN != 1",
+                                                              machInst);
+                    }
                     float fd;
                     if (issignalingnan(Fs1)) {
                         fd = numeric_limits<float>::quiet_NaN();
@@ -1243,7 +1281,10 @@ decode QUADRANT default Unknown::unknown() {
                     Fd_bits = (uint64_t)reinterpret_cast<uint32_t&>(fd);
                 }}, FloatCvtOp);
                 0x21: fcvt_d_s({{
-                    assert(CONV_SGN == 0);
+                    if (CONV_SGN != 0) {
+                        fault = make_shared<IllegalInstFault>("CONV_SGN != 0",
+                                                              machInst);
+                    }
                     uint32_t temp;
                     float fs1 = reinterpret_cast<float&>(temp = Fs1_bits);
 
@@ -1255,7 +1296,10 @@ decode QUADRANT default Unknown::unknown() {
                     }
                 }}, FloatCvtOp);
                 0x2c: fsqrt_s({{
-                    assert(RS2 == 0);
+                    if (RS2 != 0) {
+                        fault = make_shared<IllegalInstFault>("source reg x1",
+                                                              machInst);
+                    }
                     uint32_t temp;
                     float fs1 = reinterpret_cast<float&>(temp = Fs1_bits);
                     float fd;
@@ -1267,7 +1311,10 @@ decode QUADRANT default Unknown::unknown() {
                     Fd_bits = (uint64_t)reinterpret_cast<uint32_t&>(fd);
                 }}, FloatSqrtOp);
                 0x2d: fsqrt_d({{
-                    assert(RS2 == 0);
+                    if (RS2 != 0) {
+                        fault = make_shared<IllegalInstFault>("source reg x1",
+                                                              machInst);
+                    }
                     Fd = sqrt(Fs1);
                 }}, FloatSqrtOp);
                 0x50: decode ROUND_MODE {
@@ -1661,49 +1708,76 @@ decode QUADRANT default Unknown::unknown() {
             format SystemOp {
                 0x0: decode FUNCT12 {
                     0x0: ecall({{
-                        fault = make_shared<SyscallFault>();
+                        fault = make_shared<SyscallFault>(
+                                (PrivilegeMode)xc->readMiscReg(MISCREG_PRV));
                     }}, IsSerializeAfter, IsNonSpeculative, IsSyscall,
                         No_OpClass);
                     0x1: ebreak({{
-                        fault = make_shared<BreakpointFault>();
+                        fault = make_shared<BreakpointFault>(xc->pcState());
                     }}, IsSerializeAfter, IsNonSpeculative, No_OpClass);
-                    0x100: eret({{
-                        fault = make_shared<UnimplementedFault>("eret");
-                    }}, No_OpClass);
+                    0x2: uret({{
+                        STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                        status.uie = status.upie;
+                        status.upie = 1;
+                        xc->setMiscReg(MISCREG_STATUS, status);
+                        NPC = xc->readMiscReg(MISCREG_UEPC);
+                    }}, IsReturn);
+                    0x102: sret({{
+                        if (xc->readMiscReg(MISCREG_PRV) == PRV_U) {
+                            fault = make_shared<IllegalInstFault>(
+                                        "sret in user mode", machInst);
+                            NPC = NPC;
+                        } else {
+                            STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                            xc->setMiscReg(MISCREG_PRV, status.spp);
+                            status.sie = status.spie;
+                            status.spie = 1;
+                            status.spp = PRV_U;
+                            xc->setMiscReg(MISCREG_STATUS, status);
+                            NPC = xc->readMiscReg(MISCREG_SEPC);
+                        }
+                    }}, IsReturn);
+                    0x302: mret({{
+                        if (xc->readMiscReg(MISCREG_PRV) != PRV_M) {
+                            fault = make_shared<IllegalInstFault>(
+                                        "mret at lower privilege", machInst);
+                            NPC = NPC;
+                        } else {
+                            STATUS status = xc->readMiscReg(MISCREG_STATUS);
+                            xc->setMiscReg(MISCREG_PRV, status.mpp);
+                            status.mie = status.mpie;
+                            status.mpie = 1;
+                            status.mpp = PRV_U;
+                            xc->setMiscReg(MISCREG_STATUS, status);
+                            NPC = xc->readMiscReg(MISCREG_MEPC);
+                        }
+                    }}, IsReturn);
                 }
             }
             format CSROp {
                 0x1: csrrw({{
-                    Rd = xc->readMiscReg(csr);
-                    xc->setMiscReg(csr, Rs1);
+                    Rd = data;
+                    data = Rs1;
                 }}, IsNonSpeculative, No_OpClass);
                 0x2: csrrs({{
-                    Rd = xc->readMiscReg(csr);
-                    if (Rs1 != 0) {
-                        xc->setMiscReg(csr, Rd | Rs1);
-                    }
+                    Rd = data;
+                    data |= Rs1;
                 }}, IsNonSpeculative, No_OpClass);
                 0x3: csrrc({{
-                    Rd = xc->readMiscReg(csr);
-                    if (Rs1 != 0) {
-                        xc->setMiscReg(csr, Rd & ~Rs1);
-                    }
+                    Rd = data;
+                    data &= ~Rs1;
                 }}, IsNonSpeculative, No_OpClass);
                 0x5: csrrwi({{
-                    Rd = xc->readMiscReg(csr);
-                    xc->setMiscReg(csr, uimm);
+                    Rd = data;
+                    data = uimm;
                 }}, IsNonSpeculative, No_OpClass);
                 0x6: csrrsi({{
-                    Rd = xc->readMiscReg(csr);
-                    if (uimm != 0) {
-                        xc->setMiscReg(csr, Rd | uimm);
-                    }
+                    Rd = data;
+                    data |= uimm;
                 }}, IsNonSpeculative, No_OpClass);
                 0x7: csrrci({{
-                    Rd = xc->readMiscReg(csr);
-                    if (uimm != 0) {
-                        xc->setMiscReg(csr, Rd & ~uimm);
-                    }
+                    Rd = data;
+                    data &= ~uimm;
                 }}, IsNonSpeculative, No_OpClass);
             }
         }

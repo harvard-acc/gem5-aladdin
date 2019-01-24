@@ -1,4 +1,15 @@
 /*
+ * Copyright (c) 2018 ARM Limited
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright 2015 LabWare
  * Copyright 2014 Google, Inc.
  * Copyright (c) 2002-2005 The Regents of The University of Michigan
@@ -127,6 +138,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 #include "arch/vtophys.hh"
@@ -152,8 +164,6 @@ static const char GDBEnd = '#';
 static const char GDBGoodP = '+';
 static const char GDBBadP = '-';
 
-static const int GDBPacketBufLen = 1024;
-
 vector<BaseRemoteGDB *> debuggers;
 
 class HardBreakpoint : public PCEvent
@@ -172,7 +182,7 @@ class HardBreakpoint : public PCEvent
         DPRINTF(GDBMisc, "creating hardware breakpoint at %#x\n", evpc);
     }
 
-    const std::string name() const { return gdb->name() + ".hwbkpt"; }
+    const std::string name() const override { return gdb->name() + ".hwbkpt"; }
 
     void
     process(ThreadContext *tc) override
@@ -290,6 +300,7 @@ enum GdbBreakpointType {
     GdbAccWp = '4',
 };
 
+#ifndef NDEBUG
 const char *
 break_type(char c)
 {
@@ -302,6 +313,7 @@ break_type(char c)
       default: return "unknown breakpoint/watchpoint";
     }
 }
+#endif
 
 std::map<Addr, HardBreakpoint *> hardBreakMap;
 
@@ -439,20 +451,19 @@ BaseRemoteGDB::trap(int type)
     regCachePtr = gdbRegs();
     regCachePtr->getRegs(tc);
 
-    char data[GDBPacketBufLen + 1];
     GdbCommand::Context cmdCtx;
     cmdCtx.type = type;
-    cmdCtx.data = &data[1];
+    std::vector<char> data;
 
     for (;;) {
         try {
-            size_t datalen = recv(data, sizeof(data));
-            if (datalen < 1)
+            recv(data);
+            if (data.size() == 1)
                 throw BadClient();
-
-            data[datalen] = 0; // Sentinel
             cmdCtx.cmd_byte = data[0];
-            cmdCtx.len = datalen - 1;
+            cmdCtx.data = data.data() + 1;
+            // One for sentinel, one for cmd_byte.
+            cmdCtx.len = data.size() - 2;
 
             auto cmdIt = command_map.find(cmdCtx.cmd_byte);
             if (cmdIt == command_map.end()) {
@@ -519,41 +530,31 @@ BaseRemoteGDB::putbyte(uint8_t b)
 }
 
 // Receive a packet from gdb
-int
-BaseRemoteGDB::recv(char *bp, int maxlen)
+void
+BaseRemoteGDB::recv(std::vector<char>& bp)
 {
-    char *p;
     uint8_t c;
     int csum;
-    int len;
+    bp.resize(0);
 
     do {
-        p = bp;
-        csum = len = 0;
+        csum = 0;
         // Find the beginning of a packet
         while ((c = getbyte()) != GDBStart);
 
         // Read until you find the end of the data in the packet, and keep
         // track of the check sum.
-        while (len < maxlen) {
+        while (true) {
             c = getbyte();
             if (c == GDBEnd)
                 break;
             c &= 0x7f;
             csum += c;
-            *p++ = c;
-            len++;
+            bp.push_back(c);
         }
 
-        // Mask the check sum, and terminate the command string.
+        // Mask the check sum.
         csum &= 0xff;
-        *p = '\0';
-
-        // If the command was too long, report an error.
-        if (len >= maxlen) {
-            putbyte(GDBBadP);
-            continue;
-        }
 
         // Bring in the checksum. If the check sum matches, csum will be 0.
         csum -= digit2i(getbyte()) * 16;
@@ -564,21 +565,20 @@ BaseRemoteGDB::recv(char *bp, int maxlen)
             // Report that the packet was received correctly
             putbyte(GDBGoodP);
             // Sequence present?
-            if (bp[2] == ':') {
+            if (bp.size() > 2 && bp[2] == ':') {
                 putbyte(bp[0]);
                 putbyte(bp[1]);
-                len -= 3;
-                memcpy(bp, bp+3, len);
+                auto begin = std::begin(bp);
+                bp.erase(begin, std::next(begin, 3));
             }
             break;
         }
         // Otherwise, report that there was a mistake.
         putbyte(GDBBadP);
     } while (1);
-
-    DPRINTF(GDBRecv, "recv:  %s\n", bp);
-
-    return len;
+    // Sentinel.
+    bp.push_back('\0');
+    DPRINTF(GDBRecv, "recv:  %s\n", bp.data());
 }
 
 // Send a packet to gdb
@@ -978,10 +978,84 @@ BaseRemoteGDB::cmd_mem_w(GdbCommand::Context &ctx)
 bool
 BaseRemoteGDB::cmd_query_var(GdbCommand::Context &ctx)
 {
-    if (string(ctx.data, ctx.len - 1) != "C")
+    string s(ctx.data, ctx.len - 1);
+    string xfer_read_prefix = "Xfer:features:read:";
+    if (s.rfind("Supported:", 0) == 0) {
+        std::ostringstream oss;
+        // This reply field mandatory. We can receive arbitrarily
+        // long packets, so we could choose it to be arbitrarily large.
+        // This is just an arbitrary filler value that seems to work.
+        oss << "PacketSize=1024";
+        for (const auto& feature : availableFeatures())
+            oss << ';' << feature;
+        send(oss.str().c_str());
+    } else if (s.rfind(xfer_read_prefix, 0) == 0) {
+        size_t offset, length;
+        auto value_string = s.substr(xfer_read_prefix.length());
+        auto colon_pos = value_string.find(':');
+        auto comma_pos = value_string.find(',');
+        if (colon_pos == std::string::npos || comma_pos == std::string::npos)
+            throw CmdError("E00");
+        std::string annex;
+        if (!getXferFeaturesRead(value_string.substr(0, colon_pos), annex))
+            throw CmdError("E00");
+        try {
+            offset = std::stoull(
+                value_string.substr(colon_pos + 1, comma_pos), NULL, 16);
+            length = std::stoull(
+                value_string.substr(comma_pos + 1), NULL, 16);
+        } catch (std::invalid_argument& e) {
+            throw CmdError("E00");
+        } catch (std::out_of_range& e) {
+            throw CmdError("E00");
+        }
+        std::string encoded;
+        encodeXferResponse(annex, encoded, offset, length);
+        send(encoded.c_str());
+    } else if (s == "C") {
+        send("QC0");
+    } else {
         throw Unsupported();
-    send("QC0");
+    }
     return true;
+}
+
+std::vector<std::string>
+BaseRemoteGDB::availableFeatures() const
+{
+    return {};
+};
+
+bool
+BaseRemoteGDB::getXferFeaturesRead(
+    const std::string &annex, std::string &output)
+{
+    return false;
+}
+
+void
+BaseRemoteGDB::encodeBinaryData(
+    const std::string &unencoded, std::string &encoded) const
+{
+    for (const char& c : unencoded) {
+        if (c == '$' || c == '#' || c == '}' || c == '*') {
+            encoded += '}';
+            encoded += c ^ 0x20;
+        } else {
+            encoded += c;
+        }
+    }
+}
+
+void
+BaseRemoteGDB::encodeXferResponse(const std::string &unencoded,
+    std::string &encoded, size_t offset, size_t unencoded_length) const
+{
+    if (offset + unencoded_length < unencoded.length())
+        encoded += 'm';
+    else
+        encoded += 'l';
+    encodeBinaryData(unencoded.substr(offset, unencoded_length), encoded);
 }
 
 bool

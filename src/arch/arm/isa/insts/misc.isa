@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2010-2013,2017 ARM Limited
+// Copyright (c) 2010-2013,2017-2018 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -40,16 +40,52 @@
 let {{
 
     svcCode = '''
-    fault = std::make_shared<SupervisorCall>(machInst, imm);
+    ThreadContext *tc = xc->tcBase();
+
+    const auto semihost_imm = Thumb? 0xAB : 0x123456;
+
+    if (ArmSystem::haveSemihosting(tc) && imm == semihost_imm) {
+        R0 = ArmSystem::callSemihosting32(tc, R0, R1);
+    } else {
+        fault = std::make_shared<SupervisorCall>(machInst, imm);
+    }
     '''
 
     svcIop = InstObjParams("svc", "Svc", "ImmOp",
                            { "code": svcCode,
-                             "predicate_test": predicateTest },
-                           ["IsSyscall", "IsNonSpeculative", "IsSerializeAfter"])
+                             "predicate_test": predicateTest,
+                             "thumb_semihost": '0xAB',
+                             "arm_semihost": '0x123456' },
+                           ["IsSyscall", "IsNonSpeculative",
+                            "IsSerializeAfter"])
     header_output = ImmOpDeclare.subst(svcIop)
-    decoder_output = ImmOpConstructor.subst(svcIop)
+    decoder_output = SemihostConstructor.subst(svcIop)
     exec_output = PredOpExecute.subst(svcIop)
+
+    hltCode = '''
+    ThreadContext *tc = xc->tcBase();
+
+    const auto semihost_imm = Thumb? 0x3C : 0xF000;
+
+    if (ArmSystem::haveSemihosting(tc) && imm == semihost_imm) {
+        R0 = ArmSystem::callSemihosting32(tc, R0, R1);
+    } else {
+        // HLT instructions aren't implemented, so treat them as undefined
+        // instructions.
+        fault = std::make_shared<UndefinedInstruction>(
+            machInst, false, mnemonic);
+    }
+    '''
+
+    hltIop = InstObjParams("hlt", "Hlt", "ImmOp",
+                           { "code": hltCode,
+                             "predicate_test": predicateTest,
+                             "thumb_semihost": '0x3C',
+                             "arm_semihost": '0xF000' },
+                           ["IsNonSpeculative"])
+    header_output += ImmOpDeclare.subst(hltIop)
+    decoder_output += SemihostConstructor.subst(hltIop)
+    exec_output += PredOpExecute.subst(hltIop)
 
     smcCode = '''
     HCR  hcr  = Hcr;
@@ -190,7 +226,7 @@ let {{
         cpsr.c = CondCodesC;
         cpsr.v = CondCodesV;
         cpsr.ge = CondCodesGE;
-        Dest = cpsr & 0xF8FF03DF
+        Dest = cpsr & (cpsr.mode == MODE_USER ? ApsrMask : CpsrMask);
     '''
 
     mrsCpsrIop = InstObjParams("mrs", "MrsCpsr", "MrsOp",
@@ -652,7 +688,15 @@ let {{
     decoder_output += RegRegRegRegOpConstructor.subst(usada8Iop)
     exec_output += PredOpExecute.subst(usada8Iop)
 
-    bkptCode = 'return std::make_shared<PrefetchAbort>(PC, ArmFault::DebugEvent);\n'
+    bkptCode = '''
+        uint16_t imm16;
+        if (!machInst.thumb)
+            imm16 = ((bits(machInst, 19, 8) << 4) | bits(machInst, 3, 0));
+        else
+            imm16 = bits(machInst, 7, 0);
+
+        return softwareBreakpoint32(xc, imm16);
+    '''
     bkptIop = InstObjParams("bkpt", "BkptInst", "PredOp", bkptCode)
     header_output += BasicDeclare.subst(bkptIop)
     decoder_output += BasicConstructor.subst(bkptIop)
@@ -831,7 +875,7 @@ let {{
         return std::make_shared<UndefinedInstruction>(machInst, false,
                                                       mnemonic);
     }
-    if (mcrMrc14TrapToHyp((const MiscRegIndex) op1, Hcr, Cpsr, Scr, Hdcr,
+    if (mcrMrc14TrapToHyp((MiscRegIndex) op1, Hcr, Cpsr, Scr, Hdcr,
                           Hstr, Hcptr, imm)) {
         return std::make_shared<HypervisorTrap>(machInst, imm,
                                                 EC_TRAPPED_CP14_MCR_MRC);
@@ -839,11 +883,11 @@ let {{
     Dest = MiscOp1;
     '''
 
-    mrc14Iop = InstObjParams("mrc", "Mrc14", "RegRegImmOp",
+    mrc14Iop = InstObjParams("mrc", "Mrc14", "RegMiscRegImmOp",
                              { "code": mrc14code,
                                "predicate_test": predicateTest }, [])
-    header_output += RegRegImmOpDeclare.subst(mrc14Iop)
-    decoder_output += RegRegImmOpConstructor.subst(mrc14Iop)
+    header_output += RegMiscRegImmOpDeclare.subst(mrc14Iop)
+    decoder_output += RegMiscRegImmOpConstructor.subst(mrc14Iop)
     exec_output += PredOpExecute.subst(mrc14Iop)
 
 
@@ -863,16 +907,16 @@ let {{
     }
     MiscDest = Op1;
     '''
-    mcr14Iop = InstObjParams("mcr", "Mcr14", "RegRegImmOp",
+    mcr14Iop = InstObjParams("mcr", "Mcr14", "MiscRegRegImmOp",
                              { "code": mcr14code,
                                "predicate_test": predicateTest },
                                ["IsSerializeAfter","IsNonSpeculative"])
-    header_output += RegRegImmOpDeclare.subst(mcr14Iop)
-    decoder_output += RegRegImmOpConstructor.subst(mcr14Iop)
+    header_output += MiscRegRegImmOpDeclare.subst(mcr14Iop)
+    decoder_output += MiscRegRegImmOpConstructor.subst(mcr14Iop)
     exec_output += PredOpExecute.subst(mcr14Iop)
 
     mrc15code = '''
-    int preFlatOp1 = flattenMiscRegNsBanked(op1, xc->tcBase());
+    int preFlatOp1 = snsBankedIndex(op1, xc->tcBase());
     MiscRegIndex miscReg = (MiscRegIndex)
                            xc->tcBase()->flattenRegId(RegId(MiscRegClass,
                                                       preFlatOp1)).index();
@@ -904,7 +948,7 @@ let {{
 
 
     mcr15code = '''
-    int preFlatDest = flattenMiscRegNsBanked(dest, xc->tcBase());
+    int preFlatDest = snsBankedIndex(dest, xc->tcBase());
     MiscRegIndex miscReg = (MiscRegIndex)
                        xc->tcBase()->flattenRegId(RegId(MiscRegClass,
                                                   preFlatDest)).index();
@@ -937,7 +981,7 @@ let {{
 
 
     mrrc15code = '''
-    int preFlatOp1 = flattenMiscRegNsBanked(op1, xc->tcBase());
+    int preFlatOp1 = snsBankedIndex(op1, xc->tcBase());
     MiscRegIndex miscReg = (MiscRegIndex)
                            xc->tcBase()->flattenRegId(RegId(MiscRegClass,
                                                       preFlatOp1)).index();
@@ -968,7 +1012,7 @@ let {{
 
 
     mcrr15code = '''
-    int preFlatDest = flattenMiscRegNsBanked(dest, xc->tcBase());
+    int preFlatDest = snsBankedIndex(dest, xc->tcBase());
     MiscRegIndex miscReg = (MiscRegIndex)
                            xc->tcBase()->flattenRegId(RegId(MiscRegClass,
                                                       preFlatDest)).index();
@@ -1024,6 +1068,7 @@ let {{
         CPSR cpsr = Cpsr;
         cpsr.e = imm;
         Cpsr = cpsr;
+        fault = checkSETENDEnabled(xc->tcBase(), cpsr);
     '''
     setendIop = InstObjParams("setend", "Setend", "ImmOp",
                               { "code": setendCode,
@@ -1044,7 +1089,7 @@ let {{
     exec_output += PredOpExecute.subst(clrexIop)
 
     McrDcCheckCode = '''
-        int preFlatDest = flattenMiscRegNsBanked(dest, xc->tcBase());
+        int preFlatDest = snsBankedIndex(dest, xc->tcBase());
         MiscRegIndex miscReg = (MiscRegIndex) xc->tcBase()->flattenRegId(
             RegId(MiscRegClass, preFlatDest)).index();
         bool hypTrap  = mcrMrc15TrapToHyp(miscReg, Hcr, Cpsr, Scr, Hdcr, Hstr,
@@ -1072,8 +1117,8 @@ let {{
                                             Request::DST_POC);
         EA = Op1;
     '''
-    McrDcimvacIop = InstObjParams("mcr dcimvac", "McrDcimvac",
-                                  "MiscRegRegImmMemOp",
+    McrDcimvacIop = InstObjParams("mcr", "McrDcimvac",
+                                  "MiscRegRegImmOp",
                                   {"memacc_code": McrDcCheckCode,
                                    "postacc_code": "",
                                    "ea_code": McrDcimvacCode,
@@ -1091,8 +1136,8 @@ let {{
                                             Request::DST_POC);
         EA = Op1;
     '''
-    McrDccmvacIop = InstObjParams("mcr dccmvac", "McrDccmvac",
-                                  "MiscRegRegImmMemOp",
+    McrDccmvacIop = InstObjParams("mcr", "McrDccmvac",
+                                  "MiscRegRegImmOp",
                                   {"memacc_code": McrDcCheckCode,
                                    "postacc_code": "",
                                    "ea_code": McrDccmvacCode,
@@ -1110,8 +1155,8 @@ let {{
                                             Request::DST_POU);
         EA = Op1;
     '''
-    McrDccmvauIop = InstObjParams("mcr dccmvau", "McrDccmvau",
-                                  "MiscRegRegImmMemOp",
+    McrDccmvauIop = InstObjParams("mcr", "McrDccmvau",
+                                  "MiscRegRegImmOp",
                                   {"memacc_code": McrDcCheckCode,
                                    "postacc_code": "",
                                    "ea_code": McrDccmvauCode,
@@ -1130,8 +1175,8 @@ let {{
                                             Request::DST_POC);
         EA = Op1;
     '''
-    McrDccimvacIop = InstObjParams("mcr dccimvac", "McrDccimvac",
-                                  "MiscRegRegImmMemOp",
+    McrDccimvacIop = InstObjParams("mcr", "McrDccimvac",
+                                  "MiscRegRegImmOp",
                                   {"memacc_code": McrDcCheckCode,
                                    "postacc_code": "",
                                    "ea_code": McrDccimvacCode,
@@ -1154,7 +1199,7 @@ let {{
     isbIop = InstObjParams("isb", "Isb", "ImmOp",
                              {"code": isbCode,
                                "predicate_test": predicateTest},
-                                ['IsSerializeAfter', 'IsSquashAfter'])
+                                ['IsSquashAfter'])
     header_output += ImmOpDeclare.subst(isbIop)
     decoder_output += ImmOpConstructor.subst(isbIop)
     exec_output += PredOpExecute.subst(isbIop)

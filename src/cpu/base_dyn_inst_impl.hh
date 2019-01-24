@@ -63,7 +63,13 @@ BaseDynInst<Impl>::BaseDynInst(const StaticInstPtr &_staticInst,
                                const StaticInstPtr &_macroop,
                                TheISA::PCState _pc, TheISA::PCState _predPC,
                                InstSeqNum seq_num, ImplCPU *cpu)
-  : staticInst(_staticInst), cpu(cpu), traceData(NULL), macroop(_macroop)
+  : staticInst(_staticInst), cpu(cpu),
+    thread(nullptr),
+    traceData(nullptr),
+    macroop(_macroop),
+    memData(nullptr),
+    savedReq(nullptr),
+    reqToVerify(nullptr)
 {
     seqNum = seq_num;
 
@@ -88,8 +94,7 @@ BaseDynInst<Impl>::initVars()
 {
     memData = NULL;
     effAddr = 0;
-    physEffAddrLow = 0;
-    physEffAddrHigh = 0;
+    physEffAddr = 0;
     readyRegs = 0;
     memReqFlags = 0;
 
@@ -131,7 +136,6 @@ BaseDynInst<Impl>::initVars()
     cpu->snList.insert(seqNum);
 #endif
 
-    reqToVerify = NULL;
 }
 
 template <class Impl>
@@ -158,8 +162,6 @@ BaseDynInst<Impl>::~BaseDynInst()
     cpu->snList.erase(seqNum);
 #endif
 
-    if (reqToVerify)
-        delete reqToVerify;
 }
 
 #ifdef DEBUG
@@ -220,7 +222,7 @@ BaseDynInst<Impl>::markSrcRegReady(RegIndex src_idx)
 
 template <class Impl>
 bool
-BaseDynInst<Impl>::eaSrcsReady()
+BaseDynInst<Impl>::eaSrcsReady() const
 {
     // For now I am assuming that src registers 1..n-1 are the ones that the
     // EA calc depends on.  (i.e. src reg 0 is the source of the data to be

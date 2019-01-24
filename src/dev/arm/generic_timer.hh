@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, 2017 ARM Limited
+ * Copyright (c) 2013, 2015, 2017-2018 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -69,7 +69,10 @@ class SystemCounter : public Serializable
     /// Tick when the counter was reset.
     Tick _resetTick;
 
+    /// Kernel event stream control register
     uint32_t _regCntkctl;
+    /// Hypervisor event stream control register
+    uint32_t _regCnthctl;
 
   public:
     SystemCounter();
@@ -94,6 +97,9 @@ class SystemCounter : public Serializable
     void setKernelControl(uint32_t val) { _regCntkctl = val; }
     uint32_t getKernelControl() { return _regCntkctl; }
 
+    void setHypControl(uint32_t val) { _regCnthctl = val; }
+    uint32_t getHypControl() { return _regCnthctl; }
+
     void serialize(CheckpointOut &cp) const override;
     void unserialize(CheckpointIn &cp) override;
 
@@ -105,26 +111,6 @@ class SystemCounter : public Serializable
 /// Per-CPU architected timer.
 class ArchTimer : public Serializable, public Drainable
 {
-  public:
-    class Interrupt
-    {
-      public:
-        Interrupt(BaseGic &gic, unsigned irq)
-            : _gic(gic), _ppi(false), _irq(irq), _cpu(0) {}
-
-        Interrupt(BaseGic &gic, unsigned irq, unsigned cpu)
-            : _gic(gic), _ppi(true), _irq(irq), _cpu(cpu) {}
-
-        void send();
-        void clear();
-
-      private:
-        BaseGic &_gic;
-        const bool _ppi;
-        const unsigned _irq;
-        const unsigned _cpu;
-    };
-
   protected:
     /// Control register.
     BitUnion32(ArchTimerCtrl)
@@ -141,7 +127,7 @@ class ArchTimer : public Serializable, public Drainable
 
     SystemCounter &_systemCounter;
 
-    Interrupt _interrupt;
+    ArmInterruptPin * const _interrupt;
 
     /// Value of the control register ({CNTP/CNTHP/CNTV}_CTL).
     ArchTimerCtrl _control;
@@ -166,7 +152,7 @@ class ArchTimer : public Serializable, public Drainable
     ArchTimer(const std::string &name,
               SimObject &parent,
               SystemCounter &sysctr,
-              const Interrupt &interrupt);
+              ArmInterruptPin *interrupt);
 
     /// Returns the timer name.
     std::string name() const { return _name; }
@@ -214,7 +200,7 @@ class ArchTimerKvm : public ArchTimer
                  ArmSystem &system,
                  SimObject &parent,
                  SystemCounter &sysctr,
-                 const Interrupt &interrupt)
+                 ArmInterruptPin *interrupt)
       : ArchTimer(name, parent, sysctr, interrupt), system(system) {}
 
   protected:
@@ -226,39 +212,54 @@ class ArchTimerKvm : public ArchTimer
     }
 };
 
-class GenericTimer : public SimObject
+class GenericTimer : public ClockedObject
 {
   public:
+    const GenericTimerParams * params() const;
+
     GenericTimer(GenericTimerParams *p);
 
     void serialize(CheckpointOut &cp) const override;
     void unserialize(CheckpointIn &cp) override;
 
   public:
-    void setMiscReg(int misc_reg, unsigned cpu, ArmISA::MiscReg val);
-    ArmISA::MiscReg readMiscReg(int misc_reg, unsigned cpu);
+    void setMiscReg(int misc_reg, unsigned cpu, RegVal val);
+    RegVal readMiscReg(int misc_reg, unsigned cpu);
 
   protected:
     struct CoreTimers {
         CoreTimers(GenericTimer &parent, ArmSystem &system, unsigned cpu,
-                   unsigned _irqPhys, unsigned _irqVirt)
-            : irqPhys(*parent.gic, _irqPhys, cpu),
-              irqVirt(*parent.gic, _irqVirt, cpu),
+                   ArmInterruptPin *_irqPhysS, ArmInterruptPin *_irqPhysNS,
+                   ArmInterruptPin *_irqVirt, ArmInterruptPin *_irqHyp)
+            : irqPhysS(_irqPhysS),
+              irqPhysNS(_irqPhysNS),
+              irqVirt(_irqVirt),
+              irqHyp(_irqHyp),
+              physS(csprintf("%s.phys_s_timer%d", parent.name(), cpu),
+                     system, parent, parent.systemCounter,
+                     _irqPhysS),
               // This should really be phys_timerN, but we are stuck with
               // arch_timer for backwards compatibility.
-              phys(csprintf("%s.arch_timer%d", parent.name(), cpu),
-                   system, parent, parent.systemCounter,
-                   irqPhys),
+              physNS(csprintf("%s.arch_timer%d", parent.name(), cpu),
+                     system, parent, parent.systemCounter,
+                     _irqPhysNS),
               virt(csprintf("%s.virt_timer%d", parent.name(), cpu),
                    system, parent, parent.systemCounter,
-                   irqVirt)
+                   _irqVirt),
+              hyp(csprintf("%s.hyp_timer%d", parent.name(), cpu),
+                   system, parent, parent.systemCounter,
+                   _irqHyp)
         {}
 
-        ArchTimer::Interrupt irqPhys;
-        ArchTimer::Interrupt irqVirt;
+        ArmInterruptPin const *irqPhysS;
+        ArmInterruptPin const *irqPhysNS;
+        ArmInterruptPin const *irqVirt;
+        ArmInterruptPin const *irqHyp;
 
-        ArchTimerKvm phys;
+        ArchTimerKvm physS;
+        ArchTimerKvm physNS;
         ArchTimerKvm virt;
+        ArchTimerKvm hyp;
 
       private:
         // Disable copying
@@ -277,15 +278,6 @@ class GenericTimer : public SimObject
   protected: // Configuration
     /// ARM system containing this timer
     ArmSystem &system;
-
-    /// Pointer to the GIC, needed to trigger timer interrupts.
-    BaseGic *const gic;
-
-    /// Physical timer interrupt
-    const unsigned irqPhys;
-
-    /// Virtual timer interrupt
-    const unsigned irqVirt;
 };
 
 class GenericTimerISA : public ArmISA::BaseISADevice
@@ -294,12 +286,8 @@ class GenericTimerISA : public ArmISA::BaseISADevice
     GenericTimerISA(GenericTimer &_parent, unsigned _cpu)
         : parent(_parent), cpu(_cpu) {}
 
-    void setMiscReg(int misc_reg, ArmISA::MiscReg val) override {
-        parent.setMiscReg(misc_reg, cpu, val);
-    }
-    ArmISA::MiscReg readMiscReg(int misc_reg) override {
-        return parent.readMiscReg(misc_reg, cpu);
-    }
+    void setMiscReg(int misc_reg, RegVal val) override;
+    RegVal readMiscReg(int misc_reg) override;
 
   protected:
     GenericTimer &parent;

@@ -42,6 +42,7 @@ from m5.SimObject import *
 from m5.params import *
 from m5.params import isNullPointer
 from m5.proxy import *
+from Gic import ArmInterruptPin
 
 class ProbeEvent(object):
     def __init__(self, pmu, _eventId, obj, *listOfNames):
@@ -67,7 +68,6 @@ class SoftwareIncrement(object):
 ARCH_EVENT_CORE_CYCLES = 0x11
 
 class ArmPMU(SimObject):
-
     type = 'ArmPMU'
     cxx_class = 'ArmISA::PMU'
     cxx_header = 'arch/arm/pmu.hh'
@@ -115,8 +115,9 @@ class ArmPMU(SimObject):
         sharing the PMU (e.g., when switching between CPU models).
         """
 
-        bpred = cpu.branchPred if cpu and not isNullPointer(cpu.branchPred) \
-            else None
+        bpred = getattr(cpu, "branchPred", None) if cpu else None
+        if bpred is not None and isNullPointer(bpred):
+            bpred = None
 
         self.addEvent(SoftwareIncrement(self,0x00))
         # 0x01: L1I_CACHE_REFILL
@@ -173,4 +174,4 @@ class ArmPMU(SimObject):
     cycleEventId = Param.Int(ARCH_EVENT_CORE_CYCLES, "Cycle event id")
     platform = Param.Platform(Parent.any, "Platform this device is part of.")
     eventCounters = Param.Int(31, "Number of supported PMU counters")
-    pmuInterrupt = Param.Int(68, "PMU GIC interrupt number")
+    interrupt = Param.ArmInterruptPin("PMU interrupt")

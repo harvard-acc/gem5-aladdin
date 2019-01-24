@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python2.7
 #
 # Copyright (c) 2016-2017 ARM Limited
 # All rights reserved
@@ -102,6 +102,7 @@ arch_configs = {
         'realview-minor-dual',
         'realview-switcheroo-atomic',
         'realview-switcheroo-timing',
+        'realview-switcheroo-noncaching-timing',
         'realview-switcheroo-o3',
         'realview-switcheroo-full',
         'realview64-simple-atomic',

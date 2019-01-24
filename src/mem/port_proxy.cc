@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 ARM Limited
+ * Copyright (c) 2012, 2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -42,12 +42,16 @@
 #include "base/chunk_generator.hh"
 
 void
-PortProxy::readBlob(Addr addr, uint8_t *p, int size) const
+PortProxy::readBlobPhys(Addr addr, Request::Flags flags,
+                        uint8_t *p, int size) const
 {
     for (ChunkGenerator gen(addr, size, _cacheLineSize); !gen.done();
          gen.next()) {
-        Request req(gen.addr(), gen.size(), 0, Request::funcMasterId);
-        Packet pkt(&req, MemCmd::ReadReq);
+
+        auto req = std::make_shared<Request>(
+            gen.addr(), gen.size(), flags, Request::funcMasterId);
+
+        Packet pkt(req, MemCmd::ReadReq);
         pkt.dataStatic(p);
         _port.sendFunctional(&pkt);
         p += gen.size();
@@ -55,12 +59,16 @@ PortProxy::readBlob(Addr addr, uint8_t *p, int size) const
 }
 
 void
-PortProxy::writeBlob(Addr addr, const uint8_t *p, int size) const
+PortProxy::writeBlobPhys(Addr addr, Request::Flags flags,
+                         const uint8_t *p, int size) const
 {
     for (ChunkGenerator gen(addr, size, _cacheLineSize); !gen.done();
          gen.next()) {
-        Request req(gen.addr(), gen.size(), 0, Request::funcMasterId);
-        Packet pkt(&req, MemCmd::WriteReq);
+
+        auto req = std::make_shared<Request>(
+            gen.addr(), gen.size(), flags, Request::funcMasterId);
+
+        Packet pkt(req, MemCmd::WriteReq);
         pkt.dataStaticConst(p);
         _port.sendFunctional(&pkt);
         p += gen.size();
@@ -68,13 +76,33 @@ PortProxy::writeBlob(Addr addr, const uint8_t *p, int size) const
 }
 
 void
-PortProxy::memsetBlob(Addr addr, uint8_t v, int size) const
+PortProxy::memsetBlobPhys(Addr addr, Request::Flags flags,
+                          uint8_t v, int size) const
 {
     // quick and dirty...
     uint8_t *buf = new uint8_t[size];
 
     std::memset(buf, v, size);
-    PortProxy::writeBlob(addr, buf, size);
+    PortProxy::writeBlobPhys(addr, flags, buf, size);
 
     delete [] buf;
+}
+
+
+void
+SecurePortProxy::readBlob(Addr addr, uint8_t *p, int size) const
+{
+    readBlobPhys(addr, Request::SECURE, p, size);
+}
+
+void
+SecurePortProxy::writeBlob(Addr addr, const uint8_t *p, int size) const
+{
+    writeBlobPhys(addr, Request::SECURE, p, size);
+}
+
+void
+SecurePortProxy::memsetBlob(Addr addr, uint8_t v, int size) const
+{
+    memsetBlobPhys(addr, Request::SECURE, v, size);
 }

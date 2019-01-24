@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013 ARM Limited
+ * Copyright (c) 2011-2013,2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -53,9 +53,8 @@ SysDC64::generateDisassembly(Addr pc, const SymbolTable *symtab) const
 {
     std::stringstream ss;
     printMnemonic(ss, "", false);
-    ccprintf(ss, ", [");
+    ccprintf(ss, ", ");
     printIntReg(ss, base);
-    ccprintf(ss, "]");
     return ss.str();
 }
 
@@ -65,7 +64,11 @@ void
 Memory64::startDisassembly(std::ostream &os) const
 {
     printMnemonic(os, "", false);
-    printIntReg(os, dest);
+    if (isDataPrefetch()||isInstPrefetch()){
+        printPFflags(os, dest);
+    }else{
+        printIntReg(os, dest);
+    }
     ccprintf(os, ", [");
     printIntReg(os, base);
 }

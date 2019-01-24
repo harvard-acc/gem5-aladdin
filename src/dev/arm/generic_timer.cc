@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, 2017 ARM Limited
+ * Copyright (c) 2013, 2015, 2017-2018 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -69,6 +69,7 @@ void
 SystemCounter::serialize(CheckpointOut &cp) const
 {
     SERIALIZE_SCALAR(_regCntkctl);
+    SERIALIZE_SCALAR(_regCnthctl);
     SERIALIZE_SCALAR(_freq);
     SERIALIZE_SCALAR(_period);
     SERIALIZE_SCALAR(_resetTick);
@@ -81,6 +82,8 @@ SystemCounter::unserialize(CheckpointIn &cp)
     // if it isn't present.
     if (!UNSERIALIZE_OPT_SCALAR(_regCntkctl))
         _regCntkctl = 0;
+    if (!UNSERIALIZE_OPT_SCALAR(_regCnthctl))
+        _regCnthctl = 0;
     UNSERIALIZE_SCALAR(_freq);
     UNSERIALIZE_SCALAR(_period);
     UNSERIALIZE_SCALAR(_resetTick);
@@ -91,7 +94,7 @@ SystemCounter::unserialize(CheckpointIn &cp)
 ArchTimer::ArchTimer(const std::string &name,
                      SimObject &parent,
                      SystemCounter &sysctr,
-                     const Interrupt &interrupt)
+                     ArmInterruptPin *interrupt)
     : _name(name), _parent(parent), _systemCounter(sysctr),
       _interrupt(interrupt),
       _control(0), _counterLimit(0), _offset(0),
@@ -111,7 +114,7 @@ ArchTimer::counterLimitReached()
     if (!_control.imask) {
         if (scheduleEvents()) {
             DPRINTF(Timer, "Causing interrupt\n");
-            _interrupt.send();
+            _interrupt->raise();
         } else {
             DPRINTF(Timer, "Kvm mode; skipping simulated interrupt\n");
         }
@@ -216,37 +219,18 @@ ArchTimer::drainResume()
     updateCounter();
 }
 
-void
-ArchTimer::Interrupt::send()
-{
-    if (_ppi) {
-        _gic.sendPPInt(_irq, _cpu);
-    } else {
-        _gic.sendInt(_irq);
-    }
-}
-
-
-void
-ArchTimer::Interrupt::clear()
-{
-    if (_ppi) {
-        _gic.clearPPInt(_irq, _cpu);
-    } else {
-        _gic.clearInt(_irq);
-    }
-}
-
-
 GenericTimer::GenericTimer(GenericTimerParams *p)
-    : SimObject(p),
-      system(*p->system),
-      gic(p->gic),
-      irqPhys(p->int_phys),
-      irqVirt(p->int_virt)
+    : ClockedObject(p),
+      system(*p->system)
 {
     fatal_if(!p->system, "No system specified, can't instantiate timer.\n");
     system.setGenericTimer(this);
+}
+
+const GenericTimerParams *
+GenericTimer::params() const
+{
+    return dynamic_cast<const GenericTimerParams *>(_params);
 }
 
 void
@@ -261,8 +245,10 @@ GenericTimer::serialize(CheckpointOut &cp) const
 
         // This should really be phys_timerN, but we are stuck with
         // arch_timer for backwards compatibility.
-        core.phys.serializeSection(cp, csprintf("arch_timer%d", i));
+        core.physNS.serializeSection(cp, csprintf("arch_timer%d", i));
+        core.physS.serializeSection(cp, csprintf("phys_s_timer%d", i));
         core.virt.serializeSection(cp, csprintf("virt_timer%d", i));
+        core.hyp.serializeSection(cp, csprintf("hyp_timer%d", i));
     }
 }
 
@@ -286,8 +272,10 @@ GenericTimer::unserialize(CheckpointIn &cp)
         CoreTimers &core(getTimers(i));
         // This should really be phys_timerN, but we are stuck with
         // arch_timer for backwards compatibility.
-        core.phys.unserializeSection(cp, csprintf("arch_timer%d", i));
+        core.physNS.unserializeSection(cp, csprintf("arch_timer%d", i));
+        core.physS.unserializeSection(cp, csprintf("phys_s_timer%d", i));
         core.virt.unserializeSection(cp, csprintf("virt_timer%d", i));
+        core.hyp.unserializeSection(cp, csprintf("hyp_timer%d", i));
     }
 }
 
@@ -305,18 +293,26 @@ void
 GenericTimer::createTimers(unsigned cpus)
 {
     assert(timers.size() < cpus);
+    auto p = static_cast<const GenericTimerParams *>(_params);
 
     const unsigned old_cpu_count(timers.size());
     timers.resize(cpus);
     for (unsigned i = old_cpu_count; i < cpus; ++i) {
+
+        ThreadContext *tc = system.getThreadContext(i);
+
         timers[i].reset(
-            new CoreTimers(*this, system, i, irqPhys, irqVirt));
+            new CoreTimers(*this, system, i,
+                           p->int_phys_s->get(tc),
+                           p->int_phys_ns->get(tc),
+                           p->int_virt->get(tc),
+                           p->int_hyp->get(tc)));
     }
 }
 
 
 void
-GenericTimer::setMiscReg(int reg, unsigned cpu, MiscReg val)
+GenericTimer::setMiscReg(int reg, unsigned cpu, RegVal val)
 {
     CoreTimers &core(getTimers(cpu));
 
@@ -331,23 +327,25 @@ GenericTimer::setMiscReg(int reg, unsigned cpu, MiscReg val)
         systemCounter.setKernelControl(val);
         return;
 
-      // Physical timer
-      case MISCREG_CNTP_CVAL:
+      case MISCREG_CNTHCTL:
+      case MISCREG_CNTHCTL_EL2:
+        systemCounter.setHypControl(val);
+        return;
+
+      // Physical timer (NS)
       case MISCREG_CNTP_CVAL_NS:
       case MISCREG_CNTP_CVAL_EL0:
-        core.phys.setCompareValue(val);
+        core.physNS.setCompareValue(val);
         return;
 
-      case MISCREG_CNTP_TVAL:
       case MISCREG_CNTP_TVAL_NS:
       case MISCREG_CNTP_TVAL_EL0:
-        core.phys.setTimerValue(val);
+        core.physNS.setTimerValue(val);
         return;
 
-      case MISCREG_CNTP_CTL:
       case MISCREG_CNTP_CTL_NS:
       case MISCREG_CNTP_CTL_EL0:
-        core.phys.setControl(val);
+        core.physNS.setControl(val);
         return;
 
       // Count registers
@@ -380,24 +378,36 @@ GenericTimer::setMiscReg(int reg, unsigned cpu, MiscReg val)
         core.virt.setControl(val);
         return;
 
-      // PL1 phys. timer, secure
+      // Physical timer (S)
       case MISCREG_CNTP_CTL_S:
-      case MISCREG_CNTPS_CVAL_EL1:
-      case MISCREG_CNTPS_TVAL_EL1:
       case MISCREG_CNTPS_CTL_EL1:
-        M5_FALLTHROUGH;
+        core.physS.setControl(val);
+        return;
 
-      // PL2 phys. timer, non-secure
-      case MISCREG_CNTHCTL:
-      case MISCREG_CNTHCTL_EL2:
-      case MISCREG_CNTHP_CVAL:
-      case MISCREG_CNTHP_CVAL_EL2:
-      case MISCREG_CNTHP_TVAL:
-      case MISCREG_CNTHP_TVAL_EL2:
+      case MISCREG_CNTP_CVAL_S:
+      case MISCREG_CNTPS_CVAL_EL1:
+        core.physS.setCompareValue(val);
+        return;
+
+      case MISCREG_CNTP_TVAL_S:
+      case MISCREG_CNTPS_TVAL_EL1:
+        core.physS.setTimerValue(val);
+        return;
+
+      // Hyp phys. timer, non-secure
       case MISCREG_CNTHP_CTL:
       case MISCREG_CNTHP_CTL_EL2:
-        warn("Writing to unimplemented register: %s\n",
-             miscRegName[reg]);
+        core.hyp.setControl(val);
+        return;
+
+      case MISCREG_CNTHP_CVAL:
+      case MISCREG_CNTHP_CVAL_EL2:
+        core.hyp.setCompareValue(val);
+        return;
+
+      case MISCREG_CNTHP_TVAL:
+      case MISCREG_CNTHP_TVAL_EL2:
+        core.hyp.setTimerValue(val);
         return;
 
       default:
@@ -407,7 +417,7 @@ GenericTimer::setMiscReg(int reg, unsigned cpu, MiscReg val)
 }
 
 
-MiscReg
+RegVal
 GenericTimer::readMiscReg(int reg, unsigned cpu)
 {
     CoreTimers &core(getTimers(cpu));
@@ -421,23 +431,26 @@ GenericTimer::readMiscReg(int reg, unsigned cpu)
       case MISCREG_CNTKCTL_EL1:
         return systemCounter.getKernelControl();
 
+      case MISCREG_CNTHCTL:
+      case MISCREG_CNTHCTL_EL2:
+        return systemCounter.getHypControl();
+
       // Physical timer
-      case MISCREG_CNTP_CVAL:
+      case MISCREG_CNTP_CVAL_NS:
       case MISCREG_CNTP_CVAL_EL0:
-        return core.phys.compareValue();
+        return core.physNS.compareValue();
 
-      case MISCREG_CNTP_TVAL:
+      case MISCREG_CNTP_TVAL_NS:
       case MISCREG_CNTP_TVAL_EL0:
-        return core.phys.timerValue();
+        return core.physNS.timerValue();
 
-      case MISCREG_CNTP_CTL:
       case MISCREG_CNTP_CTL_EL0:
       case MISCREG_CNTP_CTL_NS:
-        return core.phys.control();
+        return core.physNS.control();
 
       case MISCREG_CNTPCT:
       case MISCREG_CNTPCT_EL0:
-        return core.phys.value();
+        return core.physNS.value();
 
 
       // Virtual timer
@@ -463,24 +476,29 @@ GenericTimer::readMiscReg(int reg, unsigned cpu)
 
       // PL1 phys. timer, secure
       case MISCREG_CNTP_CTL_S:
-      case MISCREG_CNTPS_CVAL_EL1:
-      case MISCREG_CNTPS_TVAL_EL1:
       case MISCREG_CNTPS_CTL_EL1:
-        M5_FALLTHROUGH;
+        return core.physS.control();
 
-      // PL2 phys. timer, non-secure
-      case MISCREG_CNTHCTL:
-      case MISCREG_CNTHCTL_EL2:
-      case MISCREG_CNTHP_CVAL:
-      case MISCREG_CNTHP_CVAL_EL2:
-      case MISCREG_CNTHP_TVAL:
-      case MISCREG_CNTHP_TVAL_EL2:
+      case MISCREG_CNTP_CVAL_S:
+      case MISCREG_CNTPS_CVAL_EL1:
+        return core.physS.compareValue();
+
+      case MISCREG_CNTP_TVAL_S:
+      case MISCREG_CNTPS_TVAL_EL1:
+        return core.physS.timerValue();
+
+      // HYP phys. timer (NS)
       case MISCREG_CNTHP_CTL:
       case MISCREG_CNTHP_CTL_EL2:
-        warn("Reading from unimplemented register: %s\n",
-             miscRegName[reg]);
-        return 0;
+        return core.hyp.control();
 
+      case MISCREG_CNTHP_CVAL:
+      case MISCREG_CNTHP_CVAL_EL2:
+        return core.hyp.compareValue();
+
+      case MISCREG_CNTHP_TVAL:
+      case MISCREG_CNTHP_TVAL_EL2:
+        return core.hyp.timerValue();
 
       default:
         warn("Reading from unknown register: %s\n", miscRegName[reg]);
@@ -489,6 +507,20 @@ GenericTimer::readMiscReg(int reg, unsigned cpu)
 }
 
 
+void
+GenericTimerISA::setMiscReg(int reg, RegVal val)
+{
+    DPRINTF(Timer, "Setting %s := 0x%x\n", miscRegName[reg], val);
+    parent.setMiscReg(reg, cpu, val);
+}
+
+RegVal
+GenericTimerISA::readMiscReg(int reg)
+{
+    RegVal value = parent.readMiscReg(reg, cpu);
+    DPRINTF(Timer, "Reading %s as 0x%x\n", miscRegName[reg], value);
+    return value;
+}
 
 GenericTimerMem::GenericTimerMem(GenericTimerMemParams *p)
     : PioDevice(p),
@@ -498,10 +530,10 @@ GenericTimerMem::GenericTimerMem(GenericTimerMemParams *p)
       systemCounter(),
       physTimer(csprintf("%s.phys_timer0", name()),
                 *this, systemCounter,
-                ArchTimer::Interrupt(*p->gic, p->int_phys)),
+                p->int_phys->get()),
       virtTimer(csprintf("%s.virt_timer0", name()),
                 *this, systemCounter,
-                ArchTimer::Interrupt(*p->gic, p->int_virt))
+                p->int_virt->get())
 {
 }
 
@@ -551,9 +583,9 @@ GenericTimerMem::read(PacketPtr pkt)
     DPRINTF(Timer, "Read 0x%x <- 0x%x(%i)\n", value, addr, size);
 
     if (size == 8) {
-        pkt->set<uint64_t>(value);
+        pkt->setLE<uint64_t>(value);
     } else if (size == 4) {
-        pkt->set<uint32_t>(value);
+        pkt->setLE<uint32_t>(value);
     } else {
         panic("Unexpected access size: %i\n", size);
     }
@@ -570,7 +602,7 @@ GenericTimerMem::write(PacketPtr pkt)
 
     const Addr addr(pkt->getAddr());
     const uint64_t value(size == 8 ?
-                         pkt->get<uint64_t>() : pkt->get<uint32_t>());
+                         pkt->getLE<uint64_t>() : pkt->getLE<uint32_t>());
 
     DPRINTF(Timer, "Write 0x%x -> 0x%x(%i)\n", value, addr, size);
     if (ctrlRange.contains(addr)) {

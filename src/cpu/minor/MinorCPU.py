@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2014 ARM Limited
+# Copyright (c) 2012-2014,2018 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -39,6 +39,8 @@
 # Authors: Gabe Black
 #          Nathan Binkert
 #          Andrew Bardsley
+
+from __future__ import print_function
 
 from m5.defines import buildEnv
 from m5.params import *
@@ -148,7 +150,9 @@ class MinorDefaultFloatSimdFU(MinorFU):
         'SimdMisc', 'SimdMult', 'SimdMultAcc', 'SimdShift', 'SimdShiftAcc',
         'SimdSqrt', 'SimdFloatAdd', 'SimdFloatAlu', 'SimdFloatCmp',
         'SimdFloatCvt', 'SimdFloatDiv', 'SimdFloatMisc', 'SimdFloatMult',
-        'SimdFloatMultAcc', 'SimdFloatSqrt'])
+        'SimdFloatMultAcc', 'SimdFloatSqrt', 'SimdAes', 'SimdAesMix',
+        'SimdSha1Hash', 'SimdSha1Hash2', 'SimdSha256Hash',
+        'SimdSha256Hash2', 'SimdShaSigma2', 'SimdShaSigma3'])
     timings = [MinorFUTiming(description='FloatSimd',
         srcRegsRelativeLats=[2])]
     opLat = 6
@@ -275,5 +279,5 @@ class MinorCPU(BaseCPU):
         numThreads = Parent.numThreads), "Branch Predictor")
 
     def addCheckerCpu(self):
-        print "Checker not yet supported by MinorCPU"
+        print("Checker not yet supported by MinorCPU")
         exit(1)

@@ -88,7 +88,7 @@ zeroRegisters(CPU *cpu)
     // (no longer very clean due to the change in setIntReg() in the
     // cpu model.  Consider changing later.)
     cpu->thread->setIntReg(ZeroReg, 0);
-    cpu->thread->setFloatReg(ZeroReg, 0.0);
+    cpu->thread->setFloatRegBits(ZeroReg, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -303,6 +303,7 @@ ISA::setIpr(int idx, uint64_t val, ThreadContext *tc)
             if (tc->getKernelStats())
                 tc->getKernelStats()->mode(Kernel::kernel, tc);
         }
+        M5_FALLTHROUGH;
 
       case IPR_ICM:
         // only write two mode bits - processor mode

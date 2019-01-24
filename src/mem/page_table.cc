@@ -39,12 +39,11 @@
 
 #include <string>
 
+#include "base/compiler.hh"
 #include "base/trace.hh"
 #include "debug/MMU.hh"
 #include "sim/faults.hh"
 #include "sim/serialize.hh"
-
-using namespace std;
 
 void
 EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags)
@@ -83,11 +82,11 @@ EmulationPageTable::remap(Addr vaddr, int64_t size, Addr new_vaddr)
             new_vaddr, size);
 
     while (size > 0) {
-        auto new_it = pTable.find(new_vaddr);
+        auto new_it M5_VAR_USED = pTable.find(new_vaddr);
         auto old_it = pTable.find(vaddr);
         assert(old_it != pTable.end() && new_it == pTable.end());
 
-        new_it->second = old_it->second;
+        pTable.emplace(new_vaddr, old_it->second);
         pTable.erase(old_it);
         size -= pageSize;
         vaddr += pageSize;
@@ -99,7 +98,7 @@ void
 EmulationPageTable::getMappings(std::vector<std::pair<Addr, Addr>> *addr_maps)
 {
     for (auto &iter : pTable)
-        addr_maps->push_back(make_pair(iter.first, iter.second.paddr));
+        addr_maps->push_back(std::make_pair(iter.first, iter.second.paddr));
 }
 
 void
@@ -155,7 +154,7 @@ EmulationPageTable::translate(Addr vaddr, Addr &paddr)
 }
 
 Fault
-EmulationPageTable::translate(RequestPtr req)
+EmulationPageTable::translate(const RequestPtr &req)
 {
     Addr paddr;
     assert(pageAlign(req->getVaddr() + req->getSize() - 1) ==

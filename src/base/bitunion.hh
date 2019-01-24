@@ -31,8 +31,10 @@
 #ifndef __BASE_BITUNION_HH__
 #define __BASE_BITUNION_HH__
 
+#include <functional>
 #include <iostream>
 #include <type_traits>
+#include <typeinfo>
 
 #include "base/bitfield.hh"
 
@@ -55,26 +57,31 @@ class BitfieldTypeImpl : public Base
                   "Bitfield base class must be empty.");
 
   private:
-    using Base::setter;
 
-    template<typename T>
-    struct TypeDeducer;
-
-    template<typename T>
-    friend class TypeDeducer;
-
-    template<typename Type1, typename Type2>
-    struct TypeDeducer<void (Base::*)(Type1 &, Type2)>
+    struct TypeDeducer
     {
-        typedef Type1 Storage;
-        typedef Type2 Type;
+        template<typename>
+        struct T;
+
+        template<typename C, typename Type1, typename Type2>
+        struct T<void (C::*)(Type1 &, Type2)>
+        {
+            typedef Type1 Storage;
+            typedef Type2 Type;
+        };
+
+        struct Wrapper : public Base
+        {
+            using Base::setter;
+        };
+
+        typedef typename T<decltype(&Wrapper::setter)>::Storage Storage;
+        typedef typename T<decltype(&Wrapper::setter)>::Type Type;
     };
 
   protected:
-    typedef typename TypeDeducer<
-            decltype(&BitfieldTypeImpl<Base>::setter)>::Storage Storage;
-    typedef typename TypeDeducer<
-            decltype(&BitfieldTypeImpl<Base>::setter)>::Type Type;
+    typedef typename TypeDeducer::Storage Storage;
+    typedef typename TypeDeducer::Type Type;
 
     Type getter(const Storage &storage) const = delete;
     void setter(Storage &storage, Type val) = delete;
@@ -399,9 +406,6 @@ using BitUnionBaseType = typename BitfieldBackend::BitUnionBaseType<T>::Type;
 namespace std
 {
     template <typename T>
-    struct hash;
-
-    template <typename T>
     struct hash<BitUnionType<T> > : public hash<BitUnionBaseType<T> >
     {
         size_t
@@ -410,6 +414,48 @@ namespace std
             return hash<BitUnionBaseType<T> >::operator()(val);
         }
     };
+}
+
+
+namespace BitfieldBackend
+{
+
+    template<typename T>
+    static inline std::ostream &
+    bitfieldBackendPrinter(std::ostream &os, const T &t)
+    {
+        os << t;
+        return os;
+    }
+
+    //Since BitUnions are generally numerical values and not character codes,
+    //these specializations attempt to ensure that they get cast to integers
+    //of the appropriate type before printing.
+    template <>
+    inline std::ostream &
+    bitfieldBackendPrinter(std::ostream &os, const char &t)
+    {
+        os << (int)t;
+        return os;
+    }
+
+    template <>
+    inline std::ostream &
+    bitfieldBackendPrinter(std::ostream &os, const unsigned char &t)
+    {
+        os << (unsigned int)t;
+        return os;
+    }
+}
+
+//A default << operator which casts a bitunion to its underlying type and
+//passes it to BitfieldBackend::bitfieldBackendPrinter.
+template <typename T>
+std::ostream &
+operator << (std::ostream &os, const BitUnionType<T> &bu)
+{
+    return BitfieldBackend::bitfieldBackendPrinter(
+            os, (BitUnionBaseType<T>)bu);
 }
 
 #endif // __BASE_BITUNION_HH__

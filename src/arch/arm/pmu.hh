@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2017 ARM Limited
+ * Copyright (c) 2011-2014, 2017-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -58,6 +58,7 @@
 class ArmPMUParams;
 class Platform;
 class ThreadContext;
+class ArmInterruptPin;
 
 namespace ArmISA {
 
@@ -112,20 +113,22 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
     void regProbeListeners() override;
 
   public: // ISA Device interface
+    void setThreadContext(ThreadContext *tc) override;
+
     /**
      * Set a register within the PMU.
      *
      * @param misc_reg Register number (see miscregs.hh)
      * @param val Value to store
      */
-    void setMiscReg(int misc_reg, MiscReg val) override;
+    void setMiscReg(int misc_reg, RegVal val) override;
     /**
      * Read a register within the PMU.
      *
      * @param misc_reg Register number (see miscregs.hh)
      * @return Register value.
      */
-    MiscReg readMiscReg(int misc_reg) override;
+    RegVal readMiscReg(int misc_reg) override;
 
   protected: // PMU register types and constants
     BitUnion32(PMCR_t)
@@ -193,7 +196,7 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
     typedef unsigned int EventTypeId;
 
   protected: /* High-level register and interrupt handling */
-    MiscReg readMiscRegInt(int misc_reg);
+    RegVal readMiscRegInt(int misc_reg);
 
     /**
      * PMCR write handling
@@ -214,6 +217,11 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
      * Deliver a PMU interrupt to the GIC
      */
     void raiseInterrupt();
+
+    /**
+     * Clear a PMU interrupt.
+     */
+    void clearInterrupt();
 
     /**
      * Get the value of a performance counter.
@@ -265,6 +273,18 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
      * @param type Performance counter type and filter configuration..
      */
     void setCounterTypeRegister(CounterId id, PMEVTYPER_t type);
+
+    /**
+     * Used for writing the Overflow Flag Status Register (SET/CLR)
+     *
+     * This method implements a write to the PMOVSSET/PMOVSCLR registers.
+     * It is capturing change of state in the register bits so that
+     * the overflow interrupt can be raised/cleared as a side effect
+     * of the write.
+     *
+     * @param new_val New value of the Overflow Status Register
+     */
+    void setOverflowStatus(RegVal new_val);
 
   protected: /* Probe handling and counter state */
     struct CounterState;
@@ -550,7 +570,7 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
 
   protected: /* State that needs to be serialized */
     /** Performance Monitor Count Enable Register */
-    MiscReg reg_pmcnten;
+    RegVal reg_pmcnten;
 
     /** Performance Monitor Control Register */
     PMCR_t reg_pmcr;
@@ -559,10 +579,10 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
     PMSELR_t reg_pmselr;
 
     /** Performance Monitor Interrupt Enable Register */
-    MiscReg reg_pminten;
+    RegVal reg_pminten;
 
     /** Performance Monitor Overflow Status Register */
-    MiscReg reg_pmovsr;
+    RegVal reg_pmovsr;
 
     /**
      * Performance counter ID register
@@ -596,12 +616,10 @@ class PMU : public SimObject, public ArmISA::BaseISADevice {
     PMCR_t reg_pmcr_conf;
 
     /** PMCR write mask when accessed from the guest */
-    static const MiscReg reg_pmcr_wr_mask;
+    static const RegVal reg_pmcr_wr_mask;
 
     /** Performance monitor interrupt number */
-    const unsigned int pmuInterrupt;
-    /** Platform this device belongs to */
-    Platform *const platform;
+    ArmInterruptPin *const interrupt;
 
     /**
      * List of event types supported by this PMU.

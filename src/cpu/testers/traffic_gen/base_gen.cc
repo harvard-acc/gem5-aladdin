@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2016-2017 ARM Limited
+ * Copyright (c) 2012-2013, 2016-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -44,13 +44,16 @@
 
 #include <algorithm>
 
+#include "base/logging.hh"
 #include "base/random.hh"
 #include "base/trace.hh"
+#include "cpu/testers/traffic_gen/base.hh"
 #include "debug/TrafficGen.hh"
-#include "proto/packet.pb.h"
+#include "sim/system.hh"
 
-BaseGen::BaseGen(const std::string& _name, MasterID master_id, Tick _duration)
-    : _name(_name), masterID(master_id), duration(_duration)
+BaseGen::BaseGen(SimObject &obj, MasterID master_id, Tick _duration)
+    : _name(obj.name()), masterID(master_id),
+      duration(_duration)
 {
 }
 
@@ -59,7 +62,7 @@ BaseGen::getPacket(Addr addr, unsigned size, const MemCmd& cmd,
                    Request::FlagsType flags)
 {
     // Create new request
-    Request *req = new Request(addr, size, flags, masterID);
+    RequestPtr req = std::make_shared<Request>(addr, size, flags, masterID);
     // Dummy PC to have PC-based prefetchers latch on; get entropy into higher
     // bits
     req->setPC(((Addr)masterID) << 2);
@@ -75,4 +78,28 @@ BaseGen::getPacket(Addr addr, unsigned size, const MemCmd& cmd,
     }
 
     return pkt;
+}
+
+StochasticGen::StochasticGen(SimObject &obj,
+                             MasterID master_id, Tick _duration,
+                             Addr start_addr, Addr end_addr,
+                             Addr _blocksize, Addr cacheline_size,
+                             Tick min_period, Tick max_period,
+                             uint8_t read_percent, Addr data_limit)
+        : BaseGen(obj, master_id, _duration),
+          startAddr(start_addr), endAddr(end_addr),
+          blocksize(_blocksize), cacheLineSize(cacheline_size),
+          minPeriod(min_period), maxPeriod(max_period),
+          readPercent(read_percent), dataLimit(data_limit)
+{
+    if (blocksize > cacheLineSize)
+        fatal("TrafficGen %s block size (%d) is larger than "
+              "cache line size (%d)\n", name(),
+              blocksize, cacheLineSize);
+
+    if (read_percent > 100)
+        fatal("%s cannot have more than 100% reads", name());
+
+    if (min_period > max_period)
+        fatal("%s cannot have min_period > max_period", name());
 }

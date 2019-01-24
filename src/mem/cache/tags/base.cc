@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013,2016 ARM Limited
+ * Copyright (c) 2013,2016,2018 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -48,29 +48,156 @@
 
 #include "mem/cache/tags/base.hh"
 
-#include "cpu/smt.hh" //maxThreadsPerCPU
-#include "mem/cache/base.hh"
-#include "sim/sim_exit.hh"
+#include <cassert>
 
-using namespace std;
+#include "base/types.hh"
+#include "mem/cache/replacement_policies/replaceable_entry.hh"
+#include "mem/cache/tags/indexing_policies/base.hh"
+#include "mem/request.hh"
+#include "sim/core.hh"
+#include "sim/sim_exit.hh"
+#include "sim/system.hh"
 
 BaseTags::BaseTags(const Params *p)
     : ClockedObject(p), blkSize(p->block_size), blkMask(blkSize - 1),
-      size(p->size),
-      lookupLatency(p->tag_latency),
-      accessLatency(p->sequential_access ?
-                    p->tag_latency + p->data_latency :
-                    std::max(p->tag_latency, p->data_latency)),
-      cache(nullptr), warmupBound(0),
-      warmedUp(false), numBlocks(0)
+      size(p->size), lookupLatency(p->tag_latency),
+      system(p->system), indexingPolicy(p->indexing_policy),
+      warmupBound((p->warmup_percentage/100.0) * (p->size / p->block_size)),
+      warmedUp(false), numBlocks(p->size / p->block_size),
+      dataBlks(new uint8_t[p->size]) // Allocate data storage in one big chunk
 {
 }
 
-void
-BaseTags::setCache(BaseCache *_cache)
+ReplaceableEntry*
+BaseTags::findBlockBySetAndWay(int set, int way) const
 {
-    assert(!cache);
-    cache = _cache;
+    return indexingPolicy->getEntry(set, way);
+}
+
+CacheBlk*
+BaseTags::findBlock(Addr addr, bool is_secure) const
+{
+    // Extract block tag
+    Addr tag = extractTag(addr);
+
+    // Find possible entries that may contain the given address
+    const std::vector<ReplaceableEntry*> entries =
+        indexingPolicy->getPossibleEntries(addr);
+
+    // Search for block
+    for (const auto& location : entries) {
+        CacheBlk* blk = static_cast<CacheBlk*>(location);
+        if ((blk->tag == tag) && blk->isValid() &&
+            (blk->isSecure() == is_secure)) {
+            return blk;
+        }
+    }
+
+    // Did not find block
+    return nullptr;
+}
+
+void
+BaseTags::insertBlock(const Addr addr, const bool is_secure,
+                      const int src_master_ID, const uint32_t task_ID,
+                      CacheBlk *blk)
+{
+    assert(!blk->isValid());
+
+    // Previous block, if existed, has been removed, and now we have
+    // to insert the new one
+    // Deal with what we are bringing in
+    assert(src_master_ID < system->maxMasters());
+    occupancies[src_master_ID]++;
+
+    // Insert block with tag, src master id and task id
+    blk->insert(extractTag(addr), is_secure, src_master_ID, task_ID);
+
+    // Check if cache warm up is done
+    if (!warmedUp && tagsInUse.value() >= warmupBound) {
+        warmedUp = true;
+        warmupCycle = curTick();
+    }
+
+    // We only need to write into one tag and one data block.
+    tagAccesses += 1;
+    dataAccesses += 1;
+}
+
+Addr
+BaseTags::extractTag(const Addr addr) const
+{
+    return indexingPolicy->extractTag(addr);
+}
+
+void
+BaseTags::cleanupRefsVisitor(CacheBlk &blk)
+{
+    if (blk.isValid()) {
+        totalRefs += blk.refCount;
+        ++sampledRefs;
+    }
+}
+
+void
+BaseTags::cleanupRefs()
+{
+    forEachBlk([this](CacheBlk &blk) { cleanupRefsVisitor(blk); });
+}
+
+void
+BaseTags::computeStatsVisitor(CacheBlk &blk)
+{
+    if (blk.isValid()) {
+        assert(blk.task_id < ContextSwitchTaskId::NumTaskId);
+        occupanciesTaskId[blk.task_id]++;
+        assert(blk.tickInserted <= curTick());
+        Tick age = curTick() - blk.tickInserted;
+
+        int age_index;
+        if (age / SimClock::Int::us < 10) { // <10us
+            age_index = 0;
+        } else if (age / SimClock::Int::us < 100) { // <100us
+            age_index = 1;
+        } else if (age / SimClock::Int::ms < 1) { // <1ms
+            age_index = 2;
+        } else if (age / SimClock::Int::ms < 10) { // <10ms
+            age_index = 3;
+        } else
+            age_index = 4; // >10ms
+
+        ageTaskId[blk.task_id][age_index]++;
+    }
+}
+
+void
+BaseTags::computeStats()
+{
+    for (unsigned i = 0; i < ContextSwitchTaskId::NumTaskId; ++i) {
+        occupanciesTaskId[i] = 0;
+        for (unsigned j = 0; j < 5; ++j) {
+            ageTaskId[i][j] = 0;
+        }
+    }
+
+    forEachBlk([this](CacheBlk &blk) { computeStatsVisitor(blk); });
+}
+
+std::string
+BaseTags::print()
+{
+    std::string str;
+
+    auto print_blk = [&str](CacheBlk &blk) {
+        if (blk.isValid())
+            str += csprintf("\tBlock: %s\n", blk.print());
+    };
+    forEachBlk(print_blk);
+
+    if (str.empty())
+        str = "no valid tags\n";
+
+    return str;
 }
 
 void
@@ -79,13 +206,6 @@ BaseTags::regStats()
     ClockedObject::regStats();
 
     using namespace Stats;
-
-    replacements
-        .init(maxThreadsPerCPU)
-        .name(name() + ".replacements")
-        .desc("number of replacements")
-        .flags(total)
-        ;
 
     tagsInUse
         .name(name() + ".tagsinuse")
@@ -115,13 +235,13 @@ BaseTags::regStats()
         ;
 
     occupancies
-        .init(cache->system->maxMasters())
+        .init(system->maxMasters())
         .name(name() + ".occ_blocks")
         .desc("Average occupied blocks per requestor")
         .flags(nozero | nonan)
         ;
-    for (int i = 0; i < cache->system->maxMasters(); i++) {
-        occupancies.subname(i, cache->system->getMasterName(i));
+    for (int i = 0; i < system->maxMasters(); i++) {
+        occupancies.subname(i, system->getMasterName(i));
     }
 
     avgOccs
@@ -129,8 +249,8 @@ BaseTags::regStats()
         .desc("Average percentage of cache occupancy")
         .flags(nozero | total)
         ;
-    for (int i = 0; i < cache->system->maxMasters(); i++) {
-        avgOccs.subname(i, cache->system->getMasterName(i));
+    for (int i = 0; i < system->maxMasters(); i++) {
+        avgOccs.subname(i, system->getMasterName(i));
     }
 
     avgOccs = occupancies / Stats::constant(numBlocks);

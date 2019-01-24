@@ -299,15 +299,16 @@ RubyPort::MemSlavePort::recvTimingReq(PacketPtr pkt)
         // route the response
         pkt->pushSenderState(new SenderState(this));
 
-        DPRINTF(RubyPort, "Request %s 0x%x issued\n", pkt->cmdString(),
+        DPRINTF(RubyPort, "Request %s address %#x issued\n", pkt->cmdString(),
                 pkt->getAddr());
         return true;
     }
 
     if (pkt->cmd != MemCmd::MemFenceReq) {
         DPRINTF(RubyPort,
-                "Request for address %#x did not issued because %s\n",
-                pkt->getAddr(), RequestStatus_to_string(requestStatus));
+                "Request %s for address %#x did not issue because %s\n",
+                pkt->cmdString(), pkt->getAddr(),
+                RequestStatus_to_string(requestStatus));
     }
 
     addToRetryList();
@@ -607,11 +608,13 @@ RubyPort::ruby_eviction_callback(Addr address)
     // Allocate the invalidate request and packet on the stack, as it is
     // assumed they will not be modified or deleted by receivers.
     // TODO: should this really be using funcMasterId?
-    Request request(address, RubySystem::getBlockSizeBytes(), 0,
-                    Request::funcMasterId);
+    auto request = std::make_shared<Request>(
+        address, RubySystem::getBlockSizeBytes(), 0,
+        Request::funcMasterId);
+
     // Use a single packet to signal all snooping ports of the invalidation.
     // This assumes that snooping ports do NOT modify the packet/request
-    Packet pkt(&request, MemCmd::InvalidateReq);
+    Packet pkt(request, MemCmd::InvalidateReq);
     for (CpuPortIter p = slave_ports.begin(); p != slave_ports.end(); ++p) {
         // check if the connected master port is snooping
         if ((*p)->isSnooping()) {

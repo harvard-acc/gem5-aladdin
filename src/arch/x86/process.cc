@@ -244,12 +244,9 @@ X86_64Process::initState()
         initDesc.p = 1;               // present
         initDesc.l = 1;               // longmode - 64 bit
         initDesc.d = 0;               // operand size
-        initDesc.g = 1;               // granularity
         initDesc.s = 1;               // system segment
-        initDesc.limitHigh = 0xFFFF;
-        initDesc.limitLow = 0xF;
-        initDesc.baseHigh = 0x0;
-        initDesc.baseLow = 0x0;
+        initDesc.limit = 0xFFFFFFFF;
+        initDesc.base = 0;
 
         //64 bit code segment
         SegDescriptor csLowPLDesc = initDesc;
@@ -320,11 +317,8 @@ X86_64Process::initState()
         TSSDescLow.type = 0xB;
         TSSDescLow.dpl = 0; // Privelege level 0
         TSSDescLow.p = 1; // Present
-        TSSDescLow.g = 1; // Page granularity
-        TSSDescLow.limitHigh = 0xF;
-        TSSDescLow.limitLow = 0xFFFF;
-        TSSDescLow.baseLow = bits(TSSVirtAddr, 23, 0);
-        TSSDescLow.baseHigh = bits(TSSVirtAddr, 31, 24);
+        TSSDescLow.limit = 0xFFFFFFFF;
+        TSSDescLow.base = bits(TSSVirtAddr, 31, 0);
 
         TSShigh TSSDescHigh = 0;
         TSSDescHigh.base = bits(TSSVirtAddr, 63, 32);
@@ -342,10 +336,8 @@ X86_64Process::initState()
         SegSelector tssSel = 0;
         tssSel.si = numGDTEntries - 1;
 
-        uint64_t tss_base_addr = (TSSDescHigh.base << 32) |
-                                 (TSSDescLow.baseHigh << 24) |
-                                  TSSDescLow.baseLow;
-        uint64_t tss_limit = TSSDescLow.limitLow | (TSSDescLow.limitHigh << 16);
+        uint64_t tss_base_addr = (TSSDescHigh.base << 32) | TSSDescLow.base;
+        uint64_t tss_limit = TSSDescLow.limit;
 
         SegAttr tss_attr = 0;
 
@@ -1008,20 +1000,22 @@ X86Process::argsInit(int pageSize,
     initVirtMem.writeString(file_name_base, filename.c_str());
 
     // Fix up the aux vectors which point to data
-    assert(auxv[auxv.size() - 3].a_type == M5_AT_RANDOM);
-    auxv[auxv.size() - 3].a_val = aux_data_base;
-    assert(auxv[auxv.size() - 2].a_type == M5_AT_EXECFN);
-    auxv[auxv.size() - 2].a_val = argv_array_base;
-    assert(auxv[auxv.size() - 1].a_type == M5_AT_PLATFORM);
-    auxv[auxv.size() - 1].a_val = aux_data_base + numRandomBytes;
+    assert(auxv[auxv.size() - 3].getHostAuxType() == M5_AT_RANDOM);
+    auxv[auxv.size() - 3].setAuxVal(aux_data_base);
+    assert(auxv[auxv.size() - 2].getHostAuxType() == M5_AT_EXECFN);
+    auxv[auxv.size() - 2].setAuxVal(argv_array_base);
+    assert(auxv[auxv.size() - 1].getHostAuxType() == M5_AT_PLATFORM);
+    auxv[auxv.size() - 1].setAuxVal(aux_data_base + numRandomBytes);
 
 
     // Copy the aux stuff
     for (int x = 0; x < auxv.size(); x++) {
         initVirtMem.writeBlob(auxv_array_base + x * 2 * intSize,
-                (uint8_t*)&(auxv[x].a_type), intSize);
+                              (uint8_t*)&(auxv[x].getAuxType()),
+                              intSize);
         initVirtMem.writeBlob(auxv_array_base + (x * 2 + 1) * intSize,
-                (uint8_t*)&(auxv[x].a_val), intSize);
+                              (uint8_t*)&(auxv[x].getAuxVal()),
+                              intSize);
     }
     // Write out the terminating zeroed auxiliary vector
     const uint64_t zero = 0;

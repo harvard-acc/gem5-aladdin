@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2010-2011,2016 ARM Limited
+// Copyright (c) 2010-2011, 2016-2018 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -130,7 +130,7 @@ let {{
                     width = 1;
                     break;
                 }
-                // Fall through on purpose.
+                M5_FALLTHROUGH;
               default:
                 return new Unknown(machInst);
             }
@@ -404,6 +404,8 @@ let {{
                         } else {
                             return new VbifD<uint64_t>(machInst, vd, vn, vm);
                         }
+                      default:
+                        M5_UNREACHABLE;
                     }
                 } else {
                     switch (c) {
@@ -445,6 +447,8 @@ let {{
                             return new VornD<uint64_t>(
                                     machInst, vd, vn, vm);
                         }
+                      default:
+                        M5_UNREACHABLE;
                     }
                 }
             }
@@ -600,6 +604,34 @@ let {{
                         } else {
                             return new NVfmsDFp<float>(machInst, vd, vn, vm);
                         }
+                    }
+                }
+            } else {
+                if (u) {
+                    switch (c) {
+                      case 0x0:
+                        return new SHA256H(machInst, vd, vn, vm);
+                      case 0x1:
+                        return new SHA256H2(machInst, vd, vn, vm);
+                      case 0x2:
+                        return new SHA256SU1(machInst, vd, vn, vm);
+                      case 0x3:
+                        return new Unknown(machInst);
+                      default:
+                        M5_UNREACHABLE;
+                    }
+                } else {
+                    switch (c) {
+                      case 0x0:
+                        return new SHA1C(machInst, vd, vn, vm);
+                      case 0x1:
+                        return new SHA1P(machInst, vd, vn, vm);
+                      case 0x2:
+                        return new SHA1M(machInst, vd, vn, vm);
+                      case 0x3:
+                        return new SHA1SU0(machInst, vd, vn, vm);
+                      default:
+                        M5_UNREACHABLE;
                     }
                 }
             }
@@ -1444,6 +1476,18 @@ let {{
               case 0x5:
                 return decodeNeonUTwoMiscSReg<NVpaddlD, NVpaddlQ>(
                         q, size, machInst, vd, vm);
+              case 0x6:
+                if (q == 0) {
+                    return new AESE(machInst, vd, vd, vm);
+                } else {
+                    return new AESD(machInst, vd, vd, vm);
+                }
+              case 0x7:
+                if (q == 0) {
+                    return new AESMC(machInst, vd, vm);
+                } else {
+                    return new AESIMC(machInst, vd, vm);
+                }
               case 0x8:
                 return decodeNeonSTwoMiscReg<NVclsD, NVclsQ>(
                         q, size, machInst, vd, vm);
@@ -1530,6 +1574,12 @@ let {{
                     return decodeNeonSTwoMiscReg<NVcltD, NVcltQ>(
                             q, size, machInst, vd, vm);
                 }
+              case 0x5:
+                if (q) {
+                    return new SHA1H(machInst, vd, vm);
+                } else {
+                    return new Unknown(machInst);
+                }
               case 0x6:
                 if (bits(machInst, 10)) {
                     if (q)
@@ -1550,6 +1600,8 @@ let {{
                     return decodeNeonSTwoMiscReg<NVnegD, NVnegQ>(
                             q, size, machInst, vd, vm);
                 }
+              default:
+                return new Unknown64(machInst);
             }
           case 0x2:
             switch (bits(b, 4, 1)) {
@@ -1589,6 +1641,12 @@ let {{
                             size, machInst, vd, vm, 8 << size);
                 } else {
                     return new Unknown(machInst);
+                }
+              case 0x7:
+                if (q) {
+                    return new SHA256SU0(machInst, vd, vm);
+                } else {
+                    return new SHA1SU1(machInst, vd, vm);
                 }
               case 0xc:
               case 0xe:
@@ -1859,6 +1917,8 @@ let {{
                     // If rn == sp, then this is called vpop.
                     return new VLdmStm(machInst, rn, vd, single,
                                        true, true, true, offset);
+                  default:
+                    M5_UNREACHABLE;
                 }
             }
           case 0x2:
@@ -1870,7 +1930,7 @@ let {{
                 return new VLdmStm(machInst, rn, vd, single,
                                    false, true, true, offset);
             }
-            // Fall through on purpose
+            M5_FALLTHROUGH;
           case 0x3:
             const bool up = (bits(machInst, 23) == 1);
             const uint32_t imm = bits(machInst, 7, 0) << 2;
@@ -2393,11 +2453,11 @@ let {{
                 const uint32_t baseImm =
                     bits(machInst, 3, 0) | (bits(machInst, 19, 16) << 4);
                 if (single) {
-                    uint32_t imm = vfp_modified_imm(baseImm, false);
+                    uint32_t imm = vfp_modified_imm(baseImm, FpDataType::Fp32);
                     return decodeVfpRegImmOp<VmovImmS>(
                             machInst, vd, imm, false);
                 } else {
-                    uint64_t imm = vfp_modified_imm(baseImm, true);
+                    uint64_t imm = vfp_modified_imm(baseImm, FpDataType::Fp64);
                     return decodeVfpRegImmOp<VmovImmD>(
                             machInst, vd, imm, true);
                 }

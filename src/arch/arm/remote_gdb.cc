@@ -1,7 +1,7 @@
 /*
  * Copyright 2015 LabWare
  * Copyright 2014 Google Inc.
- * Copyright (c) 2010, 2013, 2016 ARM Limited
+ * Copyright (c) 2010, 2013, 2016, 2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -150,6 +150,12 @@
 #include "base/remote_gdb.hh"
 #include "base/socket.hh"
 #include "base/trace.hh"
+#include "blobs/gdb_xml_aarch64_core.hh"
+#include "blobs/gdb_xml_aarch64_fpu.hh"
+#include "blobs/gdb_xml_aarch64_target.hh"
+#include "blobs/gdb_xml_arm_core.hh"
+#include "blobs/gdb_xml_arm_target.hh"
+#include "blobs/gdb_xml_arm_vfpv3.hh"
 #include "cpu/static_inst.hh"
 #include "cpu/thread_context.hh"
 #include "cpu/thread_state.hh"
@@ -203,16 +209,16 @@ RemoteGDB::AArch64GdbRegCache::getRegs(ThreadContext *context)
     r.pc = context->pcState().pc();
     r.cpsr = context->readMiscRegNoEffect(MISCREG_CPSR);
 
-    for (int i = 0; i < 32*4; i += 4) {
-        r.v[i + 0] = context->readFloatRegBits(i + 2);
-        r.v[i + 1] = context->readFloatRegBits(i + 3);
-        r.v[i + 2] = context->readFloatRegBits(i + 0);
-        r.v[i + 3] = context->readFloatRegBits(i + 1);
+    size_t base = 0;
+    for (int i = 0; i < NumVecV8ArchRegs; i++) {
+        auto v = (context->readVecReg(RegId(VecRegClass, i))).as<VecElem>();
+        for (size_t j = 0; j < NumVecElemPerVecReg; j++) {
+            r.v[base] = v[j];
+            base++;
+        }
     }
-
-    for (int i = 0; i < 32; i ++) {
-        r.vec[i] = context->readVecReg(RegId(VecRegClass,i));
-    }
+    r.fpsr = context->readMiscRegNoEffect(MISCREG_FPSR);
+    r.fpcr = context->readMiscRegNoEffect(MISCREG_FPCR);
 }
 
 void
@@ -222,23 +228,26 @@ RemoteGDB::AArch64GdbRegCache::setRegs(ThreadContext *context) const
 
     for (int i = 0; i < 31; ++i)
         context->setIntReg(INTREG_X0 + i, r.x[i]);
-    context->pcState(r.pc);
+    auto pc_state = context->pcState();
+    pc_state.set(r.pc);
+    context->pcState(pc_state);
     context->setMiscRegNoEffect(MISCREG_CPSR, r.cpsr);
     // Update the stack pointer. This should be done after
     // updating CPSR/PSTATE since that might affect how SPX gets
     // mapped.
     context->setIntReg(INTREG_SPX, r.spx);
 
-    for (int i = 0; i < 32*4; i += 4) {
-        context->setFloatRegBits(i + 2, r.v[i + 0]);
-        context->setFloatRegBits(i + 3, r.v[i + 1]);
-        context->setFloatRegBits(i + 0, r.v[i + 2]);
-        context->setFloatRegBits(i + 1, r.v[i + 3]);
+    size_t base = 0;
+    for (int i = 0; i < NumVecV8ArchRegs; i++) {
+        auto v = (context->getWritableVecReg(
+                RegId(VecRegClass, i))).as<VecElem>();
+        for (size_t j = 0; j < NumVecElemPerVecReg; j++) {
+            v[j] = r.v[base];
+            base++;
+        }
     }
-
-    for (int i = 0; i < 32; i ++) {
-        context->setVecReg(RegId(VecRegClass, i), r.vec[i]);
-    }
+    context->setMiscRegNoEffect(MISCREG_FPSR, r.fpsr);
+    context->setMiscRegNoEffect(MISCREG_FPCR, r.fpcr);
 }
 
 void
@@ -262,12 +271,13 @@ RemoteGDB::AArch32GdbRegCache::getRegs(ThreadContext *context)
     r.gpr[13] = context->readIntReg(INTREG_SP);
     r.gpr[14] = context->readIntReg(INTREG_LR);
     r.gpr[15] = context->pcState().pc();
+    r.cpsr = context->readMiscRegNoEffect(MISCREG_CPSR);
 
     // One day somebody will implement transfer of FPRs correctly.
-    for (int i=0; i<8*3; i++) r.fpr[i] = 0;
+    for (int i = 0; i < 32; i++)
+        r.fpr[i] = 0;
 
     r.fpscr = context->readMiscRegNoEffect(MISCREG_FPSCR);
-    r.cpsr = context->readMiscRegNoEffect(MISCREG_CPSR);
 }
 
 void
@@ -290,12 +300,39 @@ RemoteGDB::AArch32GdbRegCache::setRegs(ThreadContext *context) const
     context->setIntReg(INTREG_R12, r.gpr[12]);
     context->setIntReg(INTREG_SP, r.gpr[13]);
     context->setIntReg(INTREG_LR, r.gpr[14]);
-    context->pcState(r.gpr[15]);
+    auto pc_state = context->pcState();
+    pc_state.set(r.gpr[15]);
+    context->pcState(pc_state);
 
     // One day somebody will implement transfer of FPRs correctly.
 
     context->setMiscReg(MISCREG_FPSCR, r.fpscr);
     context->setMiscRegNoEffect(MISCREG_CPSR, r.cpsr);
+}
+
+bool
+RemoteGDB::getXferFeaturesRead(const std::string &annex, std::string &output)
+{
+#define GDB_XML(x, s) \
+        { x, std::string(reinterpret_cast<const char *>(Blobs::s), \
+        Blobs::s ## _len) }
+    static const std::map<std::string, std::string> annexMap32{
+        GDB_XML("target.xml", gdb_xml_arm_target),
+        GDB_XML("arm-core.xml", gdb_xml_arm_core),
+        GDB_XML("arm-vfpv3.xml", gdb_xml_arm_vfpv3),
+    };
+    static const std::map<std::string, std::string> annexMap64{
+        GDB_XML("target.xml", gdb_xml_aarch64_target),
+        GDB_XML("aarch64-core.xml", gdb_xml_aarch64_core),
+        GDB_XML("aarch64-fpu.xml", gdb_xml_aarch64_fpu),
+    };
+#undef GDB_XML
+    auto& annexMap = inAArch64(context()) ? annexMap64 : annexMap32;
+    auto it = annexMap.find(annex);
+    if (it == annexMap.end())
+        return false;
+    output = it->second;
+    return true;
 }
 
 BaseGdbRegCache*

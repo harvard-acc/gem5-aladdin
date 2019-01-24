@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2013,2016-2017 ARM Limited
+ * Copyright (c) 2010-2013,2016-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -179,7 +179,7 @@ class ArmStaticInst : public StaticInst
     void printExtendOperand(bool firstOperand, std::ostream &os,
                             IntRegIndex rm, ArmExtendType type,
                             int64_t shiftAmt) const;
-
+    void printPFflags(std::ostream &os, int flag) const;
 
     void printDataInst(std::ostream &os, bool withImm) const;
     void printDataInst(std::ostream &os, bool withImm, bool immShift, bool s,
@@ -188,12 +188,13 @@ class ArmStaticInst : public StaticInst
                        uint64_t imm) const;
 
     void
-    advancePC(PCState &pcState) const
+    advancePC(PCState &pcState) const override
     {
         pcState.advance();
     }
 
-    std::string generateDisassembly(Addr pc, const SymbolTable *symtab) const;
+    std::string generateDisassembly(
+            Addr pc, const SymbolTable *symtab) const override;
 
     static inline uint32_t
     cpsrWriteByInstr(CPSR cpsr, uint32_t val, SCR scr, NSACR nsacr,
@@ -229,7 +230,7 @@ class ArmStaticInst : public StaticInst
                 // Now check the new mode is allowed
                 OperatingMode newMode = (OperatingMode) (val & mask(5));
                 OperatingMode oldMode = (OperatingMode)(uint32_t)cpsr.mode;
-                if (!badMode(newMode)) {
+                if (!badMode(tc, newMode)) {
                     bool validModeChange = true;
                     // Check for attempts to enter modes only permitted in
                     // Secure state from Non-secure state. These are Monitor
@@ -370,6 +371,14 @@ class ArmStaticInst : public StaticInst
                        ExceptionLevel targetEL, bool isWfe) const;
 
     /**
+     * Trigger a Software Breakpoint.
+     *
+     * See aarch32/exceptions/debug/AArch32.SoftwareBreakpoint in the
+     * ARM ARM psueodcode library.
+     */
+    Fault softwareBreakpoint32(ExecContext *xc, uint16_t imm) const;
+
+    /**
      * Trap an access to Advanced SIMD or FP registers due to access
      * control bits.
      *
@@ -434,13 +443,48 @@ class ArmStaticInst : public StaticInst
     Fault trapWFx(ThreadContext *tc, CPSR cpsr, SCR scr, bool isWfe) const;
 
     /**
+     * Check if SETEND instruction execution in aarch32 should be trapped.
+     *
+     * See aarch32/exceptions/traps/AArch32.CheckSETENDEnabled in the
+     * ARM ARM pseudocode library.
+     */
+    Fault checkSETENDEnabled(ThreadContext *tc, CPSR cpsr) const;
+
+    /**
+     * UNDEFINED behaviour in AArch32
+     *
+     * See aarch32/exceptions/traps/AArch32.UndefinedFault in the
+     * ARM ARM pseudocode library.
+     */
+    Fault undefinedFault32(ThreadContext *tc, ExceptionLevel el) const;
+
+    /**
+     * UNDEFINED behaviour in AArch64
+     *
+     * See aarch64/exceptions/traps/AArch64.UndefinedFault in the
+     * ARM ARM pseudocode library.
+     */
+    Fault undefinedFault64(ThreadContext *tc, ExceptionLevel el) const;
+
+    /**
      * Get the new PSTATE from a SPSR register in preparation for an
      * exception return.
      *
      * See shared/functions/system/SetPSTATEFromPSR in the ARM ARM
-     * psueodcode library.
+     * pseudocode library.
      */
     CPSR getPSTATEFromPSR(ThreadContext *tc, CPSR cpsr, CPSR spsr) const;
+
+    /**
+     * Return true if exceptions normally routed to EL1 are being handled
+     * at an Exception level using AArch64, because either EL1 is using
+     * AArch64 or TGE is in force and EL2 is using AArch64.
+     *
+     * See aarch32/exceptions/exceptions/AArch32.GeneralExceptionsToAArch64
+     * in the ARM ARM pseudocode library.
+     */
+    bool generalExceptionsToAArch64(ThreadContext *tc,
+                                    ExceptionLevel pstateEL) const;
 
   public:
     virtual void
@@ -469,6 +513,12 @@ class ArmStaticInst : public StaticInst
     encoding() const
     {
         return static_cast<MachInst>(machInst & (mask(instSize() * 8)));
+    }
+
+    size_t
+    asBytes(void *buf, size_t max_size) override
+    {
+        return simpleAsBytes(buf, max_size, machInst);
     }
 };
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python2.7
 #
 # Copyright (c) 2016 ARM Limited
 # All rights reserved
@@ -36,6 +36,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Authors: Andreas Sandberg
+
+from __future__ import print_function
 
 import subprocess
 from threading import Timer
@@ -187,4 +189,4 @@ if __name__ == "__main__":
     ignore_list.rules.append(FileIgnoreList.simple("bar.txt"))
     assert "bar.txt" in ignore_list
 
-    print "SUCCESS!"
+    print("SUCCESS!")

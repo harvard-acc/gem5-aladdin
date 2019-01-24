@@ -42,6 +42,8 @@
 #
 # "m5 test.py"
 
+from __future__ import print_function
+
 import optparse
 import sys
 import os
@@ -59,16 +61,10 @@ from common import Options
 from common import Simulation
 from common import CacheConfig
 from common import CpuConfig
+from common import BPConfig
 from common import MemConfig
 from common.Caches import *
 from common.cpu2000 import *
-
-# Check if KVM support has been enabled, we might need to do VM
-# configuration if that's the case.
-have_kvm_support = 'BaseKvmCPU' in globals()
-def is_kvm_cpu(cpu_class):
-    return have_kvm_support and cpu_class != None and \
-        issubclass(cpu_class, BaseKvmCPU)
 
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""
@@ -131,7 +127,7 @@ if '--ruby' in sys.argv:
 (options, args) = parser.parse_args()
 
 if args:
-    print "Error: script doesn't take any positional arguments"
+    print("Error: script doesn't take any positional arguments")
     sys.exit(1)
 
 multiprocesses = []
@@ -140,7 +136,7 @@ numThreads = 1
 if options.bench:
     apps = options.bench.split("-")
     if len(apps) != options.num_cpus:
-        print "number of benchmarks not equal to set num_cpus!"
+        print("number of benchmarks not equal to set num_cpus!")
         sys.exit(1)
 
     for app in apps:
@@ -156,13 +152,14 @@ if options.bench:
                         app, options.spec_input))
             multiprocesses.append(workload.makeProcess())
         except:
-            print >>sys.stderr, "Unable to find workload for %s: %s" % (
-                    buildEnv['TARGET_ISA'], app)
+            print("Unable to find workload for %s: %s" %
+                  (buildEnv['TARGET_ISA'], app),
+                  file=sys.stderr)
             sys.exit(1)
 elif options.cmd:
     multiprocesses, numThreads = get_processes(options)
 else:
-    print >> sys.stderr, "No workload specified. Exiting!\n"
+    print("No workload specified. Exiting!\n", file=sys.stderr)
     sys.exit(1)
 
 
@@ -207,7 +204,7 @@ if options.elastic_trace_en:
 for cpu in system.cpu:
     cpu.clk_domain = system.cpu_clk_domain
 
-if is_kvm_cpu(CPUClass) or is_kvm_cpu(FutureClass):
+if CpuConfig.is_kvm_cpu(CPUClass) or CpuConfig.is_kvm_cpu(FutureClass):
     if buildEnv['TARGET_ISA'] == 'x86':
         system.kvm_vm = KvmVM()
         for process in multiprocesses:
@@ -217,16 +214,9 @@ if is_kvm_cpu(CPUClass) or is_kvm_cpu(FutureClass):
         fatal("KvmCPU can only be used in SE mode with x86")
 
 # Sanity check
-if options.fastmem:
-    if CPUClass != AtomicSimpleCPU:
-        fatal("Fastmem can only be used with atomic CPU!")
-    if (options.caches or options.l2cache):
-        fatal("You cannot use fastmem in combination with caches!")
-
 if options.simpoint_profile:
-    if not options.fastmem:
-        # Atomic CPU checked with fastmem option already
-        fatal("SimPoint generation should be done with atomic cpu and fastmem")
+    if not CpuConfig.is_atomic_cpu(CPUClass):
+        fatal("SimPoint/BPProbe should be done with an atomic cpu")
     if np > 1:
         fatal("SimPoint generation not supported with more than one CPUs")
 
@@ -238,14 +228,15 @@ for i in xrange(np):
     else:
         system.cpu[i].workload = multiprocesses[i]
 
-    if options.fastmem:
-        system.cpu[i].fastmem = True
-
     if options.simpoint_profile:
         system.cpu[i].addSimPointProbe(options.simpoint_interval)
 
     if options.checker:
         system.cpu[i].addCheckerCpu()
+
+    if options.bp_type:
+        bpClass = BPConfig.get(options.bp_type)
+        system.cpu[i].branchPred = bpClass()
 
     system.cpu[i].createThreads()
 

@@ -79,9 +79,11 @@ namespace X86ISA
     static inline PacketPtr
     prepIntRequest(const uint8_t id, Addr offset, Addr size)
     {
-        RequestPtr req = new Request(x86InterruptAddress(id, offset),
-                                     size, Request::UNCACHEABLE,
-                                     Request::intMasterId);
+        RequestPtr req = std::make_shared<Request>(
+            x86InterruptAddress(id, offset),
+            size, Request::UNCACHEABLE,
+            Request::intMasterId);
+
         PacketPtr pkt = new Packet(req, MemCmd::MessageReq);
         pkt->allocate();
         return pkt;
@@ -92,7 +94,7 @@ namespace X86ISA
     buildIntRequest(const uint8_t id, T payload, Addr offset, Addr size)
     {
         PacketPtr pkt = prepIntRequest(id, offset, size);
-        pkt->set<T>(payload);
+        pkt->setRaw<T>(payload);
         return pkt;
     }
 

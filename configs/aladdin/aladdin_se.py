@@ -42,6 +42,8 @@
 #
 # "m5 test.py"
 
+from __future__ import print_function
+
 import ConfigParser
 import optparse
 import sys
@@ -58,6 +60,7 @@ from ruby import Ruby
 from common import Options
 from common import Simulation
 from common import CacheConfig
+from common import CpuConfig
 from common import MemConfig
 
 from common.Caches import *
@@ -131,7 +134,7 @@ if '--ruby' in sys.argv:
 (options, args) = parser.parse_args()
 
 if args:
-    print "Error: script doesn't take any positional arguments"
+    print("Error: script doesn't take any positional arguments")
     sys.exit(1)
 
 multiprocesses = []
@@ -142,7 +145,7 @@ if np > 0:
   if options.bench:
       apps = options.bench.split("-")
       if len(apps) != options.num_cpus:
-          print "number of benchmarks not equal to set num_cpus!"
+          print("number of benchmarks not equal to set num_cpus!")
           sys.exit(1)
 
       for app in apps:
@@ -285,19 +288,9 @@ if options.accel_cfg_file:
   for datapath in datapaths:
     setattr(system, datapath.acceleratorName, datapath)
 
-# Sanity check
-if options.fastmem:
-    if CPUClass != AtomicSimpleCPU:
-        fatal("Fastmem can only be used with atomic CPU!")
-    if (options.caches or options.l2cache):
-        fatal("You cannot use fastmem in combination with caches!")
-
 if options.simpoint_profile:
-    if not options.fastmem:
-        # Atomic CPU checked with fastmem option already
-        fatal("SimPoint generation should be done with atomic cpu and fastmem")
-    if np > 1:
-        fatal("SimPoint generation not supported with more than one CPUs")
+    if not CpuConfig.is_atomic_cpu(TestCPUClass):
+        fatal("SimPoint/BPProbe should be done with an atomic cpu")
 
 for i in xrange(np):
     if options.smt:
@@ -306,9 +299,6 @@ for i in xrange(np):
         system.cpu[i].workload = multiprocesses[0]
     else:
         system.cpu[i].workload = multiprocesses[i]
-
-    if options.fastmem:
-        system.cpu[i].fastmem = True
 
     if options.simpoint_profile:
         system.cpu[i].simpoint_profile = True

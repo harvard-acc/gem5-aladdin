@@ -46,6 +46,7 @@
 
 #include <list>
 
+#include "base/logging.hh"
 #include "cpu/o3/rob.hh"
 #include "debug/Fetch.hh"
 #include "debug/ROB.hh"
@@ -55,29 +56,21 @@ using namespace std;
 
 template <class Impl>
 ROB<Impl>::ROB(O3CPU *_cpu, DerivO3CPUParams *params)
-    : cpu(_cpu),
+    : robPolicy(params->smtROBPolicy),
+      cpu(_cpu),
       numEntries(params->numROBEntries),
       squashWidth(params->squashWidth),
       numInstsInROB(0),
       numThreads(params->numThreads)
 {
-    std::string policy = params->smtROBPolicy;
-
-    //Convert string to lowercase
-    std::transform(policy.begin(), policy.end(), policy.begin(),
-                   (int(*)(int)) tolower);
-
     //Figure out rob policy
-    if (policy == "dynamic") {
-        robPolicy = Dynamic;
-
+    if (robPolicy == SMTQueuePolicy::Dynamic) {
         //Set Max Entries to Total ROB Capacity
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             maxEntries[tid] = numEntries;
         }
 
-    } else if (policy == "partitioned") {
-        robPolicy = Partitioned;
+    } else if (robPolicy == SMTQueuePolicy::Partitioned) {
         DPRINTF(Fetch, "ROB sharing policy set to Partitioned\n");
 
         //@todo:make work if part_amt doesnt divide evenly.
@@ -88,8 +81,7 @@ ROB<Impl>::ROB(O3CPU *_cpu, DerivO3CPUParams *params)
             maxEntries[tid] = part_amt;
         }
 
-    } else if (policy == "threshold") {
-        robPolicy = Threshold;
+    } else if (robPolicy == SMTQueuePolicy::Threshold) {
         DPRINTF(Fetch, "ROB sharing policy set to Threshold\n");
 
         int threshold =  params->smtROBThreshold;;
@@ -98,9 +90,10 @@ ROB<Impl>::ROB(O3CPU *_cpu, DerivO3CPUParams *params)
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             maxEntries[tid] = threshold;
         }
-    } else {
-        assert(0 && "Invalid ROB Sharing Policy.Options Are:{Dynamic,"
-                    "Partitioned, Threshold}");
+    }
+
+    for (ThreadID tid = numThreads; tid < Impl::MaxThreads; tid++) {
+        maxEntries[tid] = 0;
     }
 
     resetState();
@@ -110,11 +103,11 @@ template <class Impl>
 void
 ROB<Impl>::resetState()
 {
-    for (ThreadID tid = 0; tid  < numThreads; tid++) {
-        doneSquashing[tid] = true;
+    for (ThreadID tid = 0; tid  < Impl::MaxThreads; tid++) {
         threadEntries[tid] = 0;
         squashIt[tid] = instList[tid].end();
         squashedSeqNum[tid] = 0;
+        doneSquashing[tid] = true;
     }
     numInstsInROB = 0;
 
@@ -159,7 +152,7 @@ template <class Impl>
 void
 ROB<Impl>::resetEntries()
 {
-    if (robPolicy != Dynamic || numThreads > 1) {
+    if (robPolicy != SMTQueuePolicy::Dynamic || numThreads > 1) {
         int active_threads = activeThreads->size();
 
         list<ThreadID>::iterator threads = activeThreads->begin();
@@ -168,9 +161,10 @@ ROB<Impl>::resetEntries()
         while (threads != end) {
             ThreadID tid = *threads++;
 
-            if (robPolicy == Partitioned) {
+            if (robPolicy == SMTQueuePolicy::Partitioned) {
                 maxEntries[tid] = numEntries / active_threads;
-            } else if (robPolicy == Threshold && active_threads == 1) {
+            } else if (robPolicy == SMTQueuePolicy::Threshold &&
+                       active_threads == 1) {
                 maxEntries[tid] = numEntries;
             }
         }
@@ -181,7 +175,7 @@ template <class Impl>
 int
 ROB<Impl>::entryAmount(ThreadID num_threads)
 {
-    if (robPolicy == Partitioned) {
+    if (robPolicy == SMTQueuePolicy::Partitioned) {
         return numEntries / num_threads;
     } else {
         return 0;
@@ -209,7 +203,7 @@ ROB<Impl>::countInsts(ThreadID tid)
 
 template <class Impl>
 void
-ROB<Impl>::insertInst(DynInstPtr &inst)
+ROB<Impl>::insertInst(const DynInstPtr &inst)
 {
     assert(inst);
 
@@ -252,10 +246,11 @@ ROB<Impl>::retireHead(ThreadID tid)
 
     assert(numInstsInROB > 0);
 
-    // Get the head ROB instruction.
+    // Get the head ROB instruction by copying it and remove it from the list
     InstIt head_it = instList[tid].begin();
 
-    DynInstPtr head_inst = (*head_it);
+    DynInstPtr head_inst = std::move(*head_it);
+    instList[tid].erase(head_it);
 
     assert(head_inst->readyToCommit());
 
@@ -268,8 +263,6 @@ ROB<Impl>::retireHead(ThreadID tid)
 
     head_inst->clearInROB();
     head_inst->setCommitted();
-
-    instList[tid].erase(head_it);
 
     //Update "Global" Head of ROB
     updateHead();
@@ -513,7 +506,7 @@ ROB<Impl>::squash(InstSeqNum squash_num, ThreadID tid)
 }
 
 template <class Impl>
-typename Impl::DynInstPtr
+const typename Impl::DynInstPtr&
 ROB<Impl>::readHeadInst(ThreadID tid)
 {
     if (threadEntries[tid] != 0) {

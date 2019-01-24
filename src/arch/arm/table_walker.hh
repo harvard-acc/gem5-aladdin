@@ -761,11 +761,6 @@ class TableWalker : public MemObject
         /** Flag indicating if a second stage of lookup is required */
         bool stage2Req;
 
-        /** Indicates whether the translation has been passed onto the second
-         *  stage mmu, and no more work is required from the first stage.
-         */
-        bool doingStage2;
-
         /** A pointer to the stage 2 translation that's in progress */
         TLB::Translation *stage2Tran;
 
@@ -899,7 +894,8 @@ class TableWalker : public MemObject
 
     void regStats() override;
 
-    Fault walk(RequestPtr req, ThreadContext *tc, uint16_t asid, uint8_t _vmid,
+    Fault walk(const RequestPtr &req, ThreadContext *tc,
+               uint16_t asid, uint8_t _vmid,
                bool _isHyp, TLB::Mode mode, TLB::Translation *_trans,
                bool timing, bool functional, bool secure,
                TLB::ArmTranslationType tranType, bool _stage2Req);

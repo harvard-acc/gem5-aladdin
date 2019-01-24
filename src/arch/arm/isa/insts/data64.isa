@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2011-2013, 2016-2017 ARM Limited
+// Copyright (c) 2011-2013, 2016-2018 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -317,8 +317,7 @@ let {{
             if (flat_idx == MISCREG_DAIF ||
                 flat_idx == MISCREG_DC_ZVA_Xt ||
                 flat_idx == MISCREG_DC_CVAC_Xt ||
-                flat_idx == MISCREG_DC_CIVAC_Xt ||
-                flat_idx == MISCREG_DC_IVAC_Xt
+                flat_idx == MISCREG_DC_CIVAC_Xt
                 )
                 return std::make_shared<UndefinedInstruction>(
                                     machInst, 0, EC_TRAPPED_MSR_MRS_64,
@@ -327,29 +326,8 @@ let {{
                                                           mnemonic);
         }
 
-        // Check for traps to supervisor (FP/SIMD regs)
-        if (el <= EL1 && msrMrs64TrapToSup(flat_idx, el, Cpacr64))
-            return std::make_shared<SupervisorTrap>(machInst, 0x1E00000,
-                                                    EC_TRAPPED_SIMD_FP);
-
-        bool is_vfp_neon = false;
-
-        // Check for traps to hypervisor
-        if ((ArmSystem::haveVirtualization(xc->tcBase()) && el <= EL2) &&
-            msrMrs64TrapToHyp(flat_idx, el, %s, CptrEl264, Hcr64, &is_vfp_neon)) {
-            return std::make_shared<HypervisorTrap>(
-                machInst, is_vfp_neon ? 0x1E00000 : imm,
-                is_vfp_neon ? EC_TRAPPED_SIMD_FP : EC_TRAPPED_MSR_MRS_64);
-        }
-
-        // Check for traps to secure monitor
-        if ((ArmSystem::haveSecurity(xc->tcBase()) && el <= EL3) &&
-            msrMrs64TrapToMon(flat_idx, CptrEl364, el, &is_vfp_neon)) {
-            return std::make_shared<SecureMonitorTrap>(
-                machInst,
-                is_vfp_neon ? 0x1E00000 : imm,
-                is_vfp_neon ? EC_TRAPPED_SIMD_FP : EC_TRAPPED_MSR_MRS_64);
-        }
+        fault = this->trap(xc->tcBase(), flat_idx, el, imm);
+        if (fault != NoFault) return fault;
     '''
 
     mrsCode = '''
@@ -359,7 +337,7 @@ let {{
         ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
         %s
         XDest = MiscOp1_ud;
-    ''' % (msrMrs64EnabledCheckCode % ('Read', 'true'),)
+    ''' % (msrMrs64EnabledCheckCode % ('Read'),)
 
     mrsIop = InstObjParams("mrs", "Mrs64", "RegMiscRegImmOp64",
                            mrsCode,
@@ -383,7 +361,7 @@ let {{
         ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
         %s
         MiscDest_ud = XOp1;
-    ''' % (msrMrs64EnabledCheckCode % ('Write', 'false'),)
+    ''' % (msrMrs64EnabledCheckCode % ('Write'),)
 
     msrIop = InstObjParams("msr", "Msr64", "MiscRegRegImmOp64",
                            msrCode,
@@ -400,16 +378,19 @@ let {{
         CondCodesV = cpsr.v;
     ''')
 
-    msrdczva_ea_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->flattenRegId(
-                                   RegId(MiscRegClass, dest)).index();
+    msr_check_code = '''
+        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->
+            flattenRegId(RegId(MiscRegClass, dest)).index();
         CPSR cpsr = Cpsr;
         ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-    '''
+        %s
+    ''' % (msrMrs64EnabledCheckCode % ('Write'),)
 
-    msrdczva_ea_code += msrMrs64EnabledCheckCode % ('Write', 'false')
+
+    msrdczva_ea_code = msr_check_code
     msrdczva_ea_code += '''
-           Request::Flags memAccessFlags = Request::CACHE_BLOCK_ZERO|ArmISA::TLB::MustBeOne;
+           Request::Flags memAccessFlags = Request::CACHE_BLOCK_ZERO |
+               ArmISA::TLB::MustBeOne;
            EA = XBase;
            assert(!(Dczid & 0x10));
            uint64_t op_size = power(2, Dczid + 2);
@@ -417,10 +398,13 @@ let {{
 
    '''
 
-    msrDCZVAIop = InstObjParams("dczva", "Dczva", "SysDC64",
-                { "ea_code" : msrdczva_ea_code,
-                  "memacc_code" : ";", "use_uops" : 0,
-                  "op_wb" : ";", "fa_code" : ";"}, ['IsStore', 'IsMemRef']);
+    msrDCZVAIop = InstObjParams("dc zva", "Dczva", "SysDC64",
+                                { "ea_code" : msrdczva_ea_code,
+                                  "memacc_code" : ';',
+                                  "use_uops" : 0,
+                                  "op_wb" : ";",
+                                  "fa_code" : ";"},
+                                ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCZVAIop);
     decoder_output += DCStore64Constructor.subst(msrDCZVAIop);
     exec_output += DCStore64Execute.subst(msrDCZVAIop);
@@ -428,14 +412,7 @@ let {{
     exec_output += Store64CompleteAcc.subst(msrDCZVAIop);
 
 
-    msrdccvau_ea_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->flattenRegId(
-                                   RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-    '''
-
-    msrdccvau_ea_code += msrMrs64EnabledCheckCode % ('Write', 'false')
+    msrdccvau_ea_code = msr_check_code
     msrdccvau_ea_code += '''
            Request::Flags memAccessFlags = Request::CLEAN | Request::DST_POU |
               ArmISA::TLB::MustBeOne;
@@ -446,9 +423,11 @@ let {{
     '''
 
     msrDCCVAUIop = InstObjParams("dc cvau", "Dccvau", "SysDC64",
-                { "ea_code" : msrdccvau_ea_code,
-                  "memacc_code" : ";", "use_uops" : 0,
-                  "op_wb" : ";", "fa_code" : ";"}, ['IsStore', 'IsMemRef']);
+                                 { "ea_code" : msrdccvau_ea_code,
+                                   "memacc_code" : ';',
+                                   "use_uops" : 0,
+                                   "op_wb" : ";", "fa_code" : ";"},
+                                 ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCVAUIop);
     decoder_output += DCStore64Constructor.subst(msrDCCVAUIop);
     exec_output += DCStore64Execute.subst(msrDCCVAUIop);
@@ -456,14 +435,7 @@ let {{
     exec_output += Store64CompleteAcc.subst(msrDCCVAUIop);
 
 
-    msrdccvac_ea_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->flattenRegId(
-            RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-    '''
-
-    msrdccvac_ea_code += msrMrs64EnabledCheckCode % ('Write', 'false')
+    msrdccvac_ea_code = msr_check_code
     msrdccvac_ea_code += '''
            Request::Flags memAccessFlags = Request::CLEAN | Request::DST_POC |
               ArmISA::TLB::MustBeOne;
@@ -474,9 +446,11 @@ let {{
     '''
 
     msrDCCVACIop = InstObjParams("dc cvac", "Dccvac", "SysDC64",
-                { "ea_code" : msrdccvac_ea_code,
-                  "memacc_code" : ";", "use_uops" : 0,
-                  "op_wb" : ";", "fa_code" : ";"}, ['IsStore', 'IsMemRef']);
+                                 { "ea_code" : msrdccvac_ea_code,
+                                   "memacc_code" : ';',
+                                   "use_uops" : 0,
+                                   "op_wb" : ";", "fa_code" : ";"},
+                                 ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCCVACIop);
     exec_output += DCStore64Execute.subst(msrDCCVACIop);
@@ -484,14 +458,7 @@ let {{
     exec_output += Store64CompleteAcc.subst(msrDCCVACIop);
 
 
-    msrdccivac_ea_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->flattenRegId(
-                                   RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-    '''
-
-    msrdccivac_ea_code += msrMrs64EnabledCheckCode % ('Write', 'false')
+    msrdccivac_ea_code = msr_check_code
     msrdccivac_ea_code += '''
            Request::Flags memAccessFlags = Request::CLEAN |
               Request::INVALIDATE | Request::DST_POC | ArmISA::TLB::MustBeOne;
@@ -502,9 +469,11 @@ let {{
     '''
 
     msrDCCIVACIop = InstObjParams("dc civac", "Dccivac", "SysDC64",
-                { "ea_code" : msrdccivac_ea_code,
-                  "memacc_code" : ";", "use_uops" : 0,
-                  "op_wb" : ";", "fa_code" : ";"}, ['IsStore', 'IsMemRef']);
+                                  { "ea_code" : msrdccivac_ea_code,
+                                    "memacc_code" : ';',
+                                    "use_uops" : 0,
+                                    "op_wb" : ";", "fa_code" : ";"},
+                                  ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCIVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCCIVACIop);
     exec_output += DCStore64Execute.subst(msrDCCIVACIop);
@@ -512,27 +481,28 @@ let {{
     exec_output += Store64CompleteAcc.subst(msrDCCIVACIop);
 
 
-    msrdcivac_ea_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->flattenRegId(
-                                   RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-    '''
-
-    msrdcivac_ea_code += msrMrs64EnabledCheckCode % ('Write', 'false')
+    msrdcivac_ea_code = msr_check_code
     msrdcivac_ea_code += '''
            Request::Flags memAccessFlags = Request::INVALIDATE |
               Request::DST_POC | ArmISA::TLB::MustBeOne;
            EA = XBase;
+           HCR hcr = Hcr64;
+           SCR scr = Scr64;
+           if (el == EL1 && ArmSystem::haveVirtualization(xc->tcBase()) &&
+               hcr.vm && (scr.ns || !ArmSystem::haveSecurity(xc->tcBase()))) {
+               memAccessFlags = memAccessFlags | Request::CLEAN;
+           }
            System *sys = xc->tcBase()->getSystemPtr();
            Addr op_size = sys->cacheLineSize();
            EA &= ~(op_size - 1);
     '''
 
     msrDCIVACIop = InstObjParams("dc ivac", "Dcivac", "SysDC64",
-                { "ea_code" : msrdcivac_ea_code,
-                  "memacc_code" : ";", "use_uops" : 0,
-                  "op_wb" : ";", "fa_code" : ";"}, ['IsStore', 'IsMemRef']);
+                                 { "ea_code" : msrdcivac_ea_code,
+                                   "memacc_code" : ';',
+                                   "use_uops" : 0,
+                                   "op_wb" : ";", "fa_code" : ";"},
+                                 ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCIVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCIVACIop);
     exec_output += DCStore64Execute.subst(msrDCIVACIop);

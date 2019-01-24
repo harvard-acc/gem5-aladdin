@@ -28,6 +28,8 @@
 #
 # Authors: Nathan Binkert
 
+from __future__ import print_function
+
 import os
 import sys
 
@@ -38,6 +40,9 @@ import SCons
 from gem5_scons import Transform
 
 Import('*')
+
+if env['PROTOCOL'] == 'None':
+    Return()
 
 DebugFlag('ProtocolTrace')
 DebugFlag('RubyCache')
@@ -59,9 +64,6 @@ CompoundFlag('Ruby', [ 'RubyQueue', 'RubyNetwork', 'RubyTester',
     'RubyGenerated', 'RubySlicc', 'RubySystem', 'RubyCache',
     'RubyDma', 'RubyPort', 'RubySequencer', 'RubyCacheTrace',
     'RubyPrefetcher'])
-
-if env['PROTOCOL'] == 'None':
-    Return()
 
 def do_embed_text(target, source, env):
     """convert a text file into a file that can be embedded in C
@@ -101,7 +103,7 @@ generated_dir = Dir('../protocol')
 def MakeIncludeAction(target, source, env):
     f = file(str(target[0]), 'w')
     for s in source:
-        print >>f, '#include "%s"' % str(s.abspath)
+        print('#include "%s"' % str(s.abspath), file=f)
     f.close()
 
 def MakeInclude(source):

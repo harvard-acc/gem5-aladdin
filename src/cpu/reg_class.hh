@@ -82,8 +82,9 @@ class RegId {
     RegIndex regIdx;
     ElemIndex elemIdx;
     static constexpr size_t Scale = TheISA::NumVecElemPerVecReg;
+    friend struct std::hash<RegId>;
   public:
-    RegId() {};
+    RegId() : regClass(IntRegClass), regIdx(0), elemIdx(-1) {}
     RegId(RegClass reg_class, RegIndex reg_idx)
         : regClass(reg_class), regIdx(reg_idx), elemIdx(-1)
     {
@@ -131,7 +132,12 @@ class RegId {
      * constant zero value throughout the execution).
      */
 
-    inline bool isZeroReg() const;
+    inline bool isZeroReg() const
+    {
+        return ((regClass == IntRegClass && regIdx == TheISA::ZeroReg) ||
+               (THE_ISA == ALPHA_ISA && regClass == FloatRegClass &&
+                regIdx == TheISA::ZeroReg));
+    }
 
     /** @return true if it is an integer physical register. */
     bool isIntReg() const { return regClass == IntRegClass; }
@@ -167,7 +173,21 @@ class RegId {
     /** Index flattening.
      * Required to be able to use a vector for the register mapping.
      */
-    inline RegIndex flatIndex() const;
+    inline RegIndex flatIndex() const
+    {
+        switch (regClass) {
+          case IntRegClass:
+          case FloatRegClass:
+          case VecRegClass:
+          case CCRegClass:
+          case MiscRegClass:
+            return regIdx;
+          case VecElemClass:
+            return Scale*regIdx + elemIdx;
+        }
+        panic("Trying to flatten a register without class!");
+        return -1;
+    }
     /** @} */
 
     /** Elem accessor */
@@ -182,4 +202,33 @@ class RegId {
         return os << rid.className() << "{" << rid.index() << "}";
     }
 };
+
+namespace std
+{
+template<>
+struct hash<RegId>
+{
+    size_t operator()(const RegId& reg_id) const
+    {
+        // Extract unique integral values for the effective fields of a RegId.
+        const size_t flat_index = static_cast<size_t>(reg_id.flatIndex());
+        const size_t class_num = static_cast<size_t>(reg_id.regClass);
+
+        const size_t shifted_class_num = class_num << (sizeof(RegIndex) << 3);
+
+        // Concatenate the class_num to the end of the flat_index, in order to
+        // maximize information retained.
+        const size_t concatenated_hash = flat_index | shifted_class_num;
+
+        // If RegIndex is larger than size_t, then class_num will not be
+        // considered by this hash function, so we may wish to perform a
+        // different operation to include that information in the hash.
+        static_assert(sizeof(RegIndex) < sizeof(size_t),
+            "sizeof(RegIndex) should be less than sizeof(size_t)");
+
+        return concatenated_hash;
+    }
+};
+}
+
 #endif // __CPU__REG_CLASS_HH__

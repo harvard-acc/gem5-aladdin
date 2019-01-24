@@ -41,7 +41,9 @@
 #include <string>
 #include <vector>
 
+#include "arch/riscv/isa.hh"
 #include "arch/riscv/isa_traits.hh"
+#include "arch/riscv/registers.hh"
 #include "base/loader/elf_object.hh"
 #include "base/loader/object_file.hh"
 #include "base/logging.hh"
@@ -81,6 +83,8 @@ RiscvProcess::initState()
     Process::initState();
 
     argsInit<uint64_t>(PageBytes);
+    for (ContextID ctx: contextIds)
+        system->getThreadContext(ctx)->setMiscRegNoEffect(MISCREG_PRV, PRV_U);
 }
 
 template<class IntType> void
@@ -201,11 +205,11 @@ RiscvProcess::argsInit(int pageSize)
     };
     for (const AuxVector<IntType>& aux: auxv) {
         DPRINTF(Stack, "Wrote aux key %s to address %p\n",
-                aux_keys[aux.a_type], (void*)sp);
-        pushOntoStack((uint8_t*)&aux.a_type, sizeof(IntType));
+                aux_keys[aux.getAuxType()], (void*)sp);
+        pushOntoStack((uint8_t*)&aux.getAuxType(), sizeof(IntType));
         DPRINTF(Stack, "Wrote aux value %x to address %p\n",
-                aux.a_val, (void*)sp);
-        pushOntoStack((uint8_t*)&aux.a_val, sizeof(IntType));
+                aux.getAuxVal(), (void*)sp);
+        pushOntoStack((uint8_t*)&aux.getAuxVal(), sizeof(IntType));
     }
 
     ThreadContext *tc = system->getThreadContext(contextIds[0]);

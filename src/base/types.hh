@@ -165,6 +165,63 @@ isRomMicroPC(MicroPC upc)
 
 const Addr MaxAddr = (Addr)-1;
 
+typedef uint64_t RegVal;
+typedef double FloatRegVal;
+
+static inline uint32_t
+floatToBits32(float val)
+{
+    union
+    {
+        float f;
+        uint32_t i;
+    } u;
+    u.f = val;
+    return u.i;
+}
+
+static inline uint64_t
+floatToBits64(double val)
+{
+    union
+    {
+        double f;
+        uint64_t i;
+    } u;
+    u.f = val;
+    return u.i;
+}
+
+static inline uint64_t floatToBits(double val) { return floatToBits64(val); }
+static inline uint32_t floatToBits(float val) { return floatToBits32(val); }
+
+static inline float
+bitsToFloat32(uint32_t val)
+{
+    union
+    {
+        float f;
+        uint32_t i;
+    } u;
+    u.i = val;
+    return u.f;
+}
+
+static inline double
+bitsToFloat64(uint64_t val)
+{
+    union
+    {
+        double f;
+        uint64_t i;
+    } u;
+    u.i = val;
+    return u.f;
+}
+
+static inline double bitsToFloat(uint64_t val) { return bitsToFloat64(val); }
+static inline float bitsToFloat(uint32_t val) { return bitsToFloat32(val); }
+
 /**
  * Thread index/ID type
  */
@@ -191,6 +248,7 @@ constexpr decltype(nullptr) NoFault = nullptr;
 struct AtomicOpFunctor
 {
     virtual void operator()(uint8_t *p) = 0;
+    virtual AtomicOpFunctor* clone() = 0;
     virtual ~AtomicOpFunctor() {}
 };
 
@@ -198,6 +256,7 @@ template <class T>
 struct TypedAtomicOpFunctor : public AtomicOpFunctor
 {
     void operator()(uint8_t *p) { execute((T *)p); }
+    virtual AtomicOpFunctor* clone() = 0;
     virtual void execute(T * p) = 0;
 };
 

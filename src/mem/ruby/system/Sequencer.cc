@@ -476,17 +476,14 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
             (type == RubyRequestType_RMW_Read) ||
             (type == RubyRequestType_Locked_RMW_Read) ||
             (type == RubyRequestType_Load_Linked)) {
-            memcpy(pkt->getPtr<uint8_t>(),
-                   data.getData(getOffset(request_address), pkt->getSize()),
-                   pkt->getSize());
+            pkt->setData(
+                data.getData(getOffset(request_address), pkt->getSize()));
             DPRINTF(RubySequencer, "read data %s\n", data);
         } else if (pkt->req->isSwap()) {
             std::vector<uint8_t> overwrite_val(pkt->getSize());
-            memcpy(&overwrite_val[0], pkt->getConstPtr<uint8_t>(),
-                   pkt->getSize());
-            memcpy(pkt->getPtr<uint8_t>(),
-                   data.getData(getOffset(request_address), pkt->getSize()),
-                   pkt->getSize());
+            pkt->writeData(&overwrite_val[0]);
+            pkt->setData(
+                data.getData(getOffset(request_address), pkt->getSize()));
             data.setData(&overwrite_val[0],
                          getOffset(request_address), pkt->getSize());
             DPRINTF(RubySequencer, "swap data %s\n", data);
@@ -516,7 +513,6 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
     RubySystem *rs = m_ruby_system;
     if (RubySystem::getWarmupEnabled()) {
         assert(pkt->req);
-        delete pkt->req;
         delete pkt;
         rs->m_cache_recorder->enqueueNextFetchRequest();
     } else if (RubySystem::getCooldownEnabled()) {

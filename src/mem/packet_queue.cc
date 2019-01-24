@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012,2015 ARM Limited
+ * Copyright (c) 2012,2015,2018 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -47,13 +47,13 @@
 #include "debug/Drain.hh"
 #include "debug/PacketQueue.hh"
 
-using namespace std;
-
 PacketQueue::PacketQueue(EventManager& _em, const std::string& _label,
                          const std::string& _sendEventName,
+                         bool force_order,
                          bool disable_sanity_check)
     : em(_em), sendEvent([this]{ processSendEvent(); }, _sendEventName),
       _disableSanityCheck(disable_sanity_check),
+      forceOrder(force_order),
       label(_label), waitingOnRetry(false)
 {
 }
@@ -84,7 +84,7 @@ PacketQueue::hasAddr(Addr addr) const
 }
 
 bool
-PacketQueue::checkFunctional(PacketPtr pkt)
+PacketQueue::trySatisfyFunctional(PacketPtr pkt)
 {
     pkt->pushLabel(label);
 
@@ -94,7 +94,7 @@ PacketQueue::checkFunctional(PacketPtr pkt)
     while (!found && i != transmitList.end()) {
         // If the buffered packet contains data, and it overlaps the
         // current packet, then update data
-        found = pkt->checkFunctional(i->pkt);
+        found = pkt->trySatisfyFunctional(i->pkt);
         ++i;
     }
 
@@ -104,11 +104,11 @@ PacketQueue::checkFunctional(PacketPtr pkt)
 }
 
 void
-PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool force_order)
+PacketQueue::schedSendTiming(PacketPtr pkt, Tick when)
 {
     DPRINTF(PacketQueue, "%s for %s address %x size %d when %lu ord: %i\n",
             __func__, pkt->cmdString(), pkt->getAddr(), pkt->getSize(), when,
-            force_order);
+            forceOrder);
 
     // we can still send a packet before the end of this tick
     assert(when >= curTick());
@@ -127,13 +127,6 @@ PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool force_order)
               name());
     }
 
-    // nothing on the list
-    if (transmitList.empty()) {
-        transmitList.emplace_front(when, pkt);
-        schedSendEvent(when);
-        return;
-    }
-
     // we should either have an outstanding retry, or a send event
     // scheduled, but there is an unfortunate corner case where the
     // x86 page-table walker and timing CPU send out a new request as
@@ -143,18 +136,24 @@ PacketQueue::schedSendTiming(PacketPtr pkt, Tick when, bool force_order)
     // assert(waitingOnRetry || sendEvent.scheduled());
 
     // this belongs in the middle somewhere, so search from the end to
-    // order by tick; however, if force_order is set, also make sure
+    // order by tick; however, if forceOrder is set, also make sure
     // not to re-order in front of some existing packet with the same
     // address
-    auto i = transmitList.end();
-    --i;
-    while (i != transmitList.begin() && when < i->tick &&
-           !(force_order && i->pkt->getAddr() == pkt->getAddr()))
-        --i;
-
-    // emplace inserts the element before the position pointed to by
-    // the iterator, so advance it one step
-    transmitList.emplace(++i, when, pkt);
+    auto it = transmitList.end();
+    while (it != transmitList.begin()) {
+        --it;
+        if ((forceOrder && it->pkt->getAddr() == pkt->getAddr()) ||
+            it->tick <= when) {
+            // emplace inserts the element before the position pointed to by
+            // the iterator, so advance it one step
+            transmitList.emplace(++it, when, pkt);
+            return;
+        }
+    }
+    // either the packet list is empty or this has to be inserted
+    // before every other packet
+    transmitList.emplace_front(when, pkt);
+    schedSendEvent(when);
 }
 
 void
@@ -256,8 +255,9 @@ ReqPacketQueue::sendTiming(PacketPtr pkt)
 
 SnoopRespPacketQueue::SnoopRespPacketQueue(EventManager& _em,
                                            MasterPort& _masterPort,
+                                           bool force_order,
                                            const std::string _label)
-    : PacketQueue(_em, _label, name(_masterPort, _label)),
+    : PacketQueue(_em, _label, name(_masterPort, _label), force_order),
       masterPort(_masterPort)
 {
 }
@@ -269,8 +269,9 @@ SnoopRespPacketQueue::sendTiming(PacketPtr pkt)
 }
 
 RespPacketQueue::RespPacketQueue(EventManager& _em, SlavePort& _slavePort,
+                                 bool force_order,
                                  const std::string _label)
-    : PacketQueue(_em, _label, name(_slavePort, _label)),
+    : PacketQueue(_em, _label, name(_slavePort, _label), force_order),
       slavePort(_slavePort)
 {
 }

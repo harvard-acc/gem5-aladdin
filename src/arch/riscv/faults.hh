@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2016 RISC-V Foundation
  * Copyright (c) 2016 The University of Virginia
+ * Copyright (c) 2018 TU Dresden
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,6 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Alec Roelke
+ *          Robert Scheffel
  */
 
 #ifndef __ARCH_RISCV_FAULTS_HH__
@@ -34,19 +36,32 @@
 
 #include <string>
 
+#include "arch/riscv/isa.hh"
+#include "arch/riscv/registers.hh"
 #include "cpu/thread_context.hh"
 #include "sim/faults.hh"
 
 namespace RiscvISA
 {
 
-const uint32_t FloatInexact = 1 << 0;
-const uint32_t FloatUnderflow = 1 << 1;
-const uint32_t FloatOverflow = 1 << 2;
-const uint32_t FloatDivZero = 1 << 3;
-const uint32_t FloatInvalid = 1 << 4;
+enum FloatException : MiscReg {
+    FloatInexact = 0x1,
+    FloatUnderflow = 0x2,
+    FloatOverflow = 0x4,
+    FloatDivZero = 0x8,
+    FloatInvalid = 0x10
+};
 
-enum ExceptionCode {
+/*
+ * In RISC-V, exception and interrupt codes share some values. They can be
+ * differentiated by an 'Interrupt' flag that is enabled for interrupt faults
+ * but not exceptions. The full fault cause can be computed by placing the
+ * exception (or interrupt) code in the least significant bits of the CAUSE
+ * CSR and then setting the highest bit of CAUSE with the 'Interrupt' flag.
+ * For more details on exception causes, see Chapter 3.1.20 of the RISC-V
+ * privileged specification v 1.10. Codes are enumerated in Table 3.6.
+ */
+enum ExceptionCode : MiscReg {
     INST_ADDR_MISALIGNED = 0,
     INST_ACCESS = 1,
     INST_ILLEGAL = 2,
@@ -59,124 +74,178 @@ enum ExceptionCode {
     AMO_ACCESS = 7,
     ECALL_USER = 8,
     ECALL_SUPER = 9,
-    ECALL_HYPER = 10,
-    ECALL_MACH = 11
-};
+    ECALL_MACHINE = 11,
+    INST_PAGE = 12,
+    LOAD_PAGE = 13,
+    STORE_PAGE = 15,
+    AMO_PAGE = 15,
 
-enum InterruptCode {
-    SOFTWARE,
-    TIMER
+    INT_SOFTWARE_USER = 0,
+    INT_SOFTWARE_SUPER = 1,
+    INT_SOFTWARE_MACHINE = 3,
+    INT_TIMER_USER = 4,
+    INT_TIMER_SUPER = 5,
+    INT_TIMER_MACHINE = 7,
+    INT_EXT_USER = 8,
+    INT_EXT_SUPER = 9,
+    INT_EXT_MACHINE = 11,
+    NumInterruptTypes
 };
 
 class RiscvFault : public FaultBase
 {
   protected:
     const FaultName _name;
-    const ExceptionCode _code;
-    const InterruptCode _int;
+    const bool _interrupt;
+    ExceptionCode _code;
 
-    RiscvFault(FaultName n, ExceptionCode c, InterruptCode i)
-        : _name(n), _code(c), _int(i)
+    RiscvFault(FaultName n, bool i, ExceptionCode c)
+        : _name(n), _interrupt(i), _code(c)
     {}
 
-    FaultName
-    name() const
-    {
-        return _name;
-    }
+    FaultName name() const override { return _name; }
+    bool isInterrupt() const { return _interrupt; }
+    ExceptionCode exception() const { return _code; }
+    virtual MiscReg trap_value() const { return 0; }
 
-    ExceptionCode
-    exception() const
-    {
-        return _code;
-    }
-
-    InterruptCode
-    interrupt() const
-    {
-        return _int;
-    }
-
-    virtual void
-    invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
-
-    void
-    invoke(ThreadContext *tc, const StaticInstPtr &inst);
+    virtual void invokeSE(ThreadContext *tc, const StaticInstPtr &inst);
+    void invoke(ThreadContext *tc, const StaticInstPtr &inst) override;
 };
 
+class Reset : public FaultBase
+{
+  private:
+    const FaultName _name;
 
-class UnknownInstFault : public RiscvFault
+  public:
+    Reset() : _name("reset") {}
+    FaultName name() const override { return _name; }
+
+    void invoke(ThreadContext *tc, const StaticInstPtr &inst =
+        StaticInst::nullStaticInstPtr) override;
+};
+
+class InterruptFault : public RiscvFault
 {
   public:
-    UnknownInstFault() : RiscvFault("Unknown instruction", INST_ILLEGAL,
-            SOFTWARE)
-    {}
-
-    void
-    invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    InterruptFault(ExceptionCode c) : RiscvFault("interrupt", true, c) {}
+    InterruptFault(int c) : InterruptFault(static_cast<ExceptionCode>(c)) {}
 };
 
-class IllegalInstFault : public RiscvFault
+class InstFault : public RiscvFault
+{
+  protected:
+    const ExtMachInst _inst;
+
+  public:
+    InstFault(FaultName n, const ExtMachInst inst)
+        : RiscvFault(n, false, INST_ILLEGAL), _inst(inst)
+    {}
+
+    MiscReg trap_value() const override { return _inst; }
+};
+
+class UnknownInstFault : public InstFault
+{
+  public:
+    UnknownInstFault(const ExtMachInst inst)
+        : InstFault("Unknown instruction", inst)
+    {}
+
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
+};
+
+class IllegalInstFault : public InstFault
 {
   private:
     const std::string reason;
+
   public:
-    IllegalInstFault(std::string r)
-        : RiscvFault("Illegal instruction", INST_ILLEGAL, SOFTWARE),
-          reason(r)
+    IllegalInstFault(std::string r, const ExtMachInst inst)
+        : InstFault("Illegal instruction", inst)
     {}
 
-    void invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
 };
 
-class UnimplementedFault : public RiscvFault
+class UnimplementedFault : public InstFault
 {
   private:
     const std::string instName;
+
   public:
-    UnimplementedFault(std::string name)
-        : RiscvFault("Unimplemented instruction", INST_ILLEGAL, SOFTWARE),
-        instName(name)
+    UnimplementedFault(std::string name, const ExtMachInst inst)
+        : InstFault("Unimplemented instruction", inst),
+          instName(name)
     {}
 
-    void
-    invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
 };
 
-class IllegalFrmFault: public RiscvFault
+class IllegalFrmFault: public InstFault
 {
   private:
     const uint8_t frm;
+
   public:
-    IllegalFrmFault(uint8_t r)
-        : RiscvFault("Illegal floating-point rounding mode", INST_ILLEGAL,
-                SOFTWARE),
-        frm(r)
+    IllegalFrmFault(uint8_t r, const ExtMachInst inst)
+        : InstFault("Illegal floating-point rounding mode", inst),
+          frm(r)
     {}
 
-    void invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
+};
+
+class AddressFault : public RiscvFault
+{
+  private:
+    const Addr _addr;
+
+  public:
+    AddressFault(const Addr addr, ExceptionCode code)
+        : RiscvFault("Address", false, code), _addr(addr)
+    {}
+
+    MiscReg trap_value() const override { return _addr; }
 };
 
 class BreakpointFault : public RiscvFault
 {
+  private:
+    const PCState pcState;
+
   public:
-    BreakpointFault() : RiscvFault("Breakpoint", BREAKPOINT, SOFTWARE)
+    BreakpointFault(const PCState &pc)
+        : RiscvFault("Breakpoint", false, BREAKPOINT), pcState(pc)
     {}
 
-    void
-    invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    MiscReg trap_value() const override { return pcState.pc(); }
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
 };
 
 class SyscallFault : public RiscvFault
 {
   public:
-    // TODO: replace ECALL_USER with the appropriate privilege level of the
-    // caller
-    SyscallFault() : RiscvFault("System call", ECALL_USER, SOFTWARE)
-    {}
+    SyscallFault(PrivilegeMode prv)
+        : RiscvFault("System call", false, ECALL_USER)
+    {
+        switch (prv) {
+          case PRV_U:
+            _code = ECALL_USER;
+            break;
+          case PRV_S:
+            _code = ECALL_SUPER;
+            break;
+          case PRV_M:
+            _code = ECALL_MACHINE;
+            break;
+          default:
+            panic("Unknown privilege mode %d.", prv);
+            break;
+        }
+    }
 
-    void
-    invoke_se(ThreadContext *tc, const StaticInstPtr &inst);
+    void invokeSE(ThreadContext *tc, const StaticInstPtr &inst) override;
 };
 
 } // namespace RiscvISA

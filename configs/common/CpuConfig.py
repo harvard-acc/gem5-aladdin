@@ -1,4 +1,4 @@
-# Copyright (c) 2012, 2017 ARM Limited
+# Copyright (c) 2012, 2017-2018 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -35,6 +35,8 @@
 #
 # Authors: Andreas Sandberg
 
+from __future__ import print_function
+
 from m5 import fatal
 import m5.objects
 import inspect
@@ -57,6 +59,18 @@ def is_cpu_class(cls):
     except (TypeError, AttributeError):
         return False
 
+def _cpu_subclass_tester(name):
+    cpu_class = getattr(m5.objects, name, None)
+
+    def tester(cls):
+        return cpu_class is not None and cls is not None and \
+            issubclass(cls, cpu_class)
+
+    return tester
+
+is_kvm_cpu = _cpu_subclass_tester("BaseKvmCPU")
+is_atomic_cpu = _cpu_subclass_tester("AtomicSimpleCPU")
+
 def get(name):
     """Get a CPU class from a user provided class name or alias."""
 
@@ -64,23 +78,23 @@ def get(name):
         cpu_class = _cpu_classes[name]
         return cpu_class
     except KeyError:
-        print "%s is not a valid CPU model." % (name,)
+        print("%s is not a valid CPU model." % (name,))
         sys.exit(1)
 
 def print_cpu_list():
     """Print a list of available CPU classes including their aliases."""
 
-    print "Available CPU classes:"
+    print("Available CPU classes:")
     doc_wrapper = TextWrapper(initial_indent="\t\t", subsequent_indent="\t\t")
     for name, cls in _cpu_classes.items():
-        print "\t%s" % name
+        print("\t%s" % name)
 
         # Try to extract the class documentation from the class help
         # string.
         doc = inspect.getdoc(cls)
         if doc:
             for line in doc_wrapper.wrap(doc):
-                print line
+                print(line)
 
 def cpu_names():
     """Return a list of valid CPU names."""

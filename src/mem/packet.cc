@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 ARM Limited
+ * Copyright (c) 2011-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -50,14 +50,16 @@
 
 #include "mem/packet.hh"
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <sstream>
+#include <string>
 
 #include "base/cprintf.hh"
 #include "base/logging.hh"
 #include "base/trace.hh"
-
-using namespace std;
+#include "mem/packet_access.hh"
 
 // The one downside to bitsets is that static initializers can get ugly.
 #define SET1(a1)                     (1 << (a1))
@@ -103,6 +105,9 @@ MemCmd::commandInfo[] =
     /* SoftPFReq */
     { SET4(IsRead, IsRequest, IsSWPrefetch, NeedsResponse),
             SoftPFResp, "SoftPFReq" },
+    /* SoftPFExReq */
+    { SET6(IsRead, NeedsWritable, IsInvalidate, IsRequest,
+           IsSWPrefetch, NeedsResponse), SoftPFResp, "SoftPFExReq" },
     /* HardPFReq */
     { SET5(IsRead, IsRequest, IsHWPrefetch, NeedsResponse, FromCache),
             HardPFResp, "HardPFReq" },
@@ -223,13 +228,13 @@ MemCmd::commandInfo[] =
 };
 
 bool
-Packet::checkFunctional(Printable *obj, Addr addr, bool is_secure, int size,
+Packet::trySatisfyFunctional(Printable *obj, Addr addr, bool is_secure, int size,
                         uint8_t *_data)
 {
-    Addr func_start = getAddr();
-    Addr func_end   = getAddr() + getSize() - 1;
-    Addr val_start  = addr;
-    Addr val_end    = val_start + size - 1;
+    const Addr func_start = getAddr();
+    const Addr func_end   = getAddr() + getSize() - 1;
+    const Addr val_start  = addr;
+    const Addr val_end    = val_start + size - 1;
 
     if (is_secure != _isSecure || func_start > val_end ||
         val_start > func_end) {
@@ -250,94 +255,45 @@ Packet::checkFunctional(Printable *obj, Addr addr, bool is_secure, int size,
         return false;
     }
 
-    // offset of functional request into supplied value (could be
-    // negative if partial overlap)
-    int offset = func_start - val_start;
+    const Addr val_offset = func_start > val_start ?
+        func_start - val_start : 0;
+    const Addr func_offset = func_start < val_start ?
+        val_start - func_start : 0;
+    const Addr overlap_size = std::min(val_end, func_end)+1 -
+        std::max(val_start, func_start);
 
     if (isRead()) {
-        if (func_start >= val_start && func_end <= val_end) {
-            memcpy(getPtr<uint8_t>(), _data + offset, getSize());
-            if (bytesValid.empty())
-                bytesValid.resize(getSize(), true);
-            // complete overlap, and as the current packet is a read
-            // we are done
-            return true;
-        } else {
-            // Offsets and sizes to copy in case of partial overlap
-            int func_offset;
-            int val_offset;
-            int overlap_size;
+        std::memcpy(getPtr<uint8_t>() + func_offset,
+               _data + val_offset,
+               overlap_size);
 
-            // calculate offsets and copy sizes for the two byte arrays
-            if (val_start < func_start && val_end <= func_end) {
-                // the one we are checking against starts before and
-                // ends before or the same
-                val_offset = func_start - val_start;
-                func_offset = 0;
-                overlap_size = val_end - func_start;
-            } else if (val_start >= func_start && val_end > func_end) {
-                // the one we are checking against starts after or the
-                // same, and ends after
-                val_offset = 0;
-                func_offset = val_start - func_start;
-                overlap_size = func_end - val_start;
-            } else if (val_start >= func_start && val_end <= func_end) {
-                // the one we are checking against is completely
-                // subsumed in the current packet, possibly starting
-                // and ending at the same address
-                val_offset = 0;
-                func_offset = val_start - func_start;
-                overlap_size = size;
-            } else if (val_start < func_start && val_end > func_end) {
-                // the current packet is completely subsumed in the
-                // one we are checking against
-                val_offset = func_start - val_start;
-                func_offset = 0;
-                overlap_size = func_end - func_start;
-            } else {
-                panic("Missed a case for checkFunctional with "
-                      " %s 0x%x size %d, against 0x%x size %d\n",
-                      cmdString(), getAddr(), getSize(), addr, size);
-            }
+        // initialise the tracking of valid bytes if we have not
+        // used it already
+        if (bytesValid.empty())
+            bytesValid.resize(getSize(), false);
 
-            // copy partial data into the packet's data array
-            uint8_t *dest = getPtr<uint8_t>() + func_offset;
-            uint8_t *src = _data + val_offset;
-            memcpy(dest, src, overlap_size);
+        // track if we are done filling the functional access
+        bool all_bytes_valid = true;
 
-            // initialise the tracking of valid bytes if we have not
-            // used it already
-            if (bytesValid.empty())
-                bytesValid.resize(getSize(), false);
+        int i = 0;
 
-            // track if we are done filling the functional access
-            bool all_bytes_valid = true;
+        // check up to func_offset
+        for (; all_bytes_valid && i < func_offset; ++i)
+            all_bytes_valid &= bytesValid[i];
 
-            int i = 0;
+        // update the valid bytes
+        for (i = func_offset; i < func_offset + overlap_size; ++i)
+            bytesValid[i] = true;
 
-            // check up to func_offset
-            for (; all_bytes_valid && i < func_offset; ++i)
-                all_bytes_valid &= bytesValid[i];
+        // check the bit after the update we just made
+        for (; all_bytes_valid && i < getSize(); ++i)
+            all_bytes_valid &= bytesValid[i];
 
-            // update the valid bytes
-            for (i = func_offset; i < func_offset + overlap_size; ++i)
-                bytesValid[i] = true;
-
-            // check the bit after the update we just made
-            for (; all_bytes_valid && i < getSize(); ++i)
-                all_bytes_valid &= bytesValid[i];
-
-            return all_bytes_valid;
-        }
+        return all_bytes_valid;
     } else if (isWrite()) {
-        if (offset >= 0) {
-            memcpy(_data + offset, getConstPtr<uint8_t>(),
-                   (min(func_end, val_end) - func_start) + 1);
-        } else {
-            // val_start > func_start
-            memcpy(_data, getConstPtr<uint8_t>() - offset,
-                   (min(func_end, val_end) - val_start) + 1);
-        }
+        std::memcpy(_data + val_offset,
+               getConstPtr<uint8_t>() + func_offset,
+               overlap_size);
     } else {
         panic("Don't know how to handle command %s\n", cmdString());
     }
@@ -364,8 +320,48 @@ Packet::popSenderState()
     return sender_state;
 }
 
+uint64_t
+Packet::getUintX(ByteOrder endian) const
+{
+    switch(getSize()) {
+      case 1:
+        return (uint64_t)get<uint8_t>(endian);
+      case 2:
+        return (uint64_t)get<uint16_t>(endian);
+      case 4:
+        return (uint64_t)get<uint32_t>(endian);
+      case 8:
+        return (uint64_t)get<uint64_t>(endian);
+      default:
+        panic("%i isn't a supported word size.\n", getSize());
+    }
+}
+
 void
-Packet::print(ostream &o, const int verbosity, const string &prefix) const
+Packet::setUintX(uint64_t w, ByteOrder endian)
+{
+    switch(getSize()) {
+      case 1:
+        set<uint8_t>((uint8_t)w, endian);
+        break;
+      case 2:
+        set<uint16_t>((uint16_t)w, endian);
+        break;
+      case 4:
+        set<uint32_t>((uint32_t)w, endian);
+        break;
+      case 8:
+        set<uint64_t>((uint64_t)w, endian);
+        break;
+      default:
+        panic("%i isn't a supported word size.\n", getSize());
+    }
+
+}
+
+void
+Packet::print(std::ostream &o, const int verbosity,
+              const std::string &prefix) const
 {
     ccprintf(o, "%s%s [%x:%x]%s%s%s%s%s%s", prefix, cmdString(),
              getAddr(), getAddr() + getSize() - 1,
@@ -379,13 +375,13 @@ Packet::print(ostream &o, const int verbosity, const string &prefix) const
 
 std::string
 Packet::print() const {
-    ostringstream str;
+    std::ostringstream str;
     print(str);
     return str.str();
 }
 
-Packet::PrintReqState::PrintReqState(ostream &_os, int _verbosity)
-    : curPrefixPtr(new string("")), os(_os), verbosity(_verbosity)
+Packet::PrintReqState::PrintReqState(std::ostream &_os, int _verbosity)
+    : curPrefixPtr(new std::string("")), os(_os), verbosity(_verbosity)
 {
     labelStack.push_back(LabelStackEntry("", curPrefixPtr));
 }
@@ -398,16 +394,18 @@ Packet::PrintReqState::~PrintReqState()
 }
 
 Packet::PrintReqState::
-LabelStackEntry::LabelStackEntry(const string &_label, string *_prefix)
+LabelStackEntry::LabelStackEntry(const std::string &_label,
+                                 std::string *_prefix)
     : label(_label), prefix(_prefix), labelPrinted(false)
 {
 }
 
 void
-Packet::PrintReqState::pushLabel(const string &lbl, const string &prefix)
+Packet::PrintReqState::pushLabel(const std::string &lbl,
+                                 const std::string &prefix)
 {
     labelStack.push_back(LabelStackEntry(lbl, curPrefixPtr));
-    curPrefixPtr = new string(*curPrefixPtr);
+    curPrefixPtr = new std::string(*curPrefixPtr);
     *curPrefixPtr += prefix;
 }
 

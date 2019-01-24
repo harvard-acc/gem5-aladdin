@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2017 ARM Limited
+ * Copyright (c) 2011-2014, 2017-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -50,12 +50,11 @@
 #include "debug/PMUVerbose.hh"
 #include "dev/arm/base_gic.hh"
 #include "dev/arm/generic_timer.hh"
-#include "dev/arm/realview.hh"
 #include "params/ArmPMU.hh"
 
 namespace ArmISA {
 
-const MiscReg PMU::reg_pmcr_wr_mask = 0x39;
+const RegVal PMU::reg_pmcr_wr_mask = 0x39;
 
 PMU::PMU(const ArmPMUParams *p)
     : SimObject(p), BaseISADevice(),
@@ -68,8 +67,7 @@ PMU::PMU(const ArmPMUParams *p)
       cycleCounterEventId(p->cycleEventId),
       swIncrementEvent(nullptr),
       reg_pmcr_conf(0),
-      pmuInterrupt(p->pmuInterrupt),
-      platform(p->platform)
+      interrupt(p->interrupt->get())
 {
     DPRINTF(PMUVerbose, "Initializing the PMU.\n");
 
@@ -77,6 +75,9 @@ PMU::PMU(const ArmPMUParams *p)
         fatal("The PMU can only accept 31 counters, %d counters requested.\n",
               maximumCounterCount);
     }
+
+    warn_if(!interrupt, "ARM PMU: No interrupt specified, interrupt " \
+            "delivery disabled.\n");
 
     /* Setup the performance counter ID registers */
     reg_pmcr_conf.imp = 0x41;    // ARM Ltd.
@@ -90,6 +91,14 @@ PMU::PMU(const ArmPMUParams *p)
 
 PMU::~PMU()
 {
+}
+
+void
+PMU::setThreadContext(ThreadContext *tc)
+{
+    DPRINTF(PMUVerbose, "Assigning PMU to ContextID %i.\n", tc->contextId());
+    if (interrupt)
+        interrupt->setThreadContext(tc);
 }
 
 void
@@ -180,7 +189,7 @@ PMU::regProbeListeners()
 }
 
 void
-PMU::setMiscReg(int misc_reg, MiscReg val)
+PMU::setMiscReg(int misc_reg, RegVal val)
 {
     DPRINTF(PMUVerbose, "setMiscReg(%s, 0x%x)\n",
             miscRegName[unflattenMiscReg(misc_reg)], val);
@@ -205,7 +214,7 @@ PMU::setMiscReg(int misc_reg, MiscReg val)
 
       case MISCREG_PMOVSCLR_EL0:
       case MISCREG_PMOVSR:
-        reg_pmovsr &= ~val;
+        setOverflowStatus(reg_pmovsr & ~val);
         return;
 
       case MISCREG_PMSWINC_EL0:
@@ -277,7 +286,7 @@ PMU::setMiscReg(int misc_reg, MiscReg val)
 
       case MISCREG_PMOVSSET_EL0:
       case MISCREG_PMOVSSET:
-        reg_pmovsr |= val;
+        setOverflowStatus(reg_pmovsr | val);
         return;
 
       default:
@@ -288,16 +297,16 @@ PMU::setMiscReg(int misc_reg, MiscReg val)
          miscRegName[misc_reg]);
 }
 
-MiscReg
+RegVal
 PMU::readMiscReg(int misc_reg)
 {
-    MiscReg val(readMiscRegInt(misc_reg));
+    RegVal val(readMiscRegInt(misc_reg));
     DPRINTF(PMUVerbose, "readMiscReg(%s): 0x%x\n",
             miscRegName[unflattenMiscReg(misc_reg)], val);
     return val;
 }
 
-MiscReg
+RegVal
 PMU::readMiscRegInt(int misc_reg)
 {
     misc_reg = unflattenMiscReg(misc_reg);
@@ -636,16 +645,41 @@ PMU::setCounterTypeRegister(CounterId id, PMEVTYPER_t val)
 }
 
 void
+PMU::setOverflowStatus(RegVal new_val)
+{
+    const bool int_old = reg_pmovsr != 0;
+    const bool int_new = new_val != 0;
+
+    reg_pmovsr = new_val;
+    if (int_old && !int_new) {
+        clearInterrupt();
+    } else if (!int_old && int_new && (reg_pminten & reg_pmovsr)) {
+        raiseInterrupt();
+    }
+}
+
+void
 PMU::raiseInterrupt()
 {
-    RealView *rv(dynamic_cast<RealView *>(platform));
-    if (!rv || !rv->gic) {
-        warn_once("ARM PMU: GIC missing, can't raise interrupt.\n");
-        return;
+    if (interrupt) {
+        DPRINTF(PMUVerbose, "Delivering PMU interrupt.\n");
+        interrupt->raise();
+    } else {
+        warn_once("Dropping PMU interrupt as no interrupt has "
+                  "been specified\n");
     }
+}
 
-    DPRINTF(PMUVerbose, "Delivering PMU interrupt.\n");
-    rv->gic->sendInt(pmuInterrupt);
+void
+PMU::clearInterrupt()
+{
+    if (interrupt) {
+        DPRINTF(PMUVerbose, "Clearing PMU interrupt.\n");
+        interrupt->clear();
+    } else {
+        warn_once("Dropping PMU interrupt as no interrupt has "
+                  "been specified\n");
+    }
 }
 
 void

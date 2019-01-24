@@ -43,10 +43,12 @@ class L2Cache(RubyCache): pass
 def define_options(parser):
     return
 
-def create_system(options, full_system, system, dma_ports, ruby_system):
+def create_system(options, full_system, system, dma_ports, bootmem,
+                  ruby_system):
 
     if buildEnv['PROTOCOL'] != 'MESI_Two_Level_aladdin':
-        fatal("This script requires the MESI_Two_Level_aladdin protocol to be built.")
+        fatal("This script requires the MESI_Two_Level_aladdin protocol to be \
+            built.")
 
     # Run the original protocol script
     buildEnv['PROTOCOL'] = buildEnv['PROTOCOL'][:-8]
@@ -54,9 +56,11 @@ def create_system(options, full_system, system, dma_ports, ruby_system):
     exec "import %s" % protocol
     try:
         (cpu_sequencers, dir_cntrls, topology) = \
-            eval("%s.create_system(options, full_system, system, dma_ports, ruby_system)" % protocol)
+            eval("%s.create_system(options, full_system, system, dma_ports, \
+                bootmem, ruby_system)" % protocol)
     except:
-        print "Error: could not create system for ruby protocol inside fusion system %s" % protocol
+        print "Error: could not create system for ruby protocol inside fusion \
+            system %s" % protocol
         raise
 
     #

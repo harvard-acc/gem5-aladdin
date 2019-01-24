@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2017 ARM Limited
+ * Copyright (c) 2012-2013, 2017-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -53,14 +53,13 @@
 #include "base/intmath.hh"
 #include "base_gen.hh"
 #include "mem/packet.hh"
-#include "proto/protoio.hh"
 
 /**
  * The random generator is similar to the linear one, but does
  * not generate sequential addresses. Instead it randomly
  * picks an address in the range, aligned to the block size.
  */
-class RandomGen : public BaseGen
+class RandomGen : public StochasticGen
 {
 
   public:
@@ -70,8 +69,7 @@ class RandomGen : public BaseGen
      * min_period == max_period for a fixed inter-transaction
      * time.
      *
-     * @param _name Name to use for status and debug
-     * @param master_id MasterID set on each request
+     * @param gen Traffic generator owning this sequence generator
      * @param _duration duration of this state before transitioning
      * @param start_addr Start address
      * @param end_addr End address
@@ -81,15 +79,16 @@ class RandomGen : public BaseGen
      * @param read_percent Percent of transactions that are reads
      * @param data_limit Upper limit on how much data to read/write
      */
-    RandomGen(const std::string& _name, MasterID master_id, Tick _duration,
-              Addr start_addr, Addr end_addr, Addr _blocksize,
+    RandomGen(SimObject &obj,
+              MasterID master_id, Tick _duration,
+              Addr start_addr, Addr end_addr,
+              Addr _blocksize, Addr cacheline_size,
               Tick min_period, Tick max_period,
               uint8_t read_percent, Addr data_limit)
-        : BaseGen(_name, master_id, _duration),
-          startAddr(start_addr), endAddr(end_addr),
-          blocksize(_blocksize), minPeriod(min_period),
-          maxPeriod(max_period), readPercent(read_percent),
-          dataLimit(data_limit), dataManipulated(0)
+        : StochasticGen(obj, master_id, _duration, start_addr, end_addr,
+                        _blocksize, cacheline_size, min_period, max_period,
+                        read_percent, data_limit),
+          dataManipulated(0)
     { }
 
     void enter();
@@ -99,28 +98,6 @@ class RandomGen : public BaseGen
     Tick nextPacketTick(bool elastic, Tick delay) const;
 
   protected:
-
-    /** Start of address range */
-    const Addr startAddr;
-
-    /** End of address range */
-    const Addr endAddr;
-
-    /** Block size */
-    const Addr blocksize;
-
-    /** Request generation period */
-    const Tick minPeriod;
-    const Tick maxPeriod;
-
-    /**
-     * Percent of generated transactions that should be reads
-     */
-    const uint8_t readPercent;
-
-    /** Maximum amount of data to manipulate */
-    const Addr dataLimit;
-
     /**
      * Counter to determine the amount of data
      * manipulated. Used to determine if we should continue

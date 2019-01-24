@@ -36,8 +36,8 @@
 # Authors: Andreas Sandberg
 #          Andreas Hansson
 
-import m5
-from m5.defines import buildEnv
+from __future__ import print_function
+
 import m5.objects
 from m5.objects import CommMonitor, MemTraceProbe
 from m5.util import addToPath, fatal
@@ -68,23 +68,23 @@ def get(name):
         mem_class = _mem_classes[name]
         return mem_class
     except KeyError:
-        print "%s is not a valid memory controller." % (name,)
+        print("%s is not a valid memory controller." % (name,))
         sys.exit(1)
 
 def print_mem_list():
     """Print a list of available memory classes."""
 
-    print "Available memory classes:"
+    print("Available memory classes:")
     doc_wrapper = TextWrapper(initial_indent="\t\t", subsequent_indent="\t\t")
     for name, cls in _mem_classes.items():
-        print "\t%s" % name
+        print("\t%s" % name)
 
         # Try to extract the class documentation from the class help
         # string.
         doc = inspect.getdoc(cls)
         if doc:
             for line in doc_wrapper.wrap(doc):
-                print line
+                print(line)
 
 def mem_names():
     """Return a list of valid memory names."""
@@ -218,7 +218,6 @@ def config_mem(options, system):
     # address mapping in the case of a DRAM
     #for r in [m5.objects.AddrRange(0x00000000, size='32MB')]:
     for r in system.mem_ranges:
-        print "mem ctrl"
         for i in xrange(nbr_mem_ctrls):
             mem_ctrl = create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits,
                                        intlv_size)
@@ -229,8 +228,8 @@ def config_mem(options, system):
 
             if opt_elastic_trace_en:
                 mem_ctrl.latency = '1ns'
-                print "For elastic trace, over-riding Simple Memory " \
-                    "latency to 1ns."
+                print("For elastic trace, over-riding Simple Memory "
+                    "latency to 1ns.")
 
             mem_ctrls.append(mem_ctrl)
 

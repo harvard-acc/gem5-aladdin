@@ -1,4 +1,4 @@
-# Copyright (c) 2012, 2017 ARM Limited
+# Copyright (c) 2012, 2017-2018 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -39,11 +39,15 @@
 #
 # Authors: Brad Beckmann
 
+from __future__ import print_function
+
 import math
 import m5
 from m5.objects import *
 from m5.defines import buildEnv
 from m5.util import addToPath, fatal
+
+addToPath('../')
 
 from common import MemConfig
 
@@ -89,6 +93,14 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
     mem_ctrls = []
     crossbars = []
 
+    if options.numa_high_bit:
+        dir_bits = int(math.log(options.num_dirs, 2))
+        intlv_size = 2 ** (options.numa_high_bit - dir_bits + 1)
+    else:
+        # if the numa_bit is not specified, set the directory bits as the
+        # lowest bits above the block offset bits
+        intlv_size = options.cacheline_size
+
     # Sets bits to be used for interleaving.  Creates memory controllers
     # attached to a directory controller.  A separate controller is created
     # for each address range as the abstract memory can handle only one
@@ -100,15 +112,17 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
             crossbars.append(crossbar)
             dir_cntrl.memory = crossbar.slave
 
+        dir_ranges = []
         for r in system.mem_ranges:
             mem_ctrl = MemConfig.create_mem_ctrl(
                 MemConfig.get(options.mem_type), r, index, options.num_dirs,
-                int(math.log(options.num_dirs, 2)), options.cacheline_size)
+                int(math.log(options.num_dirs, 2)), intlv_size)
 
             if options.access_backing_store:
                 mem_ctrl.kvm_map=False
 
             mem_ctrls.append(mem_ctrl)
+            dir_ranges.append(mem_ctrl.range)
 
             if crossbar != None:
                 mem_ctrl.port = crossbar.master
@@ -116,6 +130,7 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
                 mem_ctrl.port = dir_cntrl.memory
 
         index += 1
+        dir_cntrl.addr_ranges = dir_ranges
 
     system.mem_ctrls = mem_ctrls
 
@@ -133,7 +148,8 @@ def create_topology(controllers, options):
     topology = eval("Topo.%s(controllers)" % options.topology)
     return topology
 
-def create_system(options, full_system, system, piobus = None, dma_ports = []):
+def create_system(options, full_system, system, piobus = None, dma_ports = [],
+                  bootmem=None):
 
     system.ruby = RubySystem()
     ruby = system.ruby
@@ -148,10 +164,10 @@ def create_system(options, full_system, system, piobus = None, dma_ports = []):
     try:
         (cpu_sequencers, dir_cntrls, topology) = \
              eval("%s.create_system(options, full_system, system, dma_ports,\
-                                    ruby)"
+                                    bootmem, ruby)"
                   % protocol)
     except:
-        print "Error: could not create sytem for ruby protocol %s" % protocol
+        print("Error: could not create sytem for ruby protocol %s" % protocol)
         raise
 
     # Create the network topology
@@ -196,36 +212,27 @@ def create_system(options, full_system, system, piobus = None, dma_ports = []):
         ruby.phys_mem = SimpleMemory(range=system.mem_ranges[0],
                                      in_addr_map=False)
 
-def create_directories(options, mem_ranges, ruby_system):
+def create_directories(options, bootmem, ruby_system, system):
     dir_cntrl_nodes = []
-    if options.numa_high_bit:
-        numa_bit = options.numa_high_bit
-    else:
-        # if the numa_bit is not specified, set the directory bits as the
-        # lowest bits above the block offset bits, and the numa_bit as the
-        # highest of those directory bits
-        dir_bits = int(math.log(options.num_dirs, 2))
-        block_size_bits = int(math.log(options.cacheline_size, 2))
-        numa_bit = block_size_bits + dir_bits - 1
-
     for i in xrange(options.num_dirs):
-        dir_ranges = []
-        for r in mem_ranges:
-            addr_range = m5.objects.AddrRange(r.start, size = r.size(),
-                                              intlvHighBit = numa_bit,
-                                              intlvBits = dir_bits,
-                                              intlvMatch = i)
-            dir_ranges.append(addr_range)
-
         dir_cntrl = Directory_Controller()
         dir_cntrl.version = i
         dir_cntrl.directory = RubyDirectoryMemory()
         dir_cntrl.ruby_system = ruby_system
-        dir_cntrl.addr_ranges = dir_ranges
 
         exec("ruby_system.dir_cntrl%d = dir_cntrl" % i)
         dir_cntrl_nodes.append(dir_cntrl)
-    return dir_cntrl_nodes
+
+    if bootmem is not None:
+        rom_dir_cntrl = Directory_Controller()
+        rom_dir_cntrl.directory = RubyDirectoryMemory()
+        rom_dir_cntrl.ruby_system = ruby_system
+        rom_dir_cntrl.version = i + 1
+        rom_dir_cntrl.memory = bootmem.port
+        rom_dir_cntrl.addr_ranges = bootmem.range
+        return (dir_cntrl_nodes, rom_dir_cntrl)
+
+    return (dir_cntrl_nodes, None)
 
 def send_evicts(options):
     # currently, 2 scenarios warrant forwarding evictions to the CPU:

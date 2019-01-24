@@ -305,8 +305,8 @@ StorageSpace::addSymbol(const BrigDirectiveVariable *sym,
 
     nextOffset = offset + size;
 
-    DPRINTF(HSAILObject, "Adding %s SYMBOL %s size %d offset 0x%x, init: %d\n",
-            segmentNames[segment], sym_name, size, offset, sym->init);
+    DPRINTF(HSAILObject, "Adding SYMBOL %s size %d offset %#x, init: %d\n",
+            sym_name, size, offset, sym->init);
 
     StorageElement* se = new StorageElement(sym_name, offset, size, sym);
     elements.push_back(se);
@@ -333,7 +333,7 @@ StorageSpace::findSymbol(uint64_t addr)
 {
     assert(elements_by_addr.size() > 0);
 
-    auto se = elements_by_addr.find(addr);
+    auto se = elements_by_addr.contains(addr);
 
     if (se == elements_by_addr.end()) {
         return nullptr;

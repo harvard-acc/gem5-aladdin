@@ -28,6 +28,8 @@
 # Authors: Ron Dreslinski
 #          Brad Beckmann
 
+from __future__ import print_function
+
 import m5
 from m5.objects import *
 from m5.defines import buildEnv
@@ -81,22 +83,20 @@ options.l2_assoc=2
 options.l3_assoc=2
 
 if args:
-     print "Error: script doesn't take any positional arguments"
+     print("Error: script doesn't take any positional arguments")
      sys.exit(1)
 
 block_size = 64
 
 if options.num_cpus > block_size:
-     print "Error: Number of testers %d limited to %d because of false sharing" \
-           % (options.num_cpus, block_size)
+     print("Error: Number of testers %d limited to %d because of false sharing"
+           % (options.num_cpus, block_size))
      sys.exit(1)
 
 #
 # Currently ruby does not support atomic or uncacheable accesses
 #
-cpus = [ MemTest(atomic = False,
-                 max_loads = options.maxloads,
-                 issue_dmas = False,
+cpus = [ MemTest(max_loads = options.maxloads,
                  percent_functional = options.functional,
                  percent_uncacheable = 0,
                  progress_interval = options.progress,
@@ -104,15 +104,11 @@ cpus = [ MemTest(atomic = False,
          for i in xrange(options.num_cpus) ]
 
 system = System(cpu = cpus,
-                funcmem = SimpleMemory(in_addr_map = False),
-                funcbus = IOXBar(),
                 clk_domain = SrcClockDomain(clock = options.sys_clock),
                 mem_ranges = [AddrRange(options.mem_size)])
 
 if options.num_dmas > 0:
-    dmas = [ MemTest(atomic = False,
-                     max_loads = options.maxloads,
-                     issue_dmas = True,
+    dmas = [ MemTest(max_loads = options.maxloads,
                      percent_functional = 0,
                      percent_uncacheable = 0,
                      progress_interval = options.progress,
@@ -148,24 +144,13 @@ for (i, cpu) in enumerate(cpus):
     #
     # Tie the cpu memtester ports to the correct system ports
     #
-    cpu.test = system.ruby._cpu_ports[i].slave
-    cpu.functional = system.funcbus.slave
+    cpu.port = system.ruby._cpu_ports[i].slave
 
     #
     # Since the memtester is incredibly bursty, increase the deadlock
     # threshold to 5 million cycles
     #
     system.ruby._cpu_ports[i].deadlock_threshold = 5000000
-
-for (i, dma) in enumerate(dmas):
-    #
-    # Tie the dma memtester ports to the correct functional port
-    # Note that the test port has already been connected to the dma_sequencer
-    #
-    dma.functional = system.funcbus.slave
-
-# connect reference memory to funcbus
-system.funcbus.master = system.funcmem.port
 
 # -----------------------
 # run simulation
@@ -183,4 +168,4 @@ m5.instantiate()
 # simulate until program terminates
 exit_event = m5.simulate(options.abs_max_tick)
 
-print 'Exiting @ tick', m5.curTick(), 'because', exit_event.getCause()
+print('Exiting @ tick', m5.curTick(), 'because', exit_event.getCause())

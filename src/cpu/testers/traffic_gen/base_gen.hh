@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2017 ARM Limited
+ * Copyright (c) 2012-2013, 2017-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,7 +51,8 @@
 #include "base/bitfield.hh"
 #include "base/intmath.hh"
 #include "mem/packet.hh"
-#include "proto/protoio.hh"
+
+class BaseTrafficGen;
 
 /**
  * Base class for all generators, with the shared functionality and
@@ -88,11 +89,11 @@ class BaseGen
     /**
      * Create a base generator.
      *
-     * @param _name Name to use for status and debug
+     * @param obj simobject owning the generator
      * @param master_id MasterID set on each request
      * @param _duration duration of this state before transitioning
      */
-    BaseGen(const std::string& _name, MasterID master_id, Tick _duration);
+    BaseGen(SimObject &obj, MasterID master_id, Tick _duration);
 
     virtual ~BaseGen() { }
 
@@ -131,6 +132,42 @@ class BaseGen
      */
     virtual Tick nextPacketTick(bool elastic, Tick delay) const = 0;
 
+};
+
+class StochasticGen : public BaseGen
+{
+  public:
+    StochasticGen(SimObject &obj,
+                  MasterID master_id, Tick _duration,
+                  Addr start_addr, Addr end_addr,
+                  Addr _blocksize, Addr cacheline_size,
+                  Tick min_period, Tick max_period,
+                  uint8_t read_percent, Addr data_limit);
+
+  protected:
+    /** Start of address range */
+    const Addr startAddr;
+
+    /** End of address range */
+    const Addr endAddr;
+
+    /** Blocksize and address increment */
+    const Addr blocksize;
+
+    /** Cache line size in the simulated system */
+    const Addr cacheLineSize;
+
+    /** Request generation period */
+    const Tick minPeriod;
+    const Tick maxPeriod;
+
+    /**
+     * Percent of generated transactions that should be reads
+     */
+    const uint8_t readPercent;
+
+    /** Maximum amount of data to manipulate */
+    const Addr dataLimit;
 };
 
 #endif

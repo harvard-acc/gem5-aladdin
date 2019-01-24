@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014 ARM Limited
+ * Copyright (c) 2012, 2014, 2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -74,8 +74,7 @@ using namespace std;
 PhysicalMemory::PhysicalMemory(const string& _name,
                                const vector<AbstractMemory*>& _memories,
                                bool mmap_using_noreserve) :
-    _name(_name), rangeCache(addrMap.end()), size(0),
-    mmapUsingNoReserve(mmap_using_noreserve)
+    _name(_name), size(0), mmapUsingNoReserve(mmap_using_noreserve)
 {
     if (mmap_using_noreserve)
         warn("Not reserving swap space. May cause SIGSEGV on actual usage\n");
@@ -236,20 +235,7 @@ PhysicalMemory::~PhysicalMemory()
 bool
 PhysicalMemory::isMemAddr(Addr addr) const
 {
-    // see if the address is within the last matched range
-    if (rangeCache != addrMap.end() && rangeCache->first.contains(addr)) {
-        return true;
-    } else {
-        // lookup in the interval tree
-        const auto& r = addrMap.find(addr);
-        if (r == addrMap.end()) {
-            // not in the cache, and not in the tree
-            return false;
-        }
-        // the range is in the tree, update the cache
-        rangeCache = r;
-        return true;
-    }
+    return addrMap.contains(addr) != addrMap.end();
 }
 
 AddrRangeList
@@ -292,32 +278,20 @@ void
 PhysicalMemory::access(PacketPtr pkt)
 {
     assert(pkt->isRequest());
-    Addr addr = pkt->getAddr();
-    if (rangeCache != addrMap.end() && rangeCache->first.contains(addr)) {
-        rangeCache->second->access(pkt);
-    } else {
-        // do not update the cache here, as we typically call
-        // isMemAddr before calling access
-        const auto& m = addrMap.find(addr);
-        assert(m != addrMap.end());
-        m->second->access(pkt);
-    }
+    AddrRange addr_range = RangeSize(pkt->getAddr(), pkt->getSize());
+    const auto& m = addrMap.contains(addr_range);
+    assert(m != addrMap.end());
+    m->second->access(pkt);
 }
 
 void
 PhysicalMemory::functionalAccess(PacketPtr pkt)
 {
     assert(pkt->isRequest());
-    Addr addr = pkt->getAddr();
-    if (rangeCache != addrMap.end() && rangeCache->first.contains(addr)) {
-        rangeCache->second->functionalAccess(pkt);
-    } else {
-        // do not update the cache here, as we typically call
-        // isMemAddr before calling functionalAccess
-        const auto& m = addrMap.find(addr);
-        assert(m != addrMap.end());
-        m->second->functionalAccess(pkt);
-    }
+    AddrRange addr_range = RangeSize(pkt->getAddr(), pkt->getSize());
+    const auto& m = addrMap.contains(addr_range);
+    assert(m != addrMap.end());
+    m->second->functionalAccess(pkt);
 }
 
 void
@@ -406,7 +380,7 @@ PhysicalMemory::unserialize(CheckpointIn &cp)
     UNSERIALIZE_CONTAINER(lal_addr);
     UNSERIALIZE_CONTAINER(lal_cid);
     for (size_t i = 0; i < lal_addr.size(); ++i) {
-        const auto& m = addrMap.find(lal_addr[i]);
+        const auto& m = addrMap.contains(lal_addr[i]);
         m->second->addLockedAddr(LockedAddr(lal_addr[i], lal_cid[i]));
     }
 

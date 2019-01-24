@@ -14,9 +14,9 @@
  * this list of conditions and the following disclaimer in the documentation
  * and/or other materials provided with the distribution.
  *
- * 3. Neither the name of the copyright holder nor the names of its contributors
- * may be used to endorse or promote products derived from this software
- * without specific prior written permission.
+ * 3. Neither the name of the copyright holder nor the names of its
+ * contributors may be used to endorse or promote products derived from this
+ * software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -30,7 +30,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Steve Reinhardt
+ * Authors: Steve Reinhardt
  */
 
 #include "gpu-compute/shader.hh"
@@ -226,7 +226,7 @@ Shader::handshake(GpuDispatcher *_dispatcher)
 }
 
 void
-Shader::doFunctionalAccess(RequestPtr req, MemCmd cmd, void *data,
+Shader::doFunctionalAccess(const RequestPtr &req, MemCmd cmd, void *data,
                            bool suppress_func_errors, int cu_id)
 {
     int block_size = cuList.at(cu_id)->cacheLineSize();
@@ -338,12 +338,13 @@ Shader::AccessMem(uint64_t address, void *ptr, uint32_t size, int cu_id,
 
     for (ChunkGenerator gen(address, size, cuList.at(cu_id)->cacheLineSize());
          !gen.done(); gen.next()) {
-        Request *req = new Request(0, gen.addr(), gen.size(), 0,
-                                   cuList[0]->masterId(), 0, 0, 0);
+
+        RequestPtr req = std::make_shared<Request>(
+            0, gen.addr(), gen.size(), 0,
+            cuList[0]->masterId(), 0, 0, nullptr);
 
         doFunctionalAccess(req, cmd, data_buf, suppress_func_errors, cu_id);
         data_buf += gen.size();
-        delete req;
     }
 }
 

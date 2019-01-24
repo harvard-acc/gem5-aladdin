@@ -39,7 +39,7 @@
 #
 # Authors: Steve Reinhardt
 
-from __future__ import with_statement
+from __future__ import with_statement, print_function
 import os
 import sys
 import re
@@ -617,35 +617,37 @@ class FloatRegOperand(Operand):
         return c_src + c_dest
 
     def makeRead(self, predRead):
-        bit_select = 0
-        if (self.ctype == 'float' or self.ctype == 'double'):
-            func = 'readFloatRegOperand'
-        else:
-            func = 'readFloatRegOperandBits'
         if self.read_code != None:
-            return self.buildReadCode(func)
+            return self.buildReadCode('readFloatRegOperandBits')
 
         if predRead:
             rindex = '_sourceIndex++'
         else:
             rindex = '%d' % self.src_reg_idx
 
-        return '%s = xc->%s(this, %s);\n' % \
-            (self.base_name, func, rindex)
+        code = 'xc->readFloatRegOperandBits(this, %s)' % rindex
+        if self.ctype == 'float':
+            code = 'bitsToFloat32(%s)' % code
+        elif self.ctype == 'double':
+            code = 'bitsToFloat64(%s)' % code
+        return '%s = %s;\n' % (self.base_name, code)
 
     def makeWrite(self, predWrite):
-        if (self.ctype == 'float' or self.ctype == 'double'):
-            func = 'setFloatRegOperand'
-        else:
-            func = 'setFloatRegOperandBits'
         if self.write_code != None:
-            return self.buildWriteCode(func)
+            return self.buildWriteCode('setFloatRegOperandBits')
 
         if predWrite:
             wp = '_destIndex++'
         else:
             wp = '%d' % self.dest_reg_idx
-        wp = 'xc->%s(this, %s, final_val);' % (func, wp)
+
+        val = 'final_val'
+        if self.ctype == 'float':
+            val = 'floatToBits32(%s)' % val
+        elif self.ctype == 'double':
+            val = 'floatToBits64(%s)' % val
+
+        wp = 'xc->setFloatRegOperandBits(this, %s, %s);' % (wp, val)
 
         wb = '''
         {
@@ -1537,11 +1539,11 @@ class ISAParser(Grammar):
         # select the different chunks. If no 'split' directives are used,
         # the cpp emissions have no effect.
         if re.search('-ns.cc.inc$', filename):
-            print >>f, '#if !defined(__SPLIT) || (__SPLIT == 1)'
+            print('#if !defined(__SPLIT) || (__SPLIT == 1)', file=f)
             self.splits[f] = 1
         # ensure requisite #include's
         elif filename == 'decoder-g.hh.inc':
-            print >>f, '#include "base/bitfield.hh"'
+            print('#include "base/bitfield.hh"', file=f)
 
         return f
 
@@ -1565,6 +1567,9 @@ class ISAParser(Grammar):
         # decoder method - cannot be split
         file = 'decoder.cc'
         with self.open(file) as f:
+            fn = 'base/compiler.hh'
+            f.write('#include "%s"\n' % fn)
+
             fn = 'decoder-g.cc.inc'
             assert(fn in self.files)
             f.write('#include "%s"\n' % fn)
@@ -1596,11 +1601,11 @@ class ISAParser(Grammar):
 
                 fn = 'decoder-ns.cc.inc'
                 assert(fn in self.files)
-                print >>f, 'namespace %s {' % self.namespace
+                print('namespace %s {' % self.namespace, file=f)
                 if splits > 1:
-                    print >>f, '#define __SPLIT %u' % i
-                print >>f, '#include "%s"' % fn
-                print >>f, '}'
+                    print('#define __SPLIT %u' % i, file=f)
+                print('#include "%s"' % fn, file=f)
+                print('}', file=f)
 
         # instruction execution
         splits = self.splits[self.get_file('exec')]
@@ -1617,11 +1622,11 @@ class ISAParser(Grammar):
 
                 fn = 'exec-ns.cc.inc'
                 assert(fn in self.files)
-                print >>f, 'namespace %s {' % self.namespace
+                print('namespace %s {' % self.namespace, file=f)
                 if splits > 1:
-                    print >>f, '#define __SPLIT %u' % i
-                print >>f, '#include "%s"' % fn
-                print >>f, '}'
+                    print('#define __SPLIT %u' % i, file=f)
+                print('#include "%s"' % fn, file=f)
+                print('}', file=f)
 
         # max_inst_regs.hh
         self.update('max_inst_regs.hh',
@@ -2019,7 +2024,7 @@ del wrap
     def p_def_template(self, t):
         'def_template : DEF TEMPLATE ID CODELIT SEMI'
         if t[3] in self.templateMap:
-            print "warning: template %s already defined" % t[3]
+            print("warning: template %s already defined" % t[3])
         self.templateMap[t[3]] = Template(self, t[4])
 
     # An instruction format definition looks like
@@ -2206,7 +2211,8 @@ StaticInstPtr
         codeObj = t[3]
         # just wrap the decoding code from the block as a case in the
         # outer switch statement.
-        codeObj.wrap_decode_block('\n%s\n' % ''.join(case_list))
+        codeObj.wrap_decode_block('\n%s\n' % ''.join(case_list),
+                                  'M5_UNREACHABLE;\n')
         codeObj.has_decode_default = (case_list == ['default:'])
         t[0] = codeObj
 
@@ -2604,9 +2610,9 @@ StaticInstPtr
         try:
             self._parse_isa_desc(*args, **kwargs)
         except ISAParserError, e:
-            print backtrace(self.fileNameStack)
-            print "At %s:" % e.lineno
-            print e
+            print(backtrace(self.fileNameStack))
+            print("At %s:" % e.lineno)
+            print(e)
             sys.exit(1)
 
 # Called as script: get args from command line.

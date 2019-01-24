@@ -75,6 +75,13 @@ DefaultDecode<Impl>::DefaultDecode(O3CPU *_cpu, DerivO3CPUParams *params)
 
     // @todo: Make into a parameter
     skidBufferMax = (fetchToDecodeDelay + 1) *  params->fetchWidth;
+    for (int tid = 0; tid < Impl::MaxThreads; tid++) {
+        stalls[tid] = {false};
+        decodeStatus[tid] = Idle;
+        bdelayDoneSeqNum[tid] = 0;
+        squashInst[tid] = nullptr;
+        squashAfterDelaySlot[tid] = 0;
+    }
 }
 
 template<class Impl>
@@ -288,7 +295,7 @@ DefaultDecode<Impl>::unblock(ThreadID tid)
 
 template<class Impl>
 void
-DefaultDecode<Impl>::squash(DynInstPtr &inst, ThreadID tid)
+DefaultDecode<Impl>::squash(const DynInstPtr &inst, ThreadID tid)
 {
     DPRINTF(Decode, "[tid:%i]: [sn:%i] Squashing due to incorrect branch "
             "prediction detected at decode.\n", tid, inst->seqNum);
@@ -650,8 +657,6 @@ DefaultDecode<Impl>::decodeInsts(ThreadID tid)
         ++decodeRunCycles;
     }
 
-    DynInstPtr inst;
-
     std::queue<DynInstPtr>
         &insts_to_decode = decodeStatus[tid] == Unblocking ?
         skidBuffer[tid] : insts[tid];
@@ -661,7 +666,7 @@ DefaultDecode<Impl>::decodeInsts(ThreadID tid)
     while (insts_available > 0 && toRenameIndex < decodeWidth) {
         assert(!insts_to_decode.empty());
 
-        inst = insts_to_decode.front();
+        DynInstPtr inst = std::move(insts_to_decode.front());
 
         insts_to_decode.pop();
 

@@ -49,12 +49,18 @@
 #ifndef __MEM_CACHE_WRITE_QUEUE_ENTRY_HH__
 #define __MEM_CACHE_WRITE_QUEUE_ENTRY_HH__
 
+#include <cassert>
+#include <iosfwd>
 #include <list>
+#include <string>
 
 #include "base/printable.hh"
+#include "base/types.hh"
 #include "mem/cache/queue_entry.hh"
+#include "mem/packet.hh"
+#include "sim/core.hh"
 
-class Cache;
+class BaseCache;
 
 /**
  * Write queue entry
@@ -91,7 +97,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
 
         TargetList() {}
         void add(PacketPtr pkt, Tick readyTime, Counter order);
-        bool checkFunctional(PacketPtr pkt);
+        bool trySatisfyFunctional(PacketPtr pkt);
         void print(std::ostream &os, int verbosity,
                    const std::string &prefix) const;
     };
@@ -101,7 +107,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
     /** WriteQueueEntry list iterator. */
     typedef List::iterator Iterator;
 
-    bool sendPacket(Cache &cache);
+    bool sendPacket(BaseCache &cache);
 
   private:
 
@@ -173,7 +179,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
         targets.pop_front();
     }
 
-    bool checkFunctional(PacketPtr pkt);
+    bool trySatisfyFunctional(PacketPtr pkt);
 
     /**
      * Prints the contents of this MSHR for debugging.

@@ -51,11 +51,14 @@ class RiscvStaticInst : public StaticInst
   protected:
     using StaticInst::StaticInst;
 
-    virtual std::string
-    generateDisassembly(Addr pc, const SymbolTable *symtab) const = 0;
-
   public:
-    void advancePC(PCState &pc) const { pc.advance(); }
+    void advancePC(PCState &pc) const override { pc.advance(); }
+
+    size_t
+    asBytes(void *buf, size_t size) override
+    {
+        return simpleAsBytes(buf, size, machInst);
+    }
 };
 
 /**
@@ -75,23 +78,27 @@ class RiscvMacroInst : public RiscvStaticInst
 
     ~RiscvMacroInst() { microops.clear(); }
 
-    StaticInstPtr fetchMicroop(MicroPC upc) const { return microops[upc]; }
+    StaticInstPtr
+    fetchMicroop(MicroPC upc) const override
+    {
+        return microops[upc];
+    }
 
     Fault
-    initiateAcc(ExecContext *xc, Trace::InstRecord *traceData) const
+    initiateAcc(ExecContext *xc, Trace::InstRecord *traceData) const override
     {
         panic("Tried to execute a macroop directly!\n");
     }
 
     Fault
     completeAcc(PacketPtr pkt, ExecContext *xc,
-                Trace::InstRecord *traceData) const
+                Trace::InstRecord *traceData) const override
     {
         panic("Tried to execute a macroop directly!\n");
     }
 
     Fault
-    execute(ExecContext *xc, Trace::InstRecord *traceData) const
+    execute(ExecContext *xc, Trace::InstRecord *traceData) const override
     {
         panic("Tried to execute a macroop directly!\n");
     }
@@ -110,7 +117,7 @@ class RiscvMicroInst : public RiscvStaticInst
         flags[IsMicroop] = true;
     }
 
-    void advancePC(PCState &pcState) const;
+    void advancePC(PCState &pcState) const override;
 };
 
 }

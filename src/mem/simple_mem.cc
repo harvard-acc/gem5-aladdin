@@ -48,8 +48,6 @@
 #include "base/trace.hh"
 #include "debug/Drain.hh"
 
-using namespace std;
-
 SimpleMemory::SimpleMemory(const SimpleMemoryParams* p) :
     AbstractMemory(p),
     port(name() + ".port", *this), latency(p->latency),
@@ -93,7 +91,7 @@ SimpleMemory::recvFunctional(PacketPtr pkt)
     auto p = packetQueue.begin();
     // potentially update the packets in our packet queue as well
     while (!done && p != packetQueue.end()) {
-        done = pkt->checkFunctional(p->pkt);
+        done = pkt->trySatisfyFunctional(p->pkt);
         ++p;
     }
 

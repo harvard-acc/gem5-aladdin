@@ -30,6 +30,8 @@
 
 #include "arch/generic/mmapped_ipr.hh"
 
+#include "arch/isa_traits.hh"
+#include "config/the_isa.hh"
 #include "mem/packet.hh"
 #include "mem/packet_access.hh"
 #include "sim/pseudo_inst.hh"
@@ -47,7 +49,7 @@ handlePseudoInst(ThreadContext *xc, Packet *pkt)
     assert((offset >> 16) == 0);
     ret = PseudoInst::pseudoInst(xc, func, subfunc);
     if (pkt->isRead())
-        pkt->set(ret);
+        pkt->set(ret, TheISA::GuestByteOrder);
 }
 
 Cycles

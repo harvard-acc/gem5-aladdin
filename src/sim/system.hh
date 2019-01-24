@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014 ARM Limited
+ * Copyright (c) 2012, 2014, 2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -57,6 +57,7 @@
 #include "base/statistics.hh"
 #include "config/the_isa.hh"
 #include "enums/MemoryMode.hh"
+#include "mem/mem_master.hh"
 #include "mem/mem_object.hh"
 #include "mem/physical.hh"
 #include "mem/port.hh"
@@ -199,7 +200,6 @@ class System : public MemObject
 #endif
 
     std::vector<ThreadContext *> threadContexts;
-    int _numContexts;
     const bool multiThread;
 
     ThreadContext *getThreadContext(ContextID tid)
@@ -207,11 +207,7 @@ class System : public MemObject
         return threadContexts[tid];
     }
 
-    int numContexts()
-    {
-        assert(_numContexts == (int)threadContexts.size());
-        return _numContexts;
-    }
+    unsigned numContexts() const { return threadContexts.size(); }
 
     /* Stores a pointer to a datapath object with any dependencies (other
      * accelerators that must finish execution before this accelerator an
@@ -452,31 +448,96 @@ class System : public MemObject
      * It's used to uniquely id any master in the system by name for things
      * like cache statistics.
      */
-    std::vector<std::string> masterIds;
+    std::vector<MasterInfo> masters;
 
     ThermalModel * thermalModel;
 
+  protected:
+    /**
+     * Strips off the system name from a master name
+     */
+    std::string stripSystemName(const std::string& master_name) const;
+
   public:
 
-    /** Request an id used to create a request object in the system. All objects
+    /**
+     * Request an id used to create a request object in the system. All objects
      * that intend to issues requests into the memory system must request an id
      * in the init() phase of startup. All master ids must be fixed by the
      * regStats() phase that immediately precedes it. This allows objects in
      * the memory system to understand how many masters may exist and
      * appropriately name the bins of their per-master stats before the stats
-     * are finalized
+     * are finalized.
+     *
+     * Registers a MasterID:
+     * This method takes two parameters, one of which is optional.
+     * The first one is the master object, and it is compulsory; in case
+     * a object has multiple (sub)masters, a second parameter must be
+     * provided and it contains the name of the submaster. The method will
+     * create a master's name by concatenating the SimObject name with the
+     * eventual submaster string, separated by a dot.
+     *
+     * As an example:
+     * For a cpu having two masters: a data master and an instruction master,
+     * the method must be called twice:
+     *
+     * instMasterId = getMasterId(cpu, "inst");
+     * dataMasterId = getMasterId(cpu, "data");
+     *
+     * and the masters' names will be:
+     * - "cpu.inst"
+     * - "cpu.data"
+     *
+     * @param master SimObject related to the master
+     * @param submaster String containing the submaster's name
+     * @return the master's ID.
      */
-    MasterID getMasterId(std::string req_name);
+    MasterID getMasterId(const SimObject* master,
+                         std::string submaster = std::string());
 
-    /** Get the name of an object for a given request id.
+    /**
+     * Registers a GLOBAL MasterID, which is a MasterID not related
+     * to any particular SimObject; since no SimObject is passed,
+     * the master gets registered by providing the full master name.
+     *
+     * @param masterName full name of the master
+     * @return the master's ID.
+     */
+    MasterID getGlobalMasterId(const std::string& master_name);
+
+    /**
+     * Get the name of an object for a given request id.
      */
     std::string getMasterName(MasterID master_id);
 
+    /**
+     * Looks up the MasterID for a given SimObject
+     * returns an invalid MasterID (invldMasterId) if not found.
+     */
+    MasterID lookupMasterId(const SimObject* obj) const;
+
+    /**
+     * Looks up the MasterID for a given object name string
+     * returns an invalid MasterID (invldMasterId) if not found.
+     */
+    MasterID lookupMasterId(const std::string& name) const;
+
     /** Get the number of masters registered in the system */
-    MasterID maxMasters()
-    {
-        return masterIds.size();
-    }
+    MasterID maxMasters() { return masters.size(); }
+
+  protected:
+    /** helper function for getMasterId */
+    MasterID _getMasterId(const SimObject* master,
+                          const std::string& master_name);
+
+    /**
+     * Helper function for constructing the full (sub)master name
+     * by providing the root master and the relative submaster name.
+     */
+    std::string leafMasterName(const SimObject* master,
+                               const std::string& submaster);
+
+  public:
 
     void regStats() override;
     /**

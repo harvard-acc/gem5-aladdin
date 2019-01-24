@@ -46,8 +46,8 @@
  * AbstractMemory declaration
  */
 
-#ifndef __ABSTRACT_MEMORY_HH__
-#define __ABSTRACT_MEMORY_HH__
+#ifndef __MEM_ABSTRACT_MEMORY_HH__
+#define __MEM_ABSTRACT_MEMORY_HH__
 
 #include "mem/mem_object.hh"
 #include "params/AbstractMemory.hh"
@@ -79,13 +79,13 @@ class LockedAddr {
     static Addr mask(Addr paddr) { return (paddr & ~Addr_Mask); }
 
     // check for matching execution context
-    bool matchesContext(Request *req) const
+    bool matchesContext(const RequestPtr &req) const
     {
         return (contextId == req->contextId());
     }
 
-    LockedAddr(Request *req) : addr(mask(req->getPaddr())),
-                               contextId(req->contextId())
+    LockedAddr(const RequestPtr &req) : addr(mask(req->getPaddr())),
+                                        contextId(req->contextId())
     {}
 
     // constructor for unserialization use
@@ -140,7 +140,7 @@ class AbstractMemory : public MemObject
     // this method must be called on *all* stores since even
     // non-conditional stores must clear any matching lock addresses.
     bool writeOK(PacketPtr pkt) {
-        Request *req = pkt->req;
+        const RequestPtr &req = pkt->req;
         if (lockedAddrList.empty()) {
             // no locked addrs: nothing to check, store_conditional fails
             bool isLLSC = pkt->isLLSC();
@@ -319,4 +319,4 @@ class AbstractMemory : public MemObject
 
 };
 
-#endif //__ABSTRACT_MEMORY_HH__
+#endif //__MEM_ABSTRACT_MEMORY_HH__

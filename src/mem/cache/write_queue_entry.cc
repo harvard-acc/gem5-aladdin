@@ -50,18 +50,13 @@
 
 #include "mem/cache/write_queue_entry.hh"
 
-#include <algorithm>
 #include <cassert>
 #include <string>
-#include <vector>
 
 #include "base/logging.hh"
 #include "base/types.hh"
-#include "debug/Cache.hh"
-#include "mem/cache/cache.hh"
-#include "sim/core.hh"
-
-using namespace std;
+#include "mem/cache/base.hh"
+#include "mem/request.hh"
 
 inline void
 WriteQueueEntry::TargetList::add(PacketPtr pkt, Tick readyTime,
@@ -71,10 +66,10 @@ WriteQueueEntry::TargetList::add(PacketPtr pkt, Tick readyTime,
 }
 
 bool
-WriteQueueEntry::TargetList::checkFunctional(PacketPtr pkt)
+WriteQueueEntry::TargetList::trySatisfyFunctional(PacketPtr pkt)
 {
     for (auto& t : *this) {
-        if (pkt->checkFunctional(t.pkt)) {
+        if (pkt->trySatisfyFunctional(t.pkt)) {
             return true;
         }
     }
@@ -127,21 +122,21 @@ WriteQueueEntry::deallocate()
 }
 
 bool
-WriteQueueEntry::checkFunctional(PacketPtr pkt)
+WriteQueueEntry::trySatisfyFunctional(PacketPtr pkt)
 {
     // For printing, we treat the WriteQueueEntry as a whole as single
     // entity. For other requests, we iterate over the individual
     // targets since that's where the actual data lies.
     if (pkt->isPrint()) {
-        pkt->checkFunctional(this, blkAddr, isSecure, blkSize, nullptr);
+        pkt->trySatisfyFunctional(this, blkAddr, isSecure, blkSize, nullptr);
         return false;
     } else {
-        return targets.checkFunctional(pkt);
+        return targets.trySatisfyFunctional(pkt);
     }
 }
 
 bool
-WriteQueueEntry::sendPacket(Cache &cache)
+WriteQueueEntry::sendPacket(BaseCache &cache)
 {
     return cache.sendWriteQueuePacket(this);
 }
@@ -163,7 +158,7 @@ WriteQueueEntry::print(std::ostream &os, int verbosity,
 std::string
 WriteQueueEntry::print() const
 {
-    ostringstream str;
+    std::ostringstream str;
     print(str);
     return str.str();
 }

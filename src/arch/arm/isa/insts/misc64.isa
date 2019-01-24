@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2011-2013, 2016-2017 ARM Limited
+// Copyright (c) 2011-2013, 2016-2018 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -42,29 +42,39 @@ let {{
     fault = std::make_shared<SupervisorCall>(machInst, bits(machInst, 20, 5));
     '''
 
-    svcIop = InstObjParams("svc", "Svc64", "ArmStaticInst",
+    svcIop = InstObjParams("svc", "Svc64", "ImmOp64",
                            svcCode, ["IsSyscall", "IsNonSpeculative",
                                      "IsSerializeAfter"])
-    header_output = BasicDeclare.subst(svcIop)
-    decoder_output = BasicConstructor64.subst(svcIop)
+    header_output = ImmOp64Declare.subst(svcIop)
+    decoder_output = ImmOp64Constructor.subst(svcIop)
     exec_output = BasicExecute.subst(svcIop)
 
     hvcCode = '''
     SCR scr = Scr64;
+    HCR hcr = Hcr64;
+    CPSR cpsr = Cpsr;
 
-    if (!ArmSystem::haveVirtualization(xc->tcBase()) ||
-        (ArmSystem::haveSecurity(xc->tcBase()) && (!scr.ns || !scr.hce))) {
-        fault = disabledFault();
+    auto tc = xc->tcBase();
+    ExceptionLevel pstate_EL = (ExceptionLevel)(uint8_t)(cpsr.el);
+
+    bool unalloc_encod = !ArmSystem::haveEL(tc, EL2) || pstate_EL == EL0 ||
+                         (pstate_EL == EL1 && inSecureState(tc));
+
+    bool hvc_enable = ArmSystem::haveEL(tc, EL3) ?
+        scr.hce : !hcr.hcd;
+
+    if (unalloc_encod || !hvc_enable) {
+        fault = undefinedFault64(tc, pstate_EL);
     } else {
         fault = std::make_shared<HypervisorCall>(machInst, bits(machInst, 20, 5));
     }
     '''
 
-    hvcIop = InstObjParams("hvc", "Hvc64", "ArmStaticInst",
+    hvcIop = InstObjParams("hvc", "Hvc64", "ImmOp64",
                            hvcCode, ["IsSyscall", "IsNonSpeculative",
                                      "IsSerializeAfter"])
-    header_output += BasicDeclare.subst(hvcIop)
-    decoder_output += BasicConstructor64.subst(hvcIop)
+    header_output += ImmOp64Declare.subst(hvcIop)
+    decoder_output += ImmOp64Constructor.subst(hvcIop)
     exec_output += BasicExecute.subst(hvcIop)
 
     # @todo: extend to take into account Virtualization.
@@ -79,10 +89,10 @@ let {{
     }
     '''
 
-    smcIop = InstObjParams("smc", "Smc64", "ArmStaticInst",
+    smcIop = InstObjParams("smc", "Smc64", "ImmOp64",
                            smcCode, ["IsNonSpeculative", "IsSerializeAfter"])
-    header_output += BasicDeclare.subst(smcIop)
-    decoder_output += BasicConstructor64.subst(smcIop)
+    header_output += ImmOp64Declare.subst(smcIop)
+    decoder_output += ImmOp64Constructor.subst(smcIop)
     exec_output += BasicExecute.subst(smcIop)
 
     def subst(templateBase, iop):
@@ -140,7 +150,7 @@ let {{
     exec_output += BasicExecute.subst(unknown64Iop)
 
     isbIop = InstObjParams("isb", "Isb64", "ArmStaticInst", "",
-                           ['IsSerializeAfter', 'IsSquashAfter'])
+                           ['IsSquashAfter'])
     header_output += BasicDeclare.subst(isbIop)
     decoder_output += BasicConstructor64.subst(isbIop)
     exec_output += BasicExecute.subst(isbIop)
@@ -169,9 +179,28 @@ let {{
                                                  bits(machInst, 20, 5));
     '''
 
-    brkIop = InstObjParams("brk", "Brk64", "ArmStaticInst",
+    brkIop = InstObjParams("brk", "Brk64", "ImmOp64",
                            brkCode, ["IsSerializeAfter"])
-    header_output += BasicDeclare.subst(brkIop)
-    decoder_output += BasicConstructor64.subst(brkIop)
+    header_output += ImmOp64Declare.subst(brkIop)
+    decoder_output += ImmOp64Constructor.subst(brkIop)
     exec_output += BasicExecute.subst(brkIop)
+
+    hltCode = '''
+    ThreadContext *tc = xc->tcBase();
+    if (ArmSystem::haveSemihosting(tc) && imm == 0xF000) {
+        X0 = ArmSystem::callSemihosting64(tc, X0 & mask(32), X1);
+    } else {
+        // HLT instructions aren't implemented, so treat them as undefined
+        // instructions.
+        fault = std::make_shared<UndefinedInstruction>(
+            machInst, false, mnemonic);
+    }
+
+    '''
+
+    hltIop = InstObjParams("hlt", "Hlt64", "ImmOp64",
+                           hltCode, ["IsNonSpeculative"])
+    header_output += ImmOp64Declare.subst(hltIop)
+    decoder_output += SemihostConstructor64.subst(hltIop)
+    exec_output += BasicExecute.subst(hltIop)
 }};

@@ -1,7 +1,7 @@
 /*
  * Copyright 2015 LabWare
  * Copyright 2014 Google, Inc.
- * Copyright (c) 2013, 2016 ARM Limited
+ * Copyright (c) 2013, 2016, 2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -50,8 +50,9 @@
 
 #include <algorithm>
 
+#include "arch/arm/registers.hh"
 #include "arch/arm/utility.hh"
-#include "arch/generic/vec_reg.hh"
+#include "base/compiler.hh"
 #include "base/remote_gdb.hh"
 
 class System;
@@ -71,10 +72,10 @@ class RemoteGDB : public BaseRemoteGDB
       private:
         struct {
           uint32_t gpr[16];
-          uint32_t fpr[8*3];
-          uint32_t fpscr;
           uint32_t cpsr;
-        } r;
+          uint64_t fpr[32];
+          uint32_t fpscr;
+        } M5_ATTR_PACKED r;
       public:
         char *data() const { return (char *)&r; }
         size_t size() const { return sizeof(r); }
@@ -95,10 +96,11 @@ class RemoteGDB : public BaseRemoteGDB
           uint64_t x[31];
           uint64_t spx;
           uint64_t pc;
-          uint64_t cpsr;
-          uint32_t v[32*4];
-          ArmISA::VecRegContainer vec[32];
-        } r;
+          uint32_t cpsr;
+          VecElem v[NumVecV8ArchRegs * NumVecElemPerVecReg];
+          uint32_t fpsr;
+          uint32_t fpcr;
+        } M5_ATTR_PACKED r;
       public:
         char *data() const { return (char *)&r; }
         size_t size() const { return sizeof(r); }
@@ -117,6 +119,12 @@ class RemoteGDB : public BaseRemoteGDB
   public:
     RemoteGDB(System *_system, ThreadContext *tc, int _port);
     BaseGdbRegCache *gdbRegs();
+    std::vector<std::string>
+    availableFeatures() const
+    {
+        return {"qXfer:features:read+"};
+    };
+    bool getXferFeaturesRead(const std::string &annex, std::string &output);
 };
 } // namespace ArmISA
 

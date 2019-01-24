@@ -45,11 +45,6 @@ using SparcISAInst::MaxInstSrcRegs;
 using SparcISAInst::MaxInstDestRegs;
 using SparcISAInst::MaxMiscDestRegs;
 
-typedef uint64_t IntReg;
-typedef uint64_t MiscReg;
-typedef float FloatReg;
-typedef uint32_t FloatRegBits;
-
 // dummy typedef since we don't have CC regs
 typedef uint8_t CCReg;
 
@@ -61,13 +56,6 @@ using ConstVecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, true>;
 using VecRegContainer = VecReg::Container;
 // This has to be one to prevent warnings that are treated as errors
 constexpr unsigned NumVecRegs = 1;
-
-typedef union
-{
-    IntReg intReg;
-    FloatReg fpreg;
-    MiscReg ctrlreg;
-} AnyReg;
 
 // semantically meaningful register indices
 const int ZeroReg = 0;      // architecturally meaningful
