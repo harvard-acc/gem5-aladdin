@@ -27,6 +27,14 @@ list (see link at the very bottom).
 
 #### December 1st, 2017 ####
 
+All commits from gem5 upstream as of 01/24/19 have been merged into
+gem5-Aladdin.  Notable changes:
+
+* SystemC support in gem5.
+* GTest framework for unit testing.
+
+#### December 1st, 2017 ####
+
 gem5-Aladdin now has a Docker image! This image has all of gem5-aladdin's
 dependencies installed, and it comes with a basic set of development tools
 (e.g. vim). If you are having issues building the simulator because of
