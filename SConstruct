@@ -381,6 +381,14 @@ if main['GCC'] + main['CLANG'] > 1:
     print('Error: How can we have two at the same time?')
     Exit(1)
 
+# Set up LLVM version for Aladdin.
+llvm_cmd = readCommand(['clang', '--version'], exception=False)
+llvm_version = ''.join(re.findall(r'\d+', llvm_cmd)[:2])
+if llvm_version != '60' and llvm_version != '34':
+    print('We only support LLVM-3.4 and LLVM-6.0!')
+else:
+    main.Append(CCFLAGS=['-DLLVM_VERSION=' + llvm_version])
+
 # Set up default C++ compiler flags
 if main['GCC'] or main['CLANG']:
     # As gcc and clang share many flags, do the common parts here
