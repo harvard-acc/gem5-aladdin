@@ -67,10 +67,120 @@ from common.Caches import *
 from common.cpu2000 import *
 
 def addAladdinOptions(parser):
+    parser.add_option("--accel_type", default="aladdin",
+        help="The accelerator type, options are 'aladdin' and \
+              'systolic_array'.")
     parser.add_option("--accel_cfg_file", default=None,
         help="Aladdin accelerator configuration file.")
     parser.add_option("--aladdin-debugger", action="store_true",
         help="Run the Aladdin debugger on accelerator initialization.")
+
+def createAladdinDatapths(accel_cfg_file):
+    # First read all default values.
+    default_cfg = ConfigParser.SafeConfigParser()
+    default_cfg_file = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "aladdin_template.cfg")
+    default_cfg.read(default_cfg_file)
+    defaults = dict(i for i in default_cfg.items("DEFAULT"))
+
+    # Now read the actual supplied config file using the defaults.
+    config = ConfigParser.SafeConfigParser(defaults)
+    config.read(accel_cfg_file)
+    accels = config.sections()
+    if not accels:
+        fatal("No accelerators were specified!")
+    datapaths = []
+    for accel in accels:
+        memory_type = config.get(accel, 'memory_type').lower()
+        # Accelerators need their own clock domain!
+        cycleTime = config.getint(accel, "cycle_time")
+        clock = "%1.3fGHz" % (1/cycleTime)
+        clk_domain = SrcClockDomain(
+            clock = clock, voltage_domain = system.cpu_voltage_domain)
+        # Set the globally required parameters.
+        datapath = HybridDatapath(
+            clk_domain = clk_domain,
+            benchName = accel,
+            # TODO: Ideally bench_name would change to output_prefix but that's
+            # a pretty big breaking change.
+            outputPrefix = config.get(accel, "bench_name"),
+            traceFileName = config.get(accel, "trace_file_name"),
+            configFileName = config.get(accel, "config_file_name"),
+            acceleratorName = "%s_datapath" % accel,
+            acceleratorId = config.getint(accel, "accelerator_id"),
+            cycleTime = cycleTime,
+            useDb = config.getboolean(accel, "use_db"),
+            experimentName = config.get(accel, "experiment_name"),
+            enableStatsDump = options.enable_stats_dump_and_resume,
+            executeStandalone = (np == 0))
+        datapath.cacheLineFlushLatency = config.getint(accel,
+            "cacheline_flush_latency")
+        datapath.cacheLineInvalidateLatency = config.getint(accel,
+            "cacheline_invalidate_latency")
+        datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
+        datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
+        datapath.numDmaChannels = config.getint(accel, "num_dma_channels")
+        datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
+        datapath.pipelinedDma = config.getboolean(accel, "pipelined_dma")
+        datapath.ignoreCacheFlush = config.getboolean(accel,
+            "ignore_cache_flush")
+        datapath.invalidateOnDmaStore = config.getboolean(accel,
+            "invalidate_on_dma_store")
+        datapath.recordMemoryTrace = config.getboolean(accel,
+            "record_memory_trace")
+        datapath.enableAcp = config.getboolean(accel, "enable_acp")
+        datapath.useAcpCache = True
+        datapath.acpCacheSize = config.get(accel, "acp_cache_size")
+        datapath.acpCacheLatency = config.getint(accel, "acp_cache_latency")
+        datapath.acpCacheMSHRs = config.getint(accel, "acp_cache_mshrs")
+        datapath.useAladdinDebugger = options.aladdin_debugger
+        if memory_type == "cache":
+            datapath.cacheSize = config.get(accel, "cache_size")
+            datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
+            datapath.cacheQueueSize = config.get(accel, "cache_queue_size")
+            datapath.cacheAssoc = config.getint(accel, "cache_assoc")
+            datapath.cacheHitLatency = config.getint(accel, "cache_hit_latency")
+            datapath.cacheLineSize = options.cacheline_size
+            datapath.cactiCacheConfig = config.get(accel, "cacti_cache_config")
+            datapath.tlbEntries = config.getint(accel, "tlb_entries")
+            datapath.tlbAssoc = config.getint(accel, "tlb_assoc")
+            datapath.tlbHitLatency = config.getint(accel, "tlb_hit_latency")
+            datapath.tlbMissLatency = config.getint(accel, "tlb_miss_latency")
+            datapath.tlbCactiConfig = config.get(accel, "cacti_tlb_config")
+            datapath.tlbPageBytes = config.getint(accel, "tlb_page_size")
+            datapath.numOutStandingWalks = config.getint(
+                accel, "tlb_max_outstanding_walks")
+            datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
+        elif memory_type == "spad" and options.ruby:
+            # If the memory_type is spad, Aladdin will initialize a 2-way cache
+            # for every datapath, although this cache will not be used in
+            # simulation. Ruby doesn't support direct-mapped caches, so set the
+            # assoc to 2.
+            datapath.cacheAssoc = 2
+        if (memory_type != "cache" and memory_type != "spad"):
+            fatal("Aladdin configuration file specified invalid memory type %s "
+                  "for accelerator %s." % (memory_type, accel))
+        datapaths.append(datapath)
+    for datapath in datapaths:
+        setattr(system, datapath.acceleratorName, datapath)
+
+def createSystolicArrayDatapths(accel_cfg_file):
+    config = ConfigParser.SafeConfigParser()
+    config.read(accel_cfg_file)
+    accels = config.sections()
+    if not accels:
+        fatal("No systolic arrays were specified!")
+    systolic_arrays = []
+    for accel in accels:
+        # Set the globally required parameters.
+        systolic_array = SystolicArray(
+            acceleratorName = accel,
+            acceleratorId = config.getint(accel, "acceleratorId"),
+            peArrayRows = config.getint(accel, "peArrayRows"),
+            peArrayCols = config.getint(accel, "peArrayCols"),
+            sramSize = config.getint(accel, "sramSize"))
+        systolic_arrays.append(systolic_array)
+        setattr(system, systolic_array.acceleratorName, systolic_array)
 
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""
@@ -121,7 +231,6 @@ def get_processes(options):
         return multiprocesses, idx
     else:
         return multiprocesses, 1
-
 
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
@@ -206,87 +315,10 @@ if np > 0:
       cpu.clk_domain = system.cpu_clk_domain
 
 if options.accel_cfg_file:
-  # First read all default values.
-  default_cfg = ConfigParser.SafeConfigParser()
-  default_cfg_file = os.path.join(
-      os.path.dirname(os.path.realpath(__file__)), "aladdin_template.cfg")
-  default_cfg.read(default_cfg_file)
-  defaults = dict(i for i in default_cfg.items("DEFAULT"))
-
-  # Now read the actual supplied config file using the defaults.
-  config = ConfigParser.SafeConfigParser(defaults)
-  config.read(options.accel_cfg_file)
-  accels = config.sections()
-  if not accels:
-    fatal("No accelerators were specified!")
-  datapaths = []
-  for accel in accels:
-    memory_type = config.get(accel, 'memory_type').lower()
-    # Accelerators need their own clock domain!
-    cycleTime = config.getint(accel, "cycle_time")
-    clock = "%1.3fGHz" % (1/cycleTime)
-    clk_domain = SrcClockDomain(
-        clock = clock, voltage_domain = system.cpu_voltage_domain)
-    # Set the globally required parameters.
-    datapath = HybridDatapath(
-        clk_domain = clk_domain,
-        benchName = accel,
-        # TODO: Ideally bench_name would change to output_prefix but that's a
-        # pretty big breaking change.
-        outputPrefix = config.get(accel, "bench_name"),
-        traceFileName = config.get(accel, "trace_file_name"),
-        configFileName = config.get(accel, "config_file_name"),
-        acceleratorName = "%s_datapath" % accel,
-        acceleratorId = config.getint(accel, "accelerator_id"),
-        cycleTime = cycleTime,
-        useDb = config.getboolean(accel, "use_db"),
-        experimentName = config.get(accel, "experiment_name"),
-        enableStatsDump = options.enable_stats_dump_and_resume,
-        executeStandalone = (np == 0))
-    datapath.cacheLineFlushLatency = config.getint(accel, "cacheline_flush_latency")
-    datapath.cacheLineInvalidateLatency = config.getint(accel, "cacheline_invalidate_latency")
-    datapath.dmaSetupOverhead = config.getint(accel, "dma_setup_overhead")
-    datapath.maxDmaRequests = config.getint(accel, "max_dma_requests")
-    datapath.numDmaChannels = config.getint(accel, "num_dma_channels")
-    datapath.dmaChunkSize = config.getint(accel, "dma_chunk_size")
-    datapath.pipelinedDma = config.getboolean(accel, "pipelined_dma")
-    datapath.ignoreCacheFlush = config.getboolean(accel, "ignore_cache_flush")
-    datapath.invalidateOnDmaStore = config.getboolean(accel, "invalidate_on_dma_store")
-    datapath.recordMemoryTrace = config.getboolean(accel, "record_memory_trace")
-    datapath.enableAcp = config.getboolean(accel, "enable_acp")
-    datapath.useAcpCache = True
-    datapath.acpCacheSize = config.get(accel, "acp_cache_size")
-    datapath.acpCacheLatency = config.getint(accel, "acp_cache_latency")
-    datapath.acpCacheMSHRs = config.getint(accel, "acp_cache_mshrs")
-    datapath.useAladdinDebugger = options.aladdin_debugger
-    if memory_type == "cache":
-      datapath.cacheSize = config.get(accel, "cache_size")
-      datapath.cacheBandwidth = config.get(accel, "cache_bandwidth")
-      datapath.cacheQueueSize = config.get(accel, "cache_queue_size")
-      datapath.cacheAssoc = config.getint(accel, "cache_assoc")
-      datapath.cacheHitLatency = config.getint(accel, "cache_hit_latency")
-      datapath.cacheLineSize = options.cacheline_size
-      datapath.cactiCacheConfig = config.get(accel, "cacti_cache_config")
-      datapath.tlbEntries = config.getint(accel, "tlb_entries")
-      datapath.tlbAssoc = config.getint(accel, "tlb_assoc")
-      datapath.tlbHitLatency = config.getint(accel, "tlb_hit_latency")
-      datapath.tlbMissLatency = config.getint(accel, "tlb_miss_latency")
-      datapath.tlbCactiConfig = config.get(accel, "cacti_tlb_config")
-      datapath.tlbPageBytes = config.getint(accel, "tlb_page_size")
-      datapath.numOutStandingWalks = config.getint(
-          accel, "tlb_max_outstanding_walks")
-      datapath.tlbBandwidth = config.getint(accel, "tlb_bandwidth")
-    elif memory_type == "spad" and options.ruby:
-      # If the memory_type is spad, Aladdin will initialize a 2-way cache for
-      # every datapath, although this cache will not be used in simulation.
-      # Ruby doesn't support direct-mapped caches, so set the assoc to 2.
-      datapath.cacheAssoc = 2
-    if (memory_type != "cache" and memory_type != "spad"):
-      fatal("Aladdin configuration file specified invalid memory type %s for "
-            "accelerator %s." % (memory_type, accel))
-    datapaths.append(datapath)
-  for datapath in datapaths:
-    setattr(system, datapath.acceleratorName, datapath)
+    if options.accel_type == "aladdin":
+        createAladdinDatapths(options.accel_cfg_file)
+    elif options.accel_type == "systolic_array":
+        createSystolicArrayDatapths(options.accel_cfg_file)
 
 if options.simpoint_profile:
     if not CpuConfig.is_atomic_cpu(TestCPUClass):

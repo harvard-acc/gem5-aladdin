@@ -688,14 +688,24 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
 
         exitSimLoop(exit_sim_loop_reason);
       } else {
-        // Translate the finish flag pointer to a physical address that Aladdin
-        // will write to when execution is completed.
-        Addr paddr;
-        Addr finish_flag = (Addr) p->getSyscallArg(tc, index);
-        p->pTable->translate(finish_flag, paddr);
-        // We need the context and thread id of the calling thread.
-        p->system->activateAccelerator(
-            req, paddr, tc->contextId(), tc->threadId());
+          // Read the accelerator params.
+          Addr accel_params_ptr = (Addr)p->getSyscallArg(tc, index);
+          uint8_t* accel_params_buf = new uint8_t[100];
+          SETranslatingPortProxy& memProxy = tc->getMemProxy();
+          memProxy.readBlob(
+              accel_params_ptr, accel_params_buf, 100);
+          // Translate the finish flag pointer to a physical address that
+          // Aladdin will write to when execution is completed.
+          Addr paddr;
+          Addr finish_flag;
+          size_t word_size =
+              p->objFile->getArch() == ObjectFile::X86_64 ? 8 : 4;
+          memcpy(&finish_flag, &accel_params_buf[0], word_size);
+          p->pTable->translate(finish_flag, paddr);
+
+          // We need the context and thread id of the calling thread.
+          p->system->activateAccelerator(req, paddr, (void*)accel_params_buf,
+                                         tc->contextId(), tc->threadId());
       }
       return -ENOTTY;
     }

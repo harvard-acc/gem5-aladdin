@@ -1,0 +1,10 @@
+import sys
+
+Import('*')
+
+SimObject('SystolicArray.py')
+
+Source('systolic_array.cpp')
+
+DebugFlag('SystolicArray')
+DebugFlag('SystolicArrayVerbose')

@@ -247,6 +247,7 @@ class System : public MemObject
     /* Activates an accelerator with the provided parameters. */
     void activateAccelerator(unsigned accel_id,
                              Addr finish_flag,
+                             void* accel_params,
                              int context_id,
                              int thread_id) {
         if (accelerators.find(accel_id) == accelerators.end())
@@ -261,6 +262,8 @@ class System : public MemObject
          * for supporting cache prefetchers.
          */
         accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
+        /* Set the accelerator params. */
+        accelerators[accel_id]->setParams(accel_params);
         /* Adds the specified accelerator to the event queue with a given number
          * of delay cycles (to emulate software overhead during invocation).
          */

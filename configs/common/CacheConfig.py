@@ -196,27 +196,36 @@ def config_cache(options, system):
             system.cpu[i].connectAllPorts(system.membus)
 
     if options.accel_cfg_file:
-      datapaths = system.find_all(HybridDatapath)[0]
-      for datapath in datapaths:
-        # For now, we will connect all datapaths to a cache regardless of
-        # whether they are needed or not.
-        datapath.cache = dcache_class(
-            clk_domain=datapath.clk_domain,
-            size=str(datapath.cacheSize),
-            assoc=datapath.cacheAssoc,
-            data_latency=datapath.cacheHitLatency,
-            tag_latency=datapath.cacheHitLatency,
-            response_latency=datapath.cacheHitLatency)
-        # The ability for the accelerator to have an L2 cache has been removed
-        # for now. The original implementation of attaching the accelerator's
-        # dcache to the CPU's L2 cache is probably not what users would expect
-        # anyways.
-        datapath.addPrivateL1Dcache(system, system.membus)
-        datapath.connectPrivateScratchpad(system, system.membus)
+      if options.accel_type == "aladdin":
+        datapaths = system.find_all(HybridDatapath)[0]
+        for datapath in datapaths:
+          # For now, we will connect all datapaths to a cache regardless of
+          # whether they are needed or not.
+          datapath.cache = dcache_class(
+              clk_domain=datapath.clk_domain,
+              size=str(datapath.cacheSize),
+              assoc=datapath.cacheAssoc,
+              data_latency=datapath.cacheHitLatency,
+              tag_latency=datapath.cacheHitLatency,
+              response_latency=datapath.cacheHitLatency)
+          # The ability for the accelerator to have an L2 cache has been removed
+          # for now. The original implementation of attaching the accelerator's
+          # dcache to the CPU's L2 cache is probably not what users would expect
+          # anyways.
+          datapath.addPrivateL1Dcache(system, system.membus)
+          datapath.connectPrivateScratchpad(system, system.membus)
 
-        if datapath.enableAcp:
-          assert(options.l2cache and "ACP requires an L2 cache!")
-          datapath.connectAcpPort(system.tol2bus)
+          if datapath.enableAcp:
+            assert(options.l2cache and "ACP requires an L2 cache!")
+            datapath.connectAcpPort(system.tol2bus)
+      elif options.accel_type == "systolic_array":
+        systolic_arrays = system.find_all(SystolicArray)[0]
+        for systolic_array in systolic_arrays:
+          systolic_array.cache = dcache_class(
+              clk_domain=systolic_array.clk_domain, size="128B", assoc=1)
+          systolic_array.addPrivateL1Dcache(system, system.membus)
+          systolic_array.connectPrivateScratchpad(system, system.membus)
+
     return system
 
 # ExternalSlave provides a "port", but when that port connects to a cache,
