@@ -209,128 +209,95 @@ class System : public MemObject
 
     unsigned numContexts() const { return threadContexts.size(); }
 
-    /* Stores a pointer to a datapath object with any dependencies (other
-     * accelerators that must finish execution before this accelerator an
-     * execute) the accelerator has.
-     * TODO: Deprecate the dependencies method and turn this into simple
-     * Gem5Datapath pointer.
-     */
-    class AccelData {
-        public:
-          AccelData(Gem5Datapath *_datapath, std::vector<int> _deps)
-              : datapath(_datapath), deps(_deps) {}
-
-            Gem5Datapath* datapath;
-            std::vector<int> deps;
-    };
-
-    /* Maps an accelerator id to an AccelData object. The id can be an IOCTL
+    /* Maps an accelerator id to a Gem5Datapath object. The id can be an IOCTL
      * request code. When gem5 intercepts the ioctl syscall, it will schedule
-     * the accelerator given by the request code for execution.  This map
-     * specifies the set of accelerators that another accelerator depends on.
-     * Only when an accelerator's dependencies have completed can it proceed
-     * with execution. The size of the map is the number of executing
-     * accelerators.
+     * the accelerator given by the request code for execution. The size of the
+     * map is the number of executing accelerators.
      */
-    std::map<int, AccelData*> accelerators;
+    std::map<int, Gem5Datapath*> accelerators;
 
     /* Returns the number of accelerators that are currently registered and
      * running in the system.
      */
-    int numRunningAccelerators()
-    {
-        return accelerators.size();
-    }
+    int numRunningAccelerators() { return accelerators.size(); }
 
     /* Registers the datapath pointer and list of dependencies with the system.
      * If the accelerator already exists, the simulation ends with a fatal
      * message.
      */
-    void registerAccelerator(
-        int id, Gem5Datapath* accelerator, std::vector<int> accel_deps)
-    {
+    void registerAccelerator(int id, Gem5Datapath* accelerator) {
         if (accelerators.find(id) != accelerators.end())
             fatal("Unable to register accelerator: accelerator with id %#x "
                   "already exists.", id);
-        accelerators[id] = new AccelData(accelerator, accel_deps);
+        accelerators[id] = accelerator;
         DPRINTF(Aladdin, "Registered accelerator %d\n", id);
     }
 
-    /* Marks an accelerator as finished by erasing it from the registered list. */
-    void deregisterAccelerator(int id)
-    {
+    /* Marks an accelerator as finished by erasing it from the registered list.
+     */
+    void deregisterAccelerator(int id) {
         if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to deregister accelerator: No accelerator with id %#x.", id);
+            fatal(
+                "Unable to deregister accelerator: No accelerator with id %#x.",
+                id);
         delete accelerators[id];
         accelerators.erase(id);
     }
 
-    /* Register a pointer to use for communication between accelerator and CPU. */
-    void setAcceleratorFinishFlag(int id, Addr finish_flag)
-    {
-        if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to set finish flag: No accelerator with id %#x.", id);
-        accelerators[id]->datapath->setFinishFlag(finish_flag);
-    }
-
-    /* Sets context and thread ids for a given accelerator. These are needed
-     * for supporting cache prefetchers.
-     */
-    void setAcceleratorIds(int accel_id, int context_id, int thread_id)
-    {
-        if (accelerators.find(accel_id) == accelerators.end())
-            fatal("Unable to set context thread ids: No accelerator with id %#x.",
-                  accel_id);
-        accelerators[accel_id]->datapath->setContextThreadIds(context_id, thread_id);
-    }
-
-    /* Adds the specified accelerator to the event queue with a given number of
-     * delay cycles (to emulate software overhead during invocation).
-     */
-    void scheduleAccelerator(int id, int delay)
-    {
-        if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to schedule accelerator: No accelerator with id %#x.", id);
-        Gem5Datapath *datapath = accelerators[id]->datapath;
-        datapath->initializeDatapath(delay);
-        DPRINTF(Aladdin, "Scheduling accelerator %d\n", id);
-    }
-
     /* Activates an accelerator with the provided parameters. */
-    void activateAccelerator(
-            unsigned accel_id, Addr finish_flag, int context_id, int thread_id) {
+    void activateAccelerator(unsigned accel_id,
+                             Addr finish_flag,
+                             int context_id,
+                             int thread_id) {
+        if (accelerators.find(accel_id) == accelerators.end())
+            fatal("Unable to activate accelerator: No accelerator with id %#x.",
+                  id);
         DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
-        setAcceleratorFinishFlag(accel_id, finish_flag);
-        setAcceleratorIds(accel_id, context_id, thread_id);
-        scheduleAccelerator(accel_id, 1);
+        accelerators[accel_id]->setFinishFlag(finish_flag);
+        /* Register a pointer to use for communication between accelerator and
+         * CPU.
+         */
+        accelerators[accel_id]->setFinishFlag(finish_flag);
+        /* Sets context and thread ids for a given accelerator. These are needed
+         * for supporting cache prefetchers.
+         */
+        accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
+        /* Adds the specified accelerator to the event queue with a given number
+         * of delay cycles (to emulate software overhead during invocation).
+         */
+        accelerators[accel_id]->initializeDatapath(1);
     }
 
-    /* Add an address tranlation into the datapath TLB for the specified array. */
-    void insertAddressTranslationMapping(int id, Addr sim_vaddr, Addr sim_paddr) {
+    /* Add an address tranlation into the datapath TLB for the specified array.
+     */
+    void insertAddressTranslationMapping(int id,
+                                         Addr sim_vaddr,
+                                         Addr sim_paddr) {
         if (accelerators.find(id) == accelerators.end())
             fatal("Unable to add address mapping: No accelerator with id %#x.",
                   id);
-        Gem5Datapath* datapath = accelerators[id]->datapath;
-        datapath->insertTLBEntry(sim_vaddr, sim_paddr);
+        accelerators[id]->insertTLBEntry(sim_vaddr, sim_paddr);
     }
 
     /* Add an mapping between array names to the simulated virtual addresses. */
     void insertArrayLabelMapping(int id, std::string array_label,
                                  Addr sim_vaddr, size_t size) {
         if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to add array label mapping: No accelerator with id %#x.",
+            fatal("Unable to add array label mapping: No accelerator with id "
+                  "%#x.",
                   id);
-        Gem5Datapath *datapath = accelerators[id]->datapath;
-      datapath->insertArrayLabelToVirtual(array_label, sim_vaddr, size);
+        accelerators[id]->insertArrayLabelToVirtual(
+            array_label, sim_vaddr, size);
     }
 
-    /* Get the base trace address of of the array for the specified accelerator. */
+    /* Get the base trace address of of the array for the specified accelerator.
+     */
     Addr getArrayBaseAddress(int id, const char* array_name) {
         if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to get array base address: No accelerator with id %#x.",
-                  id);
-        Gem5Datapath* datapath = accelerators[id]->datapath;
-        return datapath->getBaseAddress(std::string(array_name));
+            fatal(
+                "Unable to get array base address: No accelerator with id %#x.",
+                id);
+        return accelerators[id]->getBaseAddress(std::string(array_name));
     }
 
     /** Return number of running (non-halted) thread contexts in
