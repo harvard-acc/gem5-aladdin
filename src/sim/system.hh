@@ -253,7 +253,6 @@ class System : public MemObject
             fatal("Unable to activate accelerator: No accelerator with id %#x.",
                   id);
         DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
-        accelerators[accel_id]->setFinishFlag(finish_flag);
         /* Register a pointer to use for communication between accelerator and
          * CPU.
          */
