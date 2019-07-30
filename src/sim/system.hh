@@ -251,7 +251,7 @@ class System : public MemObject
                              int thread_id) {
         if (accelerators.find(accel_id) == accelerators.end())
             fatal("Unable to activate accelerator: No accelerator with id %#x.",
-                  id);
+                  accel_id);
         DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
         /* Register a pointer to use for communication between accelerator and
          * CPU.
