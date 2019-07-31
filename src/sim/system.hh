@@ -66,9 +66,6 @@
 #include "sim/futex_map.hh"
 #include "sim/se_signal.hh"
 
-#include "aladdin/gem5/Gem5Datapath.h"
-#include "debug/Aladdin.hh"
-
 /**
  * To avoid linking errors with LTO, only include the header if we
  * actually have the definition.
@@ -82,6 +79,7 @@ class BaseRemoteGDB;
 class KvmVM;
 class ObjectFile;
 class ThreadContext;
+class Gem5Datapath;
 
 class System : public MemObject
 {
@@ -221,83 +219,38 @@ class System : public MemObject
      */
     int numRunningAccelerators() { return accelerators.size(); }
 
+    /* Check if the accelerator exists. */
+    void checkAcceleratorExists(int id, std::string funcName);
+
     /* Registers the datapath pointer and list of dependencies with the system.
      * If the accelerator already exists, the simulation ends with a fatal
      * message.
      */
-    void registerAccelerator(int id, Gem5Datapath* accelerator) {
-        if (accelerators.find(id) != accelerators.end())
-            fatal("Unable to register accelerator: accelerator with id %#x "
-                  "already exists.", id);
-        accelerators[id] = accelerator;
-        DPRINTF(Aladdin, "Registered accelerator %d\n", id);
-    }
+    void registerAccelerator(int id, Gem5Datapath* accelerator);
 
     /* Marks an accelerator as finished by erasing it from the registered list.
      */
-    void deregisterAccelerator(int id) {
-        if (accelerators.find(id) == accelerators.end())
-            fatal(
-                "Unable to deregister accelerator: No accelerator with id %#x.",
-                id);
-        delete accelerators[id];
-        accelerators.erase(id);
-    }
+    void deregisterAccelerator(int id);
 
     /* Activates an accelerator with the provided parameters. */
     void activateAccelerator(unsigned accel_id,
                              Addr finish_flag,
                              int context_id,
-                             int thread_id) {
-        if (accelerators.find(accel_id) == accelerators.end())
-            fatal("Unable to activate accelerator: No accelerator with id %#x.",
-                  accel_id);
-        DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
-        /* Register a pointer to use for communication between accelerator and
-         * CPU.
-         */
-        accelerators[accel_id]->setFinishFlag(finish_flag);
-        /* Sets context and thread ids for a given accelerator. These are needed
-         * for supporting cache prefetchers.
-         */
-        accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
-        /* Adds the specified accelerator to the event queue with a given number
-         * of delay cycles (to emulate software overhead during invocation).
-         */
-        accelerators[accel_id]->initializeDatapath(1);
-    }
+                             int thread_id);
 
     /* Add an address tranlation into the datapath TLB for the specified array.
      */
     void insertAddressTranslationMapping(int id,
                                          Addr sim_vaddr,
-                                         Addr sim_paddr) {
-        if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to add address mapping: No accelerator with id %#x.",
-                  id);
-        accelerators[id]->insertTLBEntry(sim_vaddr, sim_paddr);
-    }
+                                         Addr sim_paddr);
 
     /* Add an mapping between array names to the simulated virtual addresses. */
     void insertArrayLabelMapping(int id, std::string array_label,
-                                 Addr sim_vaddr, size_t size) {
-        if (accelerators.find(id) == accelerators.end())
-            fatal("Unable to add array label mapping: No accelerator with id "
-                  "%#x.",
-                  id);
-        accelerators[id]->insertArrayLabelToVirtual(
-            array_label, sim_vaddr, size);
-    }
+                                 Addr sim_vaddr, size_t size);
 
     /* Get the base trace address of of the array for the specified accelerator.
      */
-    Addr getArrayBaseAddress(int id, const char* array_name) {
-        if (accelerators.find(id) == accelerators.end())
-            fatal(
-                "Unable to get array base address: No accelerator with id %#x.",
-                id);
-        return accelerators[id]->getBaseAddress(std::string(array_name));
-    }
+    Addr getArrayBaseAddress(int id, const char* array_name);
 
     /** Return number of running (non-halted) thread contexts in
      * system.  These threads could be Active or Suspended. */
