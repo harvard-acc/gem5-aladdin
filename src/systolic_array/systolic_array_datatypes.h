@@ -3,7 +3,6 @@
 
 // systolic data
 typedef struct _systolic_array_data_t {
-  volatile int* finish_flag;
   void* input_base_addr;
   void* weight_base_addr;
   void* output_base_addr;

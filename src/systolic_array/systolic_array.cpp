@@ -2,57 +2,28 @@
 
 void SystolicArray::issueDmaRead() {
   DPRINTF(SystolicArray, "Start DMA reads.\n");
+  // Read inputs.
   int inputSize = inputRows * inputCols * channels * sizeof(float);
+  uint8_t* inputData = new uint8_t[inputSize]();
+  DmaEvent* inputDmaEvent = new DmaEvent(this, inputBaseAddr);
+  splitAndSendDmaRequest(
+      inputBaseAddr, inputSize, true, inputData, inputDmaEvent);
+  // Read weights.
   int weightSize =
       weightRows * weightCols * channels * numOfmaps * sizeof(float);
-  sendDmaRequest(inputBaseAddr, inputSize, true);
-  sendDmaRequest(weightBaseAddr, weightSize, true);
-  outstandingDmaSize = inputSize + weightSize;
+  uint8_t* weightData = new uint8_t[weightSize]();
+  DmaEvent* weightDmaEvent = new DmaEvent(this, weightBaseAddr);
+  splitAndSendDmaRequest(
+      weightBaseAddr, weightSize, true, weightData, weightDmaEvent);
 }
 
 void SystolicArray::issueDmaWrite() {
   DPRINTF(SystolicArray, "Start DMA writes.\n");
   int outputSize = outputRows * outputCols * numOfmaps * sizeof(float);
-  sendDmaRequest(outputBaseAddr, outputSize, false);
-  outstandingDmaSize = outputSize;
-}
-
-void SystolicArray::sendDmaRequest(Addr startAddr, int size, bool isRead) {
-  Addr firstPageVaddr = startAddr & ~pageMask();
-  int firstPageOffset = startAddr & pageMask();
-
-  // Send the DMA request. Split it if it crosses page boundaries.
-  int remainingBytes = size;
-  int i = 0;
-  do {
-    Addr dmaReqVaddr = i == 0 ? startAddr : firstPageVaddr + i * pageBytes();
-    int dmaReqSize =
-        i == 0 ? std::min(remainingBytes, pageBytes() - firstPageOffset)
-               : std::min(remainingBytes, pageBytes());
-    i++;
-    remainingBytes -= dmaReqSize;
-
-    // Do the address translation.
-    Addr dmaReqPaddr;
-    translate(dmaReqVaddr, dmaReqPaddr);
-
-    // Prepare the DMA transaction.
-    MemCmd::Command cmd = isRead ? MemCmd::ReadReq : MemCmd::WriteReq;
-    // Marking the DMA packets as uncacheable ensures they are not snooped by
-    // caches.
-    Request::Flags flags = Request::UNCACHEABLE;
-
-    uint8_t* data = new uint8_t[dmaReqSize];
-    for (int i = 0; i < dmaReqSize; i++)
-      data[i] = 0x0;
-
-    DPRINTF(SystolicArrayVerbose,
-            "Sending DMA %s for paddr %#x with size %d.\n",
-            isRead ? "read" : "write",
-            dmaReqPaddr,
-            dmaReqSize);
-    spadPort.dmaAction(cmd, dmaReqPaddr, dmaReqSize, NULL, data, 0, flags);
-  } while (remainingBytes > 0);
+  uint8_t* outputData = new uint8_t[outputSize]();
+  DmaEvent* outputDmaEvent = new DmaEvent(this, outputBaseAddr);
+  splitAndSendDmaRequest(
+      outputBaseAddr, outputSize, false, outputData, outputDmaEvent);
 }
 
 int SystolicArray::genSramReads() {
@@ -285,47 +256,6 @@ int SystolicArray::genSramWrites() {
     }
   }
   return localCycles;
-}
-
-// Receiving response from DMA.
-bool SystolicArray::SpadPort::recvTimingResp(PacketPtr pkt) {
-  if (pkt->cmd == MemCmd::InvalidateResp)
-    return DmaPort::recvTimingResp(pkt);
-
-  dev->outstandingDmaSize -= pkt->req->getSize();
-  if (dev->outstandingDmaSize == 0) {
-    if (dev->accelStatus == WaitingForDmaRead) {
-      DPRINTF(SystolicArray, "Completed all DMA reads.\n");
-      dev->accelStatus = ReadyToCompute;
-    } else if (dev->accelStatus == WaitingForDmaWrite) {
-      DPRINTF(SystolicArray, "Completed all DMA writes.\n");
-      dev->accelStatus = ReadyToSendFinish;
-    }
-  }
-  return DmaPort::recvTimingResp(pkt);
-}
-
-void SystolicArray::CachePort::recvReqRetry() {
-  assert(inRetry());
-  assert(retryPkt->isRequest());
-  DPRINTF(SystolicArray, "recvReqRetry for paddr: %#x \n", retryPkt->getAddr());
-  if (sendTimingReq(retryPkt)) {
-    DPRINTF(SystolicArray, "Retry pass!\n");
-    clearRetryPkt();
-  } else {
-    DPRINTF(SystolicArray, "Still blocked!\n");
-  }
-}
-
-bool SystolicArray::CachePort::recvTimingResp(PacketPtr pkt) {
-  DPRINTF(SystolicArray, "%s: for address: %#x %s\n", __func__, pkt->getAddr(),
-          pkt->cmdString());
-  if (pkt->isError()) {
-    DPRINTF(SystolicArray, "Got error packet back for address: %#x\n",
-            pkt->getAddr());
-  }
-  delete pkt;
-  return true;
 }
 
 SystolicArray* SystolicArrayParams::create() { return new SystolicArray(this); }

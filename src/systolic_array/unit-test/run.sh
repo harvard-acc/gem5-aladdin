@@ -23,5 +23,5 @@ ${gem5_dir}/build/X86/gem5.opt \
   --cacheline_size=64 \
   --accel_type=systolic_array \
   --accel_cfg_file=systolic_array.cfg \
-  -c ${bmk_home}/test-gem5-accel
+  -c ${bmk_home}/test-gem5-accel \
   > stdout 2> stderr

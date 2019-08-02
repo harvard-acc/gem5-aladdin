@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "systolic_array_connection.h"
+#include "aladdin/gem5/aladdin_sys_connection.h"
 #include "aladdin/gem5/aladdin_sys_constants.h"
 
 #ifdef __cplusplus
@@ -16,13 +17,15 @@ extern "C" {
 
 void invokeSystolicArrayAndBlock(int accelerator_id,
                                  systolic_array_data_t systolic_data) {
-  volatile int* finish_flag = (volatile int*)malloc(sizeof(int));
-  *finish_flag = NOT_COMPLETED;
-  systolic_data.finish_flag = finish_flag;
-  ioctl(ALADDIN_FD, accelerator_id, &systolic_data);
-  while (*finish_flag == NOT_COMPLETED)
+  aladdin_params_t* params =
+      (aladdin_params_t*)malloc(sizeof(aladdin_params_t));
+  params->finish_flag = (volatile int*)malloc(sizeof(int));
+  *(params->finish_flag) = NOT_COMPLETED;
+  params->accel_params_ptr = &systolic_data;
+  params->size = sizeof(systolic_array_data_t);
+  ioctl(ALADDIN_FD, accelerator_id, params);
+  while (*(params->finish_flag) == NOT_COMPLETED)
     ;
-  free((void*)finish_flag);
 }
 
 #ifdef __cplusplus

@@ -69,17 +69,15 @@ class SystolicArray : public Gem5Datapath {
  public:
   typedef SystolicArrayParams Params;
   SystolicArray(const Params* p)
-      : Gem5Datapath(p, p->acceleratorId, false, p->system), tickEvent(this),
-        acceleratorName(p->acceleratorName), accelStatus(Idle),
-        spadPort(this,
-                 p->system,
-                 p->maxDmaRequests,
-                 p->dmaChunkSize,
-                 p->numDmaChannels,
-                 p->invalidateOnDmaStore),
-        spadMasterId(p->system->getMasterId(this, name() + ".spad")),
-        cacheMasterId(p->system->getMasterId(this, name() + ".cache")),
-        cachePort(this, "cache_port"), outstandingDmaSize(0),
+      : Gem5Datapath(p,
+                     p->acceleratorId,
+                     false,
+                     p->maxDmaRequests,
+                     p->dmaChunkSize,
+                     p->numDmaChannels,
+                     p->invalidateOnDmaStore,
+                     p->system),
+        tickEvent(this), acceleratorName(p->acceleratorName), accelStatus(Idle),
         peArrayRows(p->peArrayRows), peArrayCols(p->peArrayCols),
         sramSize(p->sramSize) {
     system->registerAccelerator(accelerator_id, this);
@@ -87,25 +85,10 @@ class SystolicArray : public Gem5Datapath {
 
   ~SystolicArray() { system->deregisterAccelerator(accelerator_id); }
 
-  virtual MasterPort& getSpadPort() { return spadPort; };
-  virtual MasterPort& getCachePort() { return cachePort; };
-  MasterID getSpadMasterId() { return spadMasterId; };
-  MasterID getCacheMasterId() { return cacheMasterId; };
-
-  virtual BaseMasterPort& getMasterPort(const std::string& if_name,
-                                        PortID idx = InvalidPortID) {
-    if (if_name == "spad_port")
-      return getSpadPort();
-    else if (if_name == "cache_port")
-      return getCachePort();
-    else
-      return MemObject::getMasterPort(if_name);
-  }
-
   // Returns the tick event that will schedule the next step.
-  virtual Event& getTickEvent() { return tickEvent; }
+  Event& getTickEvent() override { return tickEvent; }
 
-  virtual void setParams(void* accel_params) {
+  void setParams(void* accel_params) override {
     systolic_array_data_t* accelParams =
         reinterpret_cast<systolic_array_data_t*>(accel_params);
 
@@ -127,7 +110,7 @@ class SystolicArray : public Gem5Datapath {
     numWeightFolds = ceil(numOfmaps * 1.0 / peArrayCols);
   }
 
-  virtual void initializeDatapath(int delay) {
+  void initializeDatapath(int delay) override {
     assert(accelStatus == Idle &&
            "The systolic array accelerator is not idle!");
     accelStatus = ReadyForDmaRead;
@@ -135,7 +118,7 @@ class SystolicArray : public Gem5Datapath {
     scheduleOnEventQueue(delay);
   }
 
-  virtual void sendFinishedSignal() {
+  void sendFinishedSignal() override {
     Request::Flags flags = 0;
     int size = 4;  // 32 bit integer.
     uint8_t* data = new uint8_t[size];
@@ -148,6 +131,9 @@ class SystolicArray : public Gem5Datapath {
     MemCmd::Command cmd = MemCmd::WriteReq;
     PacketPtr pkt = new Packet(req, cmd);
     pkt->dataStatic<uint8_t>(data);
+    // We can have a more meaningful sender state if we need later.
+    Packet::SenderState* state = new Packet::SenderState();
+    pkt->pushSenderState(state);
 
     if (!cachePort.sendTimingReq(pkt)) {
       assert(!cachePort.inRetry());
@@ -158,7 +144,7 @@ class SystolicArray : public Gem5Datapath {
     }
   }
 
-  virtual void insertTLBEntry(Addr vaddr, Addr paddr) {
+  void insertTLBEntry(Addr vaddr, Addr paddr) override {
     DPRINTF(SystolicArray, "Mapping vaddr 0x%x -> paddr 0x%x.\n", vaddr, paddr);
     Addr vpn = vaddr & ~(pageMask());
     Addr ppn = paddr & ~(pageMask());
@@ -167,15 +153,15 @@ class SystolicArray : public Gem5Datapath {
     tlb.insert(vpn, ppn);
   }
 
-  virtual void insertArrayLabelToVirtual(const std::string& array_label,
-                                         Addr vaddr,
-                                         size_t size) {}
+  void insertArrayLabelToVirtual(const std::string& array_label,
+                                 Addr vaddr,
+                                 size_t size) override {}
 
-  virtual Addr getBaseAddress(std::string label) {
+  Addr getBaseAddress(std::string label) override {
     assert(false && "Should not call this for the systolic array accelerator!");
   }
 
-  virtual void resetTrace() {
+  void resetTrace() override {
     assert(false && "Should not call this for the systolic array accelerator!");
   }
 
@@ -211,57 +197,7 @@ class SystolicArray : public Gem5Datapath {
       schedule(tickEvent, clockEdge(Cycles(1)));
   }
 
- private:
-  class SpadPort : public DmaPort {
-   public:
-    SpadPort(SystolicArray* dev,
-             System* s,
-             unsigned _max_req,
-             unsigned _chunk_size,
-             unsigned _numChannels,
-             bool _invalidateOnDmaStore)
-        : DmaPort(dev,
-                  s,
-                  _max_req,
-                  _chunk_size,
-                  _numChannels,
-                  _invalidateOnDmaStore),
-          max_req(_max_req), dev(dev) {}
-    // Maximum DMA requests that can be queued.
-    const unsigned max_req;
-
-   protected:
-    virtual bool recvTimingResp(PacketPtr pkt);
-    virtual void recvTimingSnoopReq(PacketPtr pkt) {}
-    virtual void recvFunctionalSnoop(PacketPtr pkt) {}
-    virtual bool isSnooping() const { return true; }
-    SystolicArray* dev;
-  };
-
-  // Cache port to send finish signal
-  class CachePort : public MasterPort {
-   public:
-    CachePort(SystolicArray* _systolicAcc, const std::string& _name)
-        : MasterPort(_name, _systolicAcc), systolicAcc(_systolicAcc),
-          retryPkt(nullptr) {}
-
-    bool inRetry() const { return retryPkt != NULL; }
-    void setRetryPkt(PacketPtr pkt) { retryPkt = pkt; }
-    void clearRetryPkt() { retryPkt = NULL; }
-
-   protected:
-    virtual bool recvTimingResp(PacketPtr pkt);
-    virtual void recvTimingSnoopReq(PacketPtr pkt) {}
-    virtual void recvFunctionalSnoop(PacketPtr pkt) {}
-    virtual Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
-    virtual void recvReqRetry();
-    virtual void recvRespRetry() {}
-    virtual bool isSnooping() const { return false; }
-
-    SystolicArray* systolicAcc;
-    PacketPtr retryPkt;
-  };
-
+ protected:
   enum AccelStatus {
     Idle,
     ReadyForDmaRead,
@@ -272,18 +208,29 @@ class SystolicArray : public Gem5Datapath {
     ReadyToSendFinish,
   };
 
-  Addr pageMask() { return system->getPageBytes() - 1; }
-  int pageBytes() { return system->getPageBytes(); }
+  void dmaRespCallback(PacketPtr pkt) override {
+    // For now since we don't a SRAM model yet, we have nothing to do here.
+    // We should use this to fill in the data returned from DMA.
+  }
 
-  // Functions used for issuing DMA requests.
-  void translate(Addr vaddr, Addr& paddr) {
+  void dmaCompleteCallback(DmaEvent* event) override {
+    if (accelStatus == WaitingForDmaRead) {
+      DPRINTF(SystolicArray, "Completed all DMA reads.\n");
+      accelStatus = ReadyToCompute;
+    } else if (accelStatus == WaitingForDmaWrite) {
+      DPRINTF(SystolicArray, "Completed all DMA writes.\n");
+      accelStatus = ReadyToSendFinish;
+    }
+  }
+
+  Addr translateAtomic(Addr vaddr, int size) override {
     Addr page_offset = vaddr & pageMask();
     Addr vpn = vaddr & ~pageMask();
     Addr ppn;
     tlb.lookup(vpn, ppn);
-    paddr = ppn | page_offset;
+    return ppn | page_offset;
   }
-  void sendDmaRequest(Addr startAddr, int size, bool isRead);
+
   void issueDmaRead();
   void issueDmaWrite();
 
@@ -294,30 +241,19 @@ class SystolicArray : public Gem5Datapath {
 
   EventWrapper<SystolicArray, &SystolicArray::processTick> tickEvent;
 
-  // DMA port to the scratchpad.
-  SpadPort spadPort;
-  MasterID spadMasterId;
-
-  // Coherent port to the cache.
-  CachePort cachePort;
-  MasterID cacheMasterId;
-
   // Inifinte TLB memory. We need to use physical address when issuing DMA
   // requests.
   // TODO: Use a realistic TLB model to account for page walk latency when a TLB
   // miss happens.
   InfiniteTLBMemory tlb;
 
-  // These track the uncompleted DMA read/write sizes.
-  int outstandingDmaSize;
-
   std::string acceleratorName;
   AccelStatus accelStatus;
 
   // Parameters of the offloaded convolution.
-  int inputBaseAddr;
-  int weightBaseAddr;
-  int outputBaseAddr;
+  Addr inputBaseAddr;
+  Addr weightBaseAddr;
+  Addr outputBaseAddr;
   int inputRows;
   int inputCols;
   int weightRows;
