@@ -235,6 +235,7 @@ class System : public MemObject
     /* Activates an accelerator with the provided parameters. */
     void activateAccelerator(unsigned accel_id,
                              Addr finish_flag,
+                             void* accel_params,
                              int context_id,
                              int thread_id);
 

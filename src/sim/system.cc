@@ -309,6 +309,7 @@ void System::deregisterAccelerator(int id) {
 
 void System::activateAccelerator(unsigned accel_id,
                                  Addr finish_flag,
+                                 void* accel_params,
                                  int context_id,
                                  int thread_id) {
     checkAcceleratorExists(accel_id, __func__);
@@ -321,6 +322,8 @@ void System::activateAccelerator(unsigned accel_id,
      * for supporting cache prefetchers.
      */
     accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
+    /* Set the accelerator params. */
+    accelerators[accel_id]->setParams(accel_params);
     /* Adds the specified accelerator to the event queue with a given number
      * of delay cycles (to emulate software overhead during invocation).
      */
