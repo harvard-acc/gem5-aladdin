@@ -5,6 +5,23 @@ Import('*')
 SimObject('SystolicArray.py')
 
 Source('systolic_array.cpp')
+Source('dataflow.cpp')
+Source('tensor.cpp')
+Source('fetch.cpp')
+Source('commit.cpp')
+Source('pe.cpp')
+Source('scratchpad.cpp')
+Source('local_spad_interface.cpp')
 
-DebugFlag('SystolicArray')
-DebugFlag('SystolicArrayVerbose')
+DebugFlag('SystolicToplevel', 'Top level events')
+DebugFlag('SystolicDataflow', 'Dataflow events')
+DebugFlag('SystolicInterface', 'Local scratchpad interface events')
+DebugFlag('SystolicFetch', 'Fetch unit events')
+DebugFlag('SystolicCommit', 'Commit unit events')
+DebugFlag('SystolicPE', 'PE events')
+DebugFlag('SystolicSpad', 'PE events')
+
+CompoundFlag('Systolic', [
+    'SystolicToplevel', 'SystolicDataflow', 'SystolicFetch',
+    'SystolicInterface', 'SystolicFetch', 'SystolicCommit',
+    'SystolicPE', 'SystolicSpad'])

@@ -10,7 +10,9 @@
 #include <sstream>
 
 #include "base/logging.hh"
-#include "base/chunk_generator.hh"
+#include "base/statistics.hh"
+#include "base/trace.hh"
+#include "base/types.hh"
 #include "mem/mem_object.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
@@ -18,13 +20,16 @@
 #include "sim/eventq.hh"
 #include "sim/clocked_object.hh"
 #include "dev/dma_device.hh"
-#include "debug/SystolicArray.hh"
-#include "debug/SystolicArrayVerbose.hh"
 #include "aladdin/gem5/aladdin_tlb.hh"
 #include "aladdin/gem5/Gem5Datapath.h"
 
-#include "systolic_array_datatypes.h"
 #include "params/SystolicArray.hh"
+#include "debug/SystolicToplevel.hh"
+#include "systolic_array_params.h"
+#include "dataflow.h"
+#include "fetch.h"
+#include "scratchpad.h"
+#include "datatypes.h"
 
 // This models a systolic array accelerator, which uses output stationary as its
 // dataflow. The used data layout is NHWC. Three SRAMs of equal size are used to
@@ -42,9 +47,9 @@
 //                                  |        |        |        |
 //                                  V        V        V        V
 //   ^        InputWindow0 -->  |--PE00--|--PE01--|--PE02--|--PE03--|
-// Output    InputWindow1 --->  |--PE10--|--PE11--|--PE12--|--PE13--|
-// fold     InputWindow2 ---->  |--PE20--|--PE21--|--PE22--|--PE23--|
-//   V     InputWindow3 ----->  |--PE30--|--PE31--|--PE32--|--PE33--|
+// Output    InputWindow1 --->  |--PE04--|--PE05--|--PE06--|--PE07--|
+// fold     InputWindow2 ---->  |--PE08--|--PE09--|--PE10--|--PE11--|
+//   V     InputWindow3 ----->  |--PE12--|--PE13--|--PE14--|--PE15--|
 //
 // The inputs (read from local SRAM) are fed from left edge of the array and
 // pumped towards the right edge, while the top edge streams in pixels from the
@@ -60,10 +65,8 @@
 // example, the output feature map size is 32x32=1024, which will be partitioned
 // into 1024/4=256 folds. Similarly, the 16 kernels will be partitioned into
 // 16/4=4 folds.
-//
-// TODO: currently we don't have an SRAM model though we do generate SRAM
-// read/write traces. Every SRAM access takes 1 cycle. Padding is not
-// implemented yet, for now the model only supports valid padding.
+
+namespace systolic {
 
 class SystolicArray : public Gem5Datapath {
  public:
@@ -77,20 +80,48 @@ class SystolicArray : public Gem5Datapath {
                      p->numDmaChannels,
                      p->invalidateOnDmaStore,
                      p->system),
-        tickEvent(this), acceleratorName(p->acceleratorName), accelStatus(Idle),
-        peArrayRows(p->peArrayRows), peArrayCols(p->peArrayCols),
-        sramSize(p->sramSize) {
+        tickEvent(this), state(Idle), peArrayRows(p->peArrayRows),
+        peArrayCols(p->peArrayCols), lineSize(p->lineSize), alignment(8),
+        dataType(UnknownDataType), elemSize(0), inputSpad(p->inputSpad),
+        weightSpad(p->weightSpad), outputSpad(p->outputSpad) {
+    setDataType(p->dataType);
+    dataflow = new Dataflow(*this, *p);
     system->registerAccelerator(accelerator_id, this);
   }
 
-  ~SystolicArray() { system->deregisterAccelerator(accelerator_id); }
+  ~SystolicArray() {
+    delete dataflow;
+    system->deregisterAccelerator(accelerator_id);
+  }
+
+  BaseMasterPort& getMasterPort(const std::string& if_name,
+                                PortID idx = InvalidPortID) override {
+    if (if_name == "input_spad_port")
+      return dataflow->inputFetchUnits[idx]->getLocalSpadPort();
+    else if (if_name == "weight_spad_port")
+      return dataflow->weightFetchUnits[idx]->getLocalSpadPort();
+    else if (if_name == "output_spad_port")
+      return dataflow->commitUnits[idx]->getLocalSpadPort();
+    else
+      return Gem5Datapath::getMasterPort(if_name, idx);
+  }
+
+  void regStats() override {
+    Gem5Datapath::regStats();
+    using namespace Stats;
+    numCycles
+        .name(name() + ".numCycles")
+        .desc("Total number of cycles.")
+        .flags(total | nonan);
+    dataflow->regStats();
+  }
 
   // Returns the tick event that will schedule the next step.
   Event& getTickEvent() override { return tickEvent; }
 
   void setParams(void* accel_params) override {
-    systolic_array_data_t* accelParams =
-        reinterpret_cast<systolic_array_data_t*>(accel_params);
+    systolic_array_params_t* accelParams =
+        reinterpret_cast<systolic_array_params_t*>(accel_params);
 
     inputBaseAddr = (Addr)accelParams->input_base_addr;
     weightBaseAddr = (Addr)accelParams->weight_base_addr;
@@ -101,19 +132,26 @@ class SystolicArray : public Gem5Datapath {
     weightCols = accelParams->weight_dims[2];
     outputRows = accelParams->output_dims[1];
     outputCols = accelParams->output_dims[2];
+    numOfmaps = accelParams->output_dims[3];
+    numEffecWeights = accelParams->weight_dims[0];
     channels = accelParams->input_dims[3];
-    numOfmaps = accelParams->weight_dims[0];
     stride = accelParams->stride;
+    inputTopPad = accelParams->input_halo_pad[0];
+    inputBottomPad = accelParams->input_halo_pad[1];
+    inputLeftPad = accelParams->input_halo_pad[2];
+    inputRightPad = accelParams->input_halo_pad[3];
 
     // Infer the numbers of folds needed to map the convolution to the PE array.
     numOutputFolds = ceil(outputRows * outputCols * 1.0 / peArrayRows);
     numWeightFolds = ceil(numOfmaps * 1.0 / peArrayCols);
+
+    dataflow->setParams();
   }
 
   void initializeDatapath(int delay) override {
-    assert(accelStatus == Idle &&
+    assert(state == Idle &&
            "The systolic array accelerator is not idle!");
-    accelStatus = ReadyForDmaRead;
+    state = ReadyForDmaRead;
     // Start running the accelerator.
     scheduleOnEventQueue(delay);
   }
@@ -138,18 +176,21 @@ class SystolicArray : public Gem5Datapath {
     if (!cachePort.sendTimingReq(pkt)) {
       assert(!cachePort.inRetry());
       cachePort.setRetryPkt(pkt);
-      DPRINTF(SystolicArray, "Sending finished signal failed, retrying.\n");
+      DPRINTF(SystolicToplevel, "Sending finished signal failed, retrying.\n");
     } else {
-      DPRINTF(SystolicArray, "Sent finished signal.\n");
+      DPRINTF(SystolicToplevel, "Sent finished signal.\n");
     }
   }
 
   void insertTLBEntry(Addr vaddr, Addr paddr) override {
-    DPRINTF(SystolicArray, "Mapping vaddr 0x%x -> paddr 0x%x.\n", vaddr, paddr);
+    DPRINTF(
+        SystolicToplevel, "Mapping vaddr 0x%x -> paddr 0x%x.\n", vaddr, paddr);
     Addr vpn = vaddr & ~(pageMask());
     Addr ppn = paddr & ~(pageMask());
-    DPRINTF(
-        SystolicArray, "Inserting TLB entry vpn 0x%x -> ppn 0x%x.\n", vpn, ppn);
+    DPRINTF(SystolicToplevel,
+            "Inserting TLB entry vpn 0x%x -> ppn 0x%x.\n",
+            vpn,
+            ppn);
     tlb.insert(vpn, ppn);
   }
 
@@ -165,61 +206,80 @@ class SystolicArray : public Gem5Datapath {
     assert(false && "Should not call this for the systolic array accelerator!");
   }
 
-  // Run the systolic array and return the latency.
-  int run() {
-    DPRINTF(SystolicArray, "Computation starts.\n");
-    int lastReadCycle = genSramReads();
-    int lastWriteCycle = genSramWrites();
+  void processTick();
 
-    DPRINTF(SystolicArray,
-            "Computation completed. Cycles: %d.\n",
-            std::max(lastReadCycle, lastWriteCycle));
-    return std::max(lastReadCycle, lastWriteCycle);
-  }
-
-  void processTick() {
-    if (accelStatus == ReadyForDmaRead) {
-      issueDmaRead();
-      accelStatus = WaitingForDmaRead;
-    } else if (accelStatus == ReadyToCompute) {
-      int latency = run();
-      schedule(tickEvent, clockEdge(Cycles(latency)));
-      accelStatus = ReadyForDmaWrite;
-    } else if (accelStatus == ReadyForDmaWrite) {
-      issueDmaWrite();
-      accelStatus = WaitingForDmaWrite;
-    } else if (accelStatus == ReadyToSendFinish) {
-      sendFinishedSignal();
-      accelStatus = Idle;
-    }
-    // If the accelerator is still busy, schedule the next tick.
-    if (accelStatus != Idle && !tickEvent.scheduled())
-      schedule(tickEvent, clockEdge(Cycles(1)));
+  void notifyDone() {
+    assert(state = WaitingForCompute);
+    dataflow->stop();
+    state = ReadyForDmaWrite;
   }
 
  protected:
-  enum AccelStatus {
+  enum State {
     Idle,
     ReadyForDmaRead,
-    WaitingForDmaRead,
+    WaitingForDmaInputRead,
+    WaitingForDmaWeightRead,
     ReadyToCompute,
+    WaitingForCompute,
     ReadyForDmaWrite,
     WaitingForDmaWrite,
     ReadyToSendFinish,
   };
 
+  enum TensorType { Input, Weight, Output };
+
+  class SystolicDmaEvent : public DmaEvent {
+   public:
+    SystolicDmaEvent(SystolicArray* datapath,
+                     Addr startAddr,
+                     TensorType _tensorType)
+        : DmaEvent(datapath, startAddr), tensorType(_tensorType) {}
+    SystolicDmaEvent(const SystolicDmaEvent& other)
+        : DmaEvent(other.datapath, other.startAddr),
+          tensorType(other.tensorType) {}
+    const char* description() const override { return "SystolicDmaEvent"; }
+    SystolicDmaEvent* clone() const override {
+      return new SystolicDmaEvent(*this);
+    }
+    TensorType getTensorType() const { return tensorType; }
+
+   protected:
+    TensorType tensorType;
+  };
+
   void dmaRespCallback(PacketPtr pkt) override {
-    // For now since we don't a SRAM model yet, we have nothing to do here.
-    // We should use this to fill in the data returned from DMA.
+    SystolicDmaEvent* event =
+        dynamic_cast<SystolicDmaEvent*>(DmaPort::getPacketCompletionEvent(pkt));
+    // If it's a DMA read response, fill the data into the local scratchpad.
+    if (pkt->isRead()) {
+      // Since the address in the packet is the physical address, we need the
+      // virtual address in order to access the local scratchpad.
+      Addr paddr = pkt->getAddr();
+      Addr paddrBase = DmaPort::getPacketAddr(pkt);
+      Addr pageOffset = paddr - paddrBase;
+      Addr pktOffset = pageOffset + event->getReqOffset();
+      if (event->getTensorType() == Input) {
+        inputSpad->accessData(
+            pktOffset, pkt->getSize(), pkt->getPtr<uint8_t>(), false);
+      } else if (event->getTensorType() == Weight) {
+        weightSpad->accessData(
+            pktOffset, pkt->getSize(), pkt->getPtr<uint8_t>(), false);
+      }
+    }
   }
 
   void dmaCompleteCallback(DmaEvent* event) override {
-    if (accelStatus == WaitingForDmaRead) {
-      DPRINTF(SystolicArray, "Completed all DMA reads.\n");
-      accelStatus = ReadyToCompute;
-    } else if (accelStatus == WaitingForDmaWrite) {
-      DPRINTF(SystolicArray, "Completed all DMA writes.\n");
-      accelStatus = ReadyToSendFinish;
+    if (state == WaitingForDmaInputRead) {
+      DPRINTF(SystolicToplevel, "Completed DMA reads for inputs.\n");
+      issueDmaWeightRead();
+      state = WaitingForDmaWeightRead;
+    } else if (state == WaitingForDmaWeightRead) {
+      DPRINTF(SystolicToplevel, "Completed DMA reads for weights.\n");
+      state = ReadyToCompute;
+    } else if (state == WaitingForDmaWrite) {
+      DPRINTF(SystolicToplevel, "Completed all DMA writes.\n");
+      state = ReadyToSendFinish;
     }
   }
 
@@ -231,13 +291,30 @@ class SystolicArray : public Gem5Datapath {
     return ppn | page_offset;
   }
 
-  void issueDmaRead();
+  void issueDmaInputRead();
+  void issueDmaWeightRead();
   void issueDmaWrite();
 
-  // These two function generate SRAM read/write traces and return the cycle
-  // when the last SRAM read/write finish.
-  int genSramReads();
-  int genSramWrites();
+  void setDataType(const std::string& type) {
+    if (type == "int32") {
+      dataType = Int32;
+      elemSize = 4;
+    } else if (type == "int64") {
+      dataType = Int64;
+      elemSize = 8;
+    } else if (type == "float16") {
+      dataType = Float16;
+      elemSize = 2;
+    } else if (type == "float32") {
+      dataType = Float32;
+      elemSize = 4;
+    } else if (type == "float64") {
+      dataType = Float64;
+      elemSize = 8;
+    } else {
+      assert(false && "Unknown data type specified.");
+    }
+  }
 
   EventWrapper<SystolicArray, &SystolicArray::processTick> tickEvent;
 
@@ -248,8 +325,9 @@ class SystolicArray : public Gem5Datapath {
   InfiniteTLBMemory tlb;
 
   std::string acceleratorName;
-  AccelStatus accelStatus;
+  State state;
 
+ public:
   // Parameters of the offloaded convolution.
   Addr inputBaseAddr;
   Addr weightBaseAddr;
@@ -262,7 +340,12 @@ class SystolicArray : public Gem5Datapath {
   int outputCols;
   int channels;
   int numOfmaps;
+  int numEffecWeights;
   int stride;
+  int inputTopPad;
+  int inputBottomPad;
+  int inputLeftPad;
+  int inputRightPad;
 
   // The outputs/filters are partitioned into folds in order to map to the PE
   // arrays.
@@ -272,7 +355,22 @@ class SystolicArray : public Gem5Datapath {
   // Attributes of the systolic array.
   int peArrayRows;
   int peArrayCols;
-  int sramSize;
+
+  // The size of a scratchpad line. A line is the granularity for accessing
+  // the scratchpads.
+  int lineSize;
+  int alignment;
+  DataType dataType;
+  int elemSize;
+  Dataflow* dataflow;
+  Scratchpad* inputSpad;
+  Scratchpad* weightSpad;
+  Scratchpad* outputSpad;
+
+  // Number of systolic array cycles simulated.
+  Stats::Scalar numCycles;
 };
+
+}  // namespace systolic
 
 #endif  // __SYSTOLIC_ARRAY_SYSTOLIC_ARRAY_H__

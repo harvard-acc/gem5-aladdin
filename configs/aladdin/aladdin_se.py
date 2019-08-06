@@ -170,17 +170,62 @@ def createSystolicArrayDatapths(accel_cfg_file):
     accels = config.sections()
     if not accels:
         fatal("No systolic arrays were specified!")
-    systolic_arrays = []
     for accel in accels:
+        acceleratorId = config.getint(accel, "accelerator_id")
+        peArrayRows = config.getint(accel, "pe_array_rows")
+        peArrayCols = config.getint(accel, "pe_array_cols")
+        dataType = config.get(accel, "data_type")
+        sramSize = config.getint(accel, "sram_size")
+        lineSize = config.getint(accel, "line_size")
+        fetchQueueCapacity = config.getint(accel, "fetch_queue_capacity")
+        commitQueueCapacity = config.getint(accel, "commit_queue_capacity")
+        numSpadBanks = config.getint(accel, "num_spad_banks")
+        numSpadPorts = config.getint(accel, "num_spad_ports")
+        partType = config.get(accel, "partition_type")
         # Set the globally required parameters.
-        systolic_array = SystolicArray(
+        datapath = SystolicArray(
             acceleratorName = accel,
-            acceleratorId = config.getint(accel, "acceleratorId"),
-            peArrayRows = config.getint(accel, "peArrayRows"),
-            peArrayCols = config.getint(accel, "peArrayCols"),
-            sramSize = config.getint(accel, "sramSize"))
-        systolic_arrays.append(systolic_array)
-        setattr(system, systolic_array.acceleratorName, systolic_array)
+            acceleratorId = acceleratorId,
+            peArrayRows = peArrayRows,
+            peArrayCols = peArrayCols,
+            dataType = dataType,
+            lineSize = lineSize,
+            fetchQueueCapacity = fetchQueueCapacity,
+            commitQueueCapacity = commitQueueCapacity,
+            inputSpad = Scratchpad(
+                size = sramSize,
+                lineSize = lineSize,
+                numBanks = numSpadBanks,
+                numPorts = numSpadPorts,
+                partType = partType),
+            weightSpad = Scratchpad(
+                size = sramSize,
+                lineSize = lineSize,
+                numBanks = numSpadBanks,
+                numPorts = numSpadPorts,
+                partType = partType),
+            outputSpad = Scratchpad(
+                size = sramSize,
+                lineSize = lineSize,
+                numBanks = numSpadBanks,
+                numPorts = numSpadPorts,
+                partType = partType))
+        # Attach the scratchpads and the fetch/commit units of the accelerator
+        # to the bus.
+        # Input scratchpad.
+        for i in xrange(peArrayRows):
+            datapath.input_spad_port[i] = datapath.inputSpadBus.slave
+        datapath.inputSpadBus.master = datapath.inputSpad.accelSidePort
+        # Weight scratchpad.
+        for i in xrange(peArrayCols):
+            datapath.weight_spad_port[i] = datapath.weightSpadBus.slave
+        datapath.weightSpadBus.master = datapath.weightSpad.accelSidePort
+        # Output scratchpad.
+        for i in xrange(peArrayRows):
+            datapath.output_spad_port[i] = datapath.outputSpadBus.slave
+        datapath.outputSpadBus.master = datapath.outputSpad.accelSidePort
+
+        setattr(system, datapath.acceleratorName, datapath)
 
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""

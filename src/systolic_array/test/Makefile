@@ -8,7 +8,7 @@ GEM5_SRCS = ../systolic_array_connection.cpp \
 CFLAGS = -O3 -Wall
 ALL_SRCS = test.c
 
-INCLUDES += -I../ -I../../
+INCLUDES += -I../ -I../../ -I$(ALADDIN_HOME)/gem5
 BMARK = test-gem5-accel
 
 all: gem5-accel

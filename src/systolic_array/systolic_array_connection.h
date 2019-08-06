@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stdlib.h>
-#include "systolic_array_datatypes.h"
+#include "systolic_array_params.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,7 +11,7 @@ extern "C" {
 
 //invoke systolic
 void invokeSystolicArrayAndBlock(int accelerator_id,
-                                 systolic_array_data_t data);
+                                 systolic_array_params_t data);
 
 #ifdef __cplusplus
 }  // extern "C"
