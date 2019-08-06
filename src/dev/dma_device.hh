@@ -202,11 +202,9 @@ class DmaPort : public MasterPort, public Drainable
     unsigned findNextEmptyChannel();
     unsigned findNextNonEmptyChannel();
 
-    Addr getPacketAddr(PacketPtr pkt);
-
-    Event* getPacketCompletionEvent(PacketPtr pkt);
-
   public:
+    static Addr getPacketAddr(PacketPtr pkt);
+    static Event* getPacketCompletionEvent(PacketPtr pkt);
 
     DmaPort(MemObject *dev, System *s);
 

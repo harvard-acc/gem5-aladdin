@@ -71,6 +71,9 @@
 #include "sim/debug.hh"
 #include "sim/full_system.hh"
 
+#include "aladdin/gem5/Gem5Datapath.h"
+#include "debug/Aladdin.hh"
+
 /**
  * To avoid linking errors with LTO, only include the header if we
  * actually have a definition.
@@ -282,6 +285,67 @@ System::registerThreadContext(ThreadContext *tc, ContextID assigned)
     activeCpus.push_back(false);
 
     return id;
+}
+
+void System::checkAcceleratorExists(int id, std::string funcName) {
+    if (accelerators.find(id) == accelerators.end())
+        fatal("Unable to %s: No accelerator with id %#x.", funcName, id);
+}
+
+void System::registerAccelerator(int id, Gem5Datapath* accelerator) {
+    if (accelerators.find(id) != accelerators.end())
+        fatal("Unable to register accelerator: accelerator with id %#x "
+              "already exists.",
+              id);
+    accelerators[id] = accelerator;
+    DPRINTF(Aladdin, "Registered accelerator %d\n", id);
+}
+
+void System::deregisterAccelerator(int id) {
+    checkAcceleratorExists(id, __func__);
+    delete accelerators[id];
+    accelerators.erase(id);
+}
+
+void System::activateAccelerator(unsigned accel_id,
+                                 Addr finish_flag,
+                                 void* accel_params,
+                                 int context_id,
+                                 int thread_id) {
+    checkAcceleratorExists(accel_id, __func__);
+    DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
+    /* Register a pointer to use for communication between accelerator and
+     * CPU.
+     */
+    accelerators[accel_id]->setFinishFlag(finish_flag);
+    /* Sets context and thread ids for a given accelerator. These are needed
+     * for supporting cache prefetchers.
+     */
+    accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
+    /* Set the accelerator params. */
+    accelerators[accel_id]->setParams(accel_params);
+    /* Adds the specified accelerator to the event queue with a given number
+     * of delay cycles (to emulate software overhead during invocation).
+     */
+    accelerators[accel_id]->initializeDatapath(1);
+}
+
+void System::insertAddressTranslationMapping(int id,
+                                             Addr sim_vaddr,
+                                             Addr sim_paddr) {
+    checkAcceleratorExists(id, __func__);
+    accelerators[id]->insertTLBEntry(sim_vaddr, sim_paddr);
+}
+
+void System::insertArrayLabelMapping(int id, std::string array_label,
+                                     Addr sim_vaddr, size_t size) {
+    checkAcceleratorExists(id, __func__);
+    accelerators[id]->insertArrayLabelToVirtual(array_label, sim_vaddr, size);
+}
+
+Addr System::getArrayBaseAddress(int id, const char* array_name) {
+    checkAcceleratorExists(id, __func__);
+    return accelerators[id]->getBaseAddress(std::string(array_name));
 }
 
 int
