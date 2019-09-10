@@ -4,7 +4,7 @@
 #include "debug/SystolicPE.hh"
 #include "register.h"
 #include "datatypes.h"
-#include "FP16/include/fp16.h"
+#include "utils.h"
 
 namespace systolic {
 
@@ -23,9 +23,6 @@ class MulAccUnit {
 
  protected:
   void checkEndOfWindow();
-
-  float16 fp16(float fp32_data) { return fp16_ieee_from_fp32_value(fp32_data); }
-  float fp32(float16 fp16_data) { return fp16_ieee_to_fp32_value(fp16_data); }
 
   template <typename ElemType>
   void doMulAcc() {

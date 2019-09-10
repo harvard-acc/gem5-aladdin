@@ -2,6 +2,8 @@
 #define __SYSTOLIC_ARRAY_DATATYPES_H__
 
 #include <cstdint>
+#include <cstring>
+#include <cassert>
 #include <vector>
 
 namespace systolic {
