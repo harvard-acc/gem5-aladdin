@@ -159,7 +159,7 @@ void InputFetch::setParams() {
 
   // The shape of the tensor this fetch unit is fetching from.
   TensorShape shape(
-      { 1, accel.inputRows, accel.inputCols, accel.channels }, accel.alignment);
+      { 1, accel.inputRows, accel.inputCols, accel.inputChans }, accel.alignment);
   // The halo regions around the input tensor.
   std::vector<std::pair<int, int>> halo{
     { 0, 0 },
@@ -175,8 +175,8 @@ void InputFetch::setParams() {
   tensorIter = TensorRegionIndexIterator(
       shape,
       halo,
-      { 0, -accel.inputTopPad, -accel.inputLeftPad, 0 },
-      { 1, accel.weightRows, accel.weightCols, accel.channels });
+      { 0, -accel.inputTopPad, -accel.inputLeftPad, accel.ifmapStart },
+      { 1, accel.weightRows, accel.weightCols, accel.weightChans });
   // Set the original indices.
   tensorIter.advanceOrigin({ 0, 0, id, 0 });
   if (tensorIter.end()) {
@@ -240,9 +240,9 @@ void WeightFetch::setParams() {
   finishedWeightFolds = 0;
 
   // The shape of the tensor this fetch unit is fetching from.
-  TensorShape shape({ accel.numEffecWeights, accel.weightRows,
-                      accel.weightCols, accel.channels },
-                    accel.alignment);
+  TensorShape shape(
+      { accel.numKerns, accel.weightRows, accel.weightCols, accel.weightChans },
+      accel.alignment);
 
   // Set the stride.
   windowStride = std::vector<int>{ accel.peArrayCols, 0, 0, 0 };
@@ -250,8 +250,8 @@ void WeightFetch::setParams() {
   // Set the line index iterator within the window.
   tensorIter = TensorRegionIndexIterator(
       shape,
-      { 0, 0, 0, 0 },
-      { 1, accel.weightRows, accel.weightCols, accel.channels });
+      { accel.kernStart, 0, 0, 0 },
+      { 1, accel.weightRows, accel.weightCols, accel.weightChans });
   // Set the original indices.
   tensorIter.advanceOrigin({ id, 0, 0, 0 });
   if (tensorIter.end()) {

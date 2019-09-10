@@ -25,7 +25,7 @@ void Commit::setParams() {
 
   // The shape of the output tensor.
   TensorShape shape(
-      { 1, accel.outputRows, accel.outputCols, accel.numEffecWeights },
+      { 1, accel.outputRows, accel.outputCols, accel.numEffecKerns },
       accel.alignment);
   // Set the tensor iterator.
   iter = TensorRegionIndexIterator(
@@ -120,10 +120,10 @@ bool Commit::isLineComplete(int lineIndex) {
     // We have idle PE columns in the last weight fold if the number of weights
     // is non-multiples of peArrayCols.
     bool haveIdleColumns = remainingWeightFolds == 1 &&
-                       accel.numEffecWeights % accel.peArrayCols != 0;
+                           accel.numEffecKerns % accel.peArrayCols != 0;
     // Determine if this PE column is idle.
     bool isIdleColumn =
-        haveIdleColumns && i >= accel.numEffecWeights % accel.peArrayCols;
+        haveIdleColumns && i >= accel.numEffecKerns % accel.peArrayCols;
     if (!outputBuffer[i].isWindowEnd() && !isIdleColumn)
       return false;
   }

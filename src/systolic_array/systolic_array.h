@@ -128,24 +128,32 @@ class SystolicArray : public Gem5Datapath {
     outputBaseAddr = (Addr)accelParams->output_base_addr;
     inputRows = accelParams->input_dims[1];
     inputCols = accelParams->input_dims[2];
+    inputChans = accelParams->input_dims[3];
     weightRows = accelParams->weight_dims[1];
     weightCols = accelParams->weight_dims[2];
+    weightChans = accelParams->weight_dims[3];
     outputRows = accelParams->output_dims[1];
     outputCols = accelParams->output_dims[2];
     numOfmaps = accelParams->output_dims[3];
-    numEffecWeights = accelParams->weight_dims[0];
-    channels = accelParams->input_dims[3];
+    numKerns = accelParams->weight_dims[0];
+    // Number of effective kernels for this invocation. The weights can contain
+    // more kernels than the number of ofmaps that the outputs scratchpad can
+    // fit, where the number of effective kernels should be the number of
+    // ofmaps.
+    numEffecKerns = std::min(numKerns, numOfmaps);
     stride = accelParams->stride;
     inputTopPad = accelParams->input_halo_pad[0];
     inputBottomPad = accelParams->input_halo_pad[1];
     inputLeftPad = accelParams->input_halo_pad[2];
     inputRightPad = accelParams->input_halo_pad[3];
+    ifmapStart = accelParams->ifmap_start;
+    kernStart = accelParams->kern_start;
     accumResults = accelParams->accum_results;
     sendResults = accelParams->send_results;
 
     // Infer the numbers of folds needed to map the convolution to the PE array.
     numOutputFolds = ceil(outputRows * outputCols * 1.0 / peArrayRows);
-    numWeightFolds = ceil(numOfmaps * 1.0 / peArrayCols);
+    numWeightFolds = ceil(numEffecKerns * 1.0 / peArrayCols);
 
     dataflow->setParams();
   }
@@ -153,7 +161,15 @@ class SystolicArray : public Gem5Datapath {
   void initializeDatapath(int delay) override {
     assert(state == Idle &&
            "The systolic array accelerator is not idle!");
-    state = ReadyForDmaRead;
+    // If ifmapStart is set to a non-zero value, the inputs scratchpad already
+    // has the data. Similarly, the weights scratchpad already has the data if
+    // kernStart is to non-zero.
+    if (ifmapStart == 0)
+      state = ReadyForDmaInputRead;
+    else if (kernStart == 0)
+      state = ReadyForDmaWeightRead;
+    else
+      state = ReadyToCompute;
     // Start running the accelerator.
     scheduleOnEventQueue(delay);
   }
@@ -222,8 +238,9 @@ class SystolicArray : public Gem5Datapath {
  protected:
   enum State {
     Idle,
-    ReadyForDmaRead,
+    ReadyForDmaInputRead,
     WaitingForDmaInputRead,
+    ReadyForDmaWeightRead,
     WaitingForDmaWeightRead,
     ReadyToCompute,
     WaitingForCompute,
@@ -277,8 +294,11 @@ class SystolicArray : public Gem5Datapath {
   void dmaCompleteCallback(DmaEvent* event) override {
     if (state == WaitingForDmaInputRead) {
       DPRINTF(SystolicToplevel, "Completed DMA reads for inputs.\n");
-      issueDmaWeightRead();
-      state = WaitingForDmaWeightRead;
+      // Skip reading the weights if the scratchpad already has data filled.
+      if (kernStart == 0)
+        state = ReadyForDmaWeightRead;
+      else
+        state = ReadyToCompute;
     } else if (state == WaitingForDmaWeightRead) {
       DPRINTF(SystolicToplevel, "Completed DMA reads for weights.\n");
       state = ReadyToCompute;
@@ -339,18 +359,26 @@ class SystolicArray : public Gem5Datapath {
   Addr outputBaseAddr;
   int inputRows;
   int inputCols;
+  int inputChans;
   int weightRows;
   int weightCols;
+  int weightChans;
   int outputRows;
   int outputCols;
-  int channels;
   int numOfmaps;
-  int numEffecWeights;
+  int numKerns;
+  int numEffecKerns;
   int stride;
   int inputTopPad;
   int inputBottomPad;
   int inputLeftPad;
   int inputRightPad;
+  // If the inputs contain more channels than the weights, start from this one.
+  // Otherwise this should always be zero.
+  int ifmapStart;
+  // If the weights contain more kernels than the results buffer can fit, start
+  // from this one. Otherwise this should always be zero.
+  int kernStart;
   // True if we want to add the outputs to the data in the output scratchpad.
   // This is used when the weight tensor is tiled channelwise, so we need to
   // accumulate the partial sums across invocations.

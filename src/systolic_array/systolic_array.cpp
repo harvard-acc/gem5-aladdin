@@ -3,9 +3,12 @@
 namespace systolic {
 
 void SystolicArray::processTick() {
-  if (state == ReadyForDmaRead) {
+  if (state == ReadyForDmaInputRead) {
     issueDmaInputRead();
     state = WaitingForDmaInputRead;
+  } else if (state == ReadyForDmaWeightRead) {
+    issueDmaWeightRead();
+    state = WaitingForDmaWeightRead;
   } else if (state == ReadyToCompute) {
     dataflow->start();
     state = WaitingForCompute;
@@ -23,7 +26,7 @@ void SystolicArray::processTick() {
 
 void SystolicArray::issueDmaInputRead() {
   DPRINTF(SystolicToplevel, "Start DMA reads for inputs.\n");
-  int inputSize = inputRows * inputCols * channels * elemSize;
+  int inputSize = inputRows * inputCols * inputChans * elemSize;
   uint8_t* inputData = new uint8_t[inputSize]();
   SystolicDmaEvent* inputDmaEvent =
       new SystolicDmaEvent(this, inputBaseAddr, Input);
@@ -33,8 +36,7 @@ void SystolicArray::issueDmaInputRead() {
 
 void SystolicArray::issueDmaWeightRead() {
   DPRINTF(SystolicToplevel, "Start DMA reads for weights.\n");
-  int weightSize =
-      weightRows * weightCols * channels * numEffecWeights * elemSize;
+  int weightSize = weightRows * weightCols * weightChans * numKerns * elemSize;
   uint8_t* weightData = new uint8_t[weightSize]();
   auto weightDmaEvent = new SystolicDmaEvent(this, weightBaseAddr, Weight);
   splitAndSendDmaRequest(

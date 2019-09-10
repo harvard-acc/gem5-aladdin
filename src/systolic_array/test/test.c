@@ -54,6 +54,8 @@ int main() {
   memcpy(data.output_dims, output_dims, sizeof(int) * 4);
   data.stride = 1;
   memcpy(data.input_halo_pad, input_halo_pad, sizeof(int) * 4);
+  data.ifmap_start = 0;
+  data.kern_start = 0;
   data.accum_results = false;
   data.send_results = true;
   int accelerator_id = 4;
