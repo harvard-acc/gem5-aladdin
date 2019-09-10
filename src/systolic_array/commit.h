@@ -30,6 +30,31 @@ class Commit : public LocalSpadInterface {
   void evaluate() override;
 
  protected:
+  struct LineData {
+    PacketPtr pkt;
+    bool sent;
+    bool acked;
+
+    LineData(PacketPtr _pkt) : pkt(_pkt), sent(false), acked(false) {}
+    ~LineData() {
+      delete pkt;
+      delete pkt->popSenderState();
+    }
+  };
+
+  class CommitSenderState : public Packet::SenderState {
+   public:
+    CommitSenderState(LineData* _commitQueueSlotPtr)
+        : Packet::SenderState(), commitQueueSlotPtr(_commitQueueSlotPtr) {}
+
+    LineData* getCommitQueueSlotPtr() const { return commitQueueSlotPtr; }
+
+   protected:
+    // This points to the line we have reserved in the commit queue for this
+    // request.
+    LineData* commitQueueSlotPtr;
+  };
+
   // Callback from the scratchpad port upon receiving a response.
   void localSpadCallback(PacketPtr pkt) override;
 
@@ -58,13 +83,10 @@ class Commit : public LocalSpadInterface {
   // True if all the data has been sent.
   bool allSent;
 
-  // Number of outstanding commit requests.
-  int numOutstandingReq;
-
   int remainingWeightFolds;
 
   // The queue stores the lines that are waiting to be sent to the scratchpad.
-  std::deque<PacketPtr> commitQueue;
+  std::deque<LineData*> commitQueue;
   int commitQueueCapacity;
 
   // The tensor iterator which provides the current commit address.

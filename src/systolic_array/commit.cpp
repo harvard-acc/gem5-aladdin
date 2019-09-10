@@ -9,8 +9,8 @@ Commit::Commit(int _id,
     : LocalSpadInterface(
           _accel.name() + ".commit" + std::to_string(_id), _accel, params),
       id(_id), accel(_accel), elemsPerLine(_accel.lineSize / _accel.elemSize),
-      unused(false), allSent(false), numOutstandingReq(0),
-      inputs(params.peArrayCols), outputBuffer(params.peArrayCols),
+      unused(false), allSent(false), inputs(params.peArrayCols),
+      outputBuffer(params.peArrayCols),
       commitQueueCapacity(params.commitQueueCapacity) {}
 
 void Commit::setParams() {
@@ -84,13 +84,29 @@ void Commit::evaluate() {
 
   // Send requests from the commit queue if there are requests waiting
   // to be sent to the output scratchpad.
-  while (!commitQueue.empty() && !localSpadPort.isStalled()) {
-    if (!localSpadPort.sendTimingReq(commitQueue.front()))
-      DPRINTF(SystolicCommit, "Failed to send commit request. Will retry.\n");
-    else
-      DPRINTF(SystolicCommit, "Sent commit request.\n");
-    commitQueue.pop_front();
-    numOutstandingReq++;
+  auto queueIt = commitQueue.rbegin();
+  while (!commitQueue.empty() && !localSpadPort.isStalled() &&
+         queueIt != commitQueue.rend()) {
+    // If the item at the front of queue has received the ack from the
+    // scratchpad, we can delete it now.
+    if (queueIt == commitQueue.rbegin() && (*queueIt)->acked) {
+      delete *queueIt;
+      commitQueue.pop_front();
+      if (commitQueue.empty() && allSent) {
+        DPRINTF(SystolicCommit, "All the output data has been written back.\n");
+        accel.dataflow->notifyDone();
+        break;
+      }
+    }
+
+    if (!(*queueIt)->sent) {
+      if (!localSpadPort.sendTimingReq((*queueIt)->pkt))
+        DPRINTF(SystolicCommit, "Failed to send commit request. Will retry.\n");
+      else
+        DPRINTF(SystolicCommit, "Sent commit request.\n");
+      (*queueIt)->sent = true;
+    }
+    queueIt++;
   }
 }
 
@@ -116,13 +132,10 @@ bool Commit::isLineComplete(int lineIndex) {
 
 void Commit::localSpadCallback(PacketPtr pkt) {
   DPRINTF(SystolicCommit, "Received response, addr %#x.\n", pkt->getAddr());
-  numOutstandingReq--;
-  if (numOutstandingReq == 0 && allSent) {
-    DPRINTF(SystolicCommit, "All the output data has been written back.\n");
-    accel.dataflow->notifyDone();
-  }
-  delete pkt->popSenderState();
-  delete pkt;
+  CommitSenderState* state = pkt->findNextSenderState<CommitSenderState>();
+  LineData* lineSlotPtr = state->getCommitQueueSlotPtr();
+  // Mark that the line has the data acked.
+  lineSlotPtr->acked = true;
 }
 
 void Commit::queueCommitRequest(int lineIndex) {
@@ -139,17 +152,18 @@ void Commit::queueCommitRequest(int lineIndex) {
   req->setContext(accel.getContextId());
   PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
   pkt->dataDynamic(data);
-  Packet::SenderState* state = new Packet::SenderState();
-  pkt->pushSenderState(state);
+  LineData* line = new LineData(pkt);
   DPRINTF(SystolicCommit, "Created a commit request at indices %s.\n", iter);
 
-  commitQueue.push_back(pkt);
+  commitQueue.push_back(line);
   if (commitQueue.size() >= commitQueueCapacity)
     warn("Commit queue exceeds its capacity after pushing new request. "
          "Current size: %d, capacity: %d.\n",
          commitQueue.size(), commitQueueCapacity);
   if (commitQueue.size() > commitQueuePeakSize.value())
       commitQueuePeakSize = commitQueue.size();
+  CommitSenderState* state = new CommitSenderState(commitQueue.back());
+  pkt->pushSenderState(state);
 
   // Clear the line in output buffer.
   for (int i = lineIndex * elemsPerLine; i < (lineIndex + 1) * elemsPerLine;
