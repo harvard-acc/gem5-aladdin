@@ -8,6 +8,7 @@
 #include "tensor.h"
 #include "register.h"
 #include "datatypes.h"
+#include "utils.h"
 
 // Each commit unit is responsible for collecting finished output pixels from a
 // PE row and then write them to the output scratchpad. Once any output pixel is
@@ -34,11 +35,26 @@ class Commit : public LocalSpadInterface {
     PacketPtr pkt;
     bool sent;
     bool acked;
+    uint8_t* data;
 
-    LineData(PacketPtr _pkt) : pkt(_pkt), sent(false), acked(false) {}
+    LineData(PacketPtr _pkt, uint8_t* _data = nullptr)
+        : pkt(_pkt), sent(false), acked(false), data(_data) {}
     ~LineData() {
       delete pkt;
       delete pkt->popSenderState();
+    }
+
+    void deletePacket() {
+      delete pkt;
+      delete pkt->popSenderState();
+      sent = false;
+      acked = false;
+    }
+
+    template <typename T>
+    T* getDataPtr() {
+      assert(data != nullptr);
+      return reinterpret_cast<T*>(data);
     }
   };
 
@@ -63,6 +79,12 @@ class Commit : public LocalSpadInterface {
 
   // Create a writeback request and queue it to the commit queue.
   void queueCommitRequest(int lineIndex);
+
+  template <typename ElemType>
+  void accumOutputs(ElemType* currOutputs, ElemType* prevOutputs) {
+    for (int i = 0; i < elemsPerLine; i++)
+      currOutputs[i] += prevOutputs[i];
+  }
 
   int id;
 

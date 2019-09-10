@@ -130,29 +130,79 @@ bool Commit::isLineComplete(int lineIndex) {
   return true;
 }
 
+template <>
+void Commit::accumOutputs(float16* currOutputs, float16* prevOutputs) {
+  for (int i = 0; i < elemsPerLine; i++)
+    currOutputs[i] = fp16(fp32(currOutputs[i]) + fp32(prevOutputs[i]));
+}
+
 void Commit::localSpadCallback(PacketPtr pkt) {
   DPRINTF(SystolicCommit, "Received response, addr %#x.\n", pkt->getAddr());
   CommitSenderState* state = pkt->findNextSenderState<CommitSenderState>();
   LineData* lineSlotPtr = state->getCommitQueueSlotPtr();
-  // Mark that the line has the data acked.
-  lineSlotPtr->acked = true;
+  if (pkt->isRead()) {
+    // We got the previous partial sums. Now add it with the current output.
+    if (accel.dataType == Int32) {
+      accumOutputs<int>(lineSlotPtr->getDataPtr<int>(), pkt->getPtr<int>());
+    } else if (accel.dataType == Int64) {
+      accumOutputs<int64_t>(
+          lineSlotPtr->getDataPtr<int64_t>(), pkt->getPtr<int64_t>());
+    } else if (accel.dataType == Float16) {
+      accumOutputs<float16>(
+          lineSlotPtr->getDataPtr<float16>(), pkt->getPtr<float16>());
+    } else if (accel.dataType == Float32) {
+      accumOutputs<float>(
+          lineSlotPtr->getDataPtr<float>(), pkt->getPtr<float>());
+    } else if (accel.dataType == Float64) {
+      accumOutputs<double>(
+          lineSlotPtr->getDataPtr<double>(), pkt->getPtr<double>());
+    }
+    lineSlotPtr->deletePacket();
+    // Send the write request.
+    auto req = std::make_shared<Request>(
+        pkt->getAddr(), accel.lineSize, 0, localSpadMasterId);
+    req->setContext(accel.getContextId());
+    PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
+    pkt->dataDynamic(lineSlotPtr->getDataPtr<uint8_t>());
+    CommitSenderState* state = new CommitSenderState(lineSlotPtr);
+    pkt->pushSenderState(state);
+    // Set the packet pointer to the new write request.
+    lineSlotPtr->pkt = pkt;
+  } else {
+    // Mark that the line has the data acked.
+    lineSlotPtr->acked = true;
+  }
 }
 
 void Commit::queueCommitRequest(int lineIndex) {
   Addr addr = iter * accel.elemSize;
   uint8_t* data = new uint8_t[accel.lineSize]();
-  // Copy data to the packet.
+  // Copy data from the buffer for the collected data.
   for (int i = 0; i < elemsPerLine; i++) {
     memcpy(&data[i * accel.elemSize],
            outputBuffer[lineIndex * elemsPerLine + i].getDataPtr<uint8_t>(),
            accel.elemSize);
   }
-  auto req =
-      std::make_shared<Request>(addr, accel.lineSize, 0, localSpadMasterId);
-  req->setContext(accel.getContextId());
-  PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
-  pkt->dataDynamic(data);
-  LineData* line = new LineData(pkt);
+  PacketPtr pkt = nullptr;
+  LineData* line = nullptr;
+  if (accel.accumResults) {
+    // If we need to accumulate results, read the previous results first.
+    auto req =
+        std::make_shared<Request>(addr, accel.lineSize, 0, localSpadMasterId);
+    req->setContext(accel.getContextId());
+    pkt = new Packet(req, MemCmd::ReadReq);
+    pkt->allocate();
+    line = new LineData(pkt, data);
+  } else {
+    // Directly write to the scratchpad if we don't need to accumulate the
+    // results.
+    auto req =
+        std::make_shared<Request>(addr, accel.lineSize, 0, localSpadMasterId);
+    req->setContext(accel.getContextId());
+    pkt = new Packet(req, MemCmd::WriteReq);
+    pkt->dataDynamic(data);
+    line = new LineData(pkt);
+  }
   DPRINTF(SystolicCommit, "Created a commit request at indices %s.\n", iter);
 
   commitQueue.push_back(line);

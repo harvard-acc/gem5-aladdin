@@ -16,6 +16,7 @@ typedef struct _systolic_array_params_t {
   int output_dims[4];
   int stride;
   int input_halo_pad[4];
+  bool accum_results;
   bool send_results;
 } systolic_array_params_t;
 

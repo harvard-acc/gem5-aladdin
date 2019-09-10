@@ -140,6 +140,7 @@ class SystolicArray : public Gem5Datapath {
     inputBottomPad = accelParams->input_halo_pad[1];
     inputLeftPad = accelParams->input_halo_pad[2];
     inputRightPad = accelParams->input_halo_pad[3];
+    accumResults = accelParams->accum_results;
     sendResults = accelParams->send_results;
 
     // Infer the numbers of folds needed to map the convolution to the PE array.
@@ -350,6 +351,10 @@ class SystolicArray : public Gem5Datapath {
   int inputBottomPad;
   int inputLeftPad;
   int inputRightPad;
+  // True if we want to add the outputs to the data in the output scratchpad.
+  // This is used when the weight tensor is tiled channelwise, so we need to
+  // accumulate the partial sums across invocations.
+  bool accumResults;
   // True if this invocation needs to send the results back to the memory using
   // DMA.
   bool sendResults;
