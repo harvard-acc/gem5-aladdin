@@ -140,6 +140,7 @@ class SystolicArray : public Gem5Datapath {
     inputBottomPad = accelParams->input_halo_pad[1];
     inputLeftPad = accelParams->input_halo_pad[2];
     inputRightPad = accelParams->input_halo_pad[3];
+    sendResults = accelParams->send_results;
 
     // Infer the numbers of folds needed to map the convolution to the PE array.
     numOutputFolds = ceil(outputRows * outputCols * 1.0 / peArrayRows);
@@ -211,7 +212,10 @@ class SystolicArray : public Gem5Datapath {
   void notifyDone() {
     assert(state = WaitingForCompute);
     dataflow->stop();
-    state = ReadyForDmaWrite;
+    if (sendResults)
+      state = ReadyForDmaWrite;
+    else
+      state = ReadyToSendFinish;
   }
 
  protected:
@@ -346,6 +350,9 @@ class SystolicArray : public Gem5Datapath {
   int inputBottomPad;
   int inputLeftPad;
   int inputRightPad;
+  // True if this invocation needs to send the results back to the memory using
+  // DMA.
+  bool sendResults;
 
   // The outputs/filters are partitioned into folds in order to map to the PE
   // arrays.

@@ -54,6 +54,7 @@ int main() {
   memcpy(data.output_dims, output_dims, sizeof(int) * 4);
   data.stride = 1;
   memcpy(data.input_halo_pad, input_halo_pad, sizeof(int) * 4);
+  data.send_results = true;
   int accelerator_id = 4;
   mapArrayToAccelerator(
       accelerator_id, "", data.input_base_addr, input_size * sizeof(float));
