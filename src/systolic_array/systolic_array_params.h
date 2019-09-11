@@ -5,6 +5,30 @@
 extern "C" {
 #endif
 
+typedef enum _activation_type {
+    NO_ACTIVATION,
+    RELU,
+    RELU_THRESHOLD,
+    LRELU,
+    ELU,
+    SELU,
+    TANH,
+    HARD_TANH,
+    SIGMOID,
+    SOFTMAX
+} activation_type;
+
+typedef struct _activation_params {
+    // LReLU
+    float slope;
+    // ELU/SELU
+    float alpha;
+    float lambda;
+    // Hard Tanh
+    float min;
+    float max;
+} activation_params;
+
 // Struct of custom accelerator parameters. The user program uses this struct to
 // pass runtime parameters.
 typedef struct _systolic_array_params_t {
@@ -20,6 +44,8 @@ typedef struct _systolic_array_params_t {
   int kern_start;
   bool accum_results;
   bool send_results;
+  activation_type act_type;
+  activation_params act_params;
 } systolic_array_params_t;
 
 #ifdef __cplusplus

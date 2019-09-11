@@ -58,6 +58,7 @@ int main() {
   data.kern_start = 0;
   data.accum_results = false;
   data.send_results = true;
+  data.act_type = RELU;
   int accelerator_id = 4;
   mapArrayToAccelerator(
       accelerator_id, "", data.input_base_addr, input_size * sizeof(float));

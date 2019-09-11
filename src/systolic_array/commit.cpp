@@ -1,5 +1,6 @@
 #include "systolic_array.h"
 #include "commit.h"
+#include "activations.h"
 
 namespace systolic {
 
@@ -158,6 +159,15 @@ void Commit::localSpadCallback(PacketPtr pkt) {
           lineSlotPtr->getDataPtr<double>(), pkt->getPtr<double>());
     }
     lineSlotPtr->deletePacket();
+    if (accel.sendResults) {
+      // If the outputs are finished, do the activation function before we send
+      // the outputs back to the scratchpad.
+      activationFunc(lineSlotPtr->getDataPtr<uint8_t>(),
+                     elemsPerLine,
+                     accel.actType,
+                     accel.actParams,
+                     accel.dataType);
+    }
     // Send the write request.
     auto req = std::make_shared<Request>(
         pkt->getAddr(), accel.lineSize, 0, localSpadMasterId);
@@ -194,6 +204,12 @@ void Commit::queueCommitRequest(int lineIndex) {
     pkt->allocate();
     line = new LineData(pkt, data);
   } else {
+    if (accel.sendResults) {
+      // If the outputs are finished, do the activation function before we send
+      // the outputs back to the scratchpad.
+      activationFunc(
+          data, elemsPerLine, accel.actType, accel.actParams, accel.dataType);
+    }
     // Directly write to the scratchpad if we don't need to accumulate the
     // results.
     auto req =

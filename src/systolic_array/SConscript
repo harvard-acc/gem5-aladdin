@@ -12,6 +12,7 @@ Source('commit.cpp')
 Source('pe.cpp')
 Source('scratchpad.cpp')
 Source('local_spad_interface.cpp')
+Source('activations.cpp')
 Source('utils.cpp')
 
 DebugFlag('SystolicToplevel', 'Top level events')
