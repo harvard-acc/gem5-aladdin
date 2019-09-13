@@ -388,8 +388,8 @@ class SystolicArray : public Gem5Datapath {
   // True if this invocation needs to send the results back to the memory using
   // DMA.
   bool sendResults;
-  activation_type actType;
-  activation_params actParams;
+  systolic_activation_type actType;
+  systolic_activation_params actParams;
 
   // The outputs/filters are partitioned into folds in order to map to the PE
   // arrays.

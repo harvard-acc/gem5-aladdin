@@ -61,8 +61,8 @@ void hardTanh(ElemType* inputs, int elems, float min, float max) {
 
 void activationFunc(uint8_t* inputs,
                     int elems,
-                    activation_type function,
-                    activation_params params,
+                    systolic_activation_type function,
+                    systolic_activation_params params,
                     DataType dataType);
 
 }  // namespace systolic

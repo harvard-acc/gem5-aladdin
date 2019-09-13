@@ -84,26 +84,26 @@ DEFINE_ACTIVATION_FUNC_DISPATCH(sigmoid)
 
 void activationFunc(uint8_t* inputs,
                     int elems,
-                    activation_type function,
-                    activation_params params,
+                    systolic_activation_type function,
+                    systolic_activation_params params,
                     DataType dataType) {
-  if (function == NO_ACTIVATION)
+  if (function == SYSTOLIC_NO_ACTIVATION)
     return;
-  else if (function == RELU)
+  else if (function == SYSTOLIC_RELU)
     reluDispatch(inputs, elems, dataType);
-  else if (function == LRELU)
+  else if (function == SYSTOLIC_LRELU)
     lreluDispatch(inputs, elems, dataType, params.slope);
-  else if (function == ELU)
+  else if (function == SYSTOLIC_ELU)
     eluDispatch(inputs, elems, dataType, params.alpha);
-  else if (function == SELU)
+  else if (function == SYSTOLIC_SELU)
     seluDispatch(inputs, elems, dataType, params.alpha, params.lambda);
-  else if (function == TANH)
+  else if (function == SYSTOLIC_TANH)
     tanhDispatch(inputs, elems, dataType);
-  else if (function == HARD_TANH)
+  else if (function == SYSTOLIC_HARD_TANH)
     hardTanhDispatch(inputs, elems, dataType, params.min, params.max);
-  else if (function == SIGMOID)
+  else if (function == SYSTOLIC_SIGMOID)
     sigmoidDispatch(inputs, elems, dataType);
-  else if (function == SOFTMAX)
+  else if (function == SYSTOLIC_SOFTMAX)
     assert(false && "Softmax not added yet.");
   else
     assert(false && "Unknown activation function.");
