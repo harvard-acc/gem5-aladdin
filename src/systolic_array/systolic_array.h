@@ -157,6 +157,18 @@ class SystolicArray : public Gem5Datapath {
     numOutputFolds = ceil(outputRows * outputCols * 1.0 / peArrayRows);
     numWeightFolds = ceil(numEffecKerns * 1.0 / peArrayCols);
 
+    DPRINTF(SystolicToplevel,
+            "Convolution parameters: inputs (%d, %d, %d, %d), weights (%d, %d, "
+            "%d, %d), outputs (%d, %d, %d, %d), stride %d, input halo padding "
+            "(%d, %d, %d, %d), ifmap start %d, kernel start %d, accumulate "
+            "results %d, send results %d, output folds %d, weight folds %d.\n",
+            accelParams->input_dims[0], inputRows, inputCols, inputChans,
+            numKerns, weightRows, weightCols, weightChans,
+            accelParams->output_dims[0], outputRows, outputCols, numOfmaps,
+            stride, inputTopPad, inputBottomPad, inputLeftPad, inputRightPad,
+            ifmapStart, kernStart, accumResults, sendResults, numOutputFolds,
+            numWeightFolds);
+
     dataflow->setParams();
   }
 
