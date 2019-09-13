@@ -196,9 +196,8 @@ def config_cache(options, system):
             system.cpu[i].connectAllPorts(system.membus)
 
     if options.accel_cfg_file:
-      if options.accel_type == "aladdin":
-        datapaths = system.find_all(HybridDatapath)[0]
-        for datapath in datapaths:
+        aladdin_datapaths = system.find_all(HybridDatapath)[0]
+        for datapath in aladdin_datapaths:
           # For now, we will connect all datapaths to a cache regardless of
           # whether they are needed or not.
           datapath.cache = dcache_class(
@@ -218,7 +217,7 @@ def config_cache(options, system):
           if datapath.enableAcp:
             assert(options.l2cache and "ACP requires an L2 cache!")
             datapath.connectAcpPort(system.tol2bus)
-      elif options.accel_type == "systolic_array":
+
         systolic_arrays = system.find_all(SystolicArray)[0]
         for systolic_array in systolic_arrays:
           systolic_array.cache = dcache_class(

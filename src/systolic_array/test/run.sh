@@ -21,7 +21,6 @@ ${gem5_dir}/build/X86/gem5.opt \
   --l2_assoc=16 \
   --l2_hit_latency=20 \
   --cacheline_size=32 \
-  --accel_type=systolic_array \
   --accel_cfg_file=systolic_array.cfg \
   -c ${bmk_home}/test-gem5-accel \
   > stdout 2> stderr
