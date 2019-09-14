@@ -288,7 +288,7 @@ void WeightFetch::advanceTensorIter() {
       // Before we start fetching the next weight fold, we need to barrier wait
       // other fetch units.
       weightFoldEnd = true;
-      if (tensorIter.end()) {
+      if (accel.numWeightFolds == finishedWeightFolds) {
         DPRINTF(
             SystolicFetch, "All the required weight data has been fetched.\n");
         allFetched = true;

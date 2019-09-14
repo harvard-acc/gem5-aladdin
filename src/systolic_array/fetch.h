@@ -83,6 +83,7 @@ class Fetch : public LocalSpadInterface {
 
  public:
   virtual void setParams() {
+    fetchQueue.clear();
     pixelIndex = 0;
     weightFoldEnd = false;
     unused = false;
