@@ -66,6 +66,8 @@
 #include "sim/futex_map.hh"
 #include "sim/se_signal.hh"
 
+#include "aladdin/gem5/aladdin_sys_connection.h"
+
 /**
  * To avoid linking errors with LTO, only include the header if we
  * actually have the definition.
@@ -248,6 +250,10 @@ class System : public MemObject
     /* Add an mapping between array names to the simulated virtual addresses. */
     void insertArrayLabelMapping(int id, std::string array_label,
                                  Addr sim_vaddr, size_t size);
+
+    /* Set memory access type for an array. */
+    void setArrayMemoryType(int id, std::string array_label,
+                            MemoryType mem_type);
 
     /* Get the base trace address of of the array for the specified accelerator.
      */

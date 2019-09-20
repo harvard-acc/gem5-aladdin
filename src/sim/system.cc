@@ -343,6 +343,12 @@ void System::insertArrayLabelMapping(int id, std::string array_label,
     accelerators[id]->insertArrayLabelToVirtual(array_label, sim_vaddr, size);
 }
 
+void System::setArrayMemoryType(int id, std::string array_label,
+                                MemoryType mem_type) {
+    checkAcceleratorExists(id, __func__);
+    accelerators[id]->setArrayMemoryType(array_label, mem_type);
+}
+
 Addr System::getArrayBaseAddress(int id, const char* array_name) {
     checkAcceleratorExists(id, __func__);
     return accelerators[id]->getBaseAddress(std::string(array_name));
