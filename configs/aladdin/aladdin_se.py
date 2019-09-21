@@ -407,6 +407,9 @@ if options.ruby:
             system.cpu[i].dtb.walker.port = ruby_port.slave
 
     if options.accel_cfg_file:
+        datapaths = []
+        datapaths.extend(system.find_all(HybridDatapath)[0])
+        datapaths.extend(system.find_all(SystolicArray)[0])
         for i,datapath in enumerate(datapaths):
             datapath.cache_port = system.ruby._cpu_ports[options.num_cpus+3*i].slave
             datapath.spad_port = system.ruby._cpu_ports[options.num_cpus+3*i+1].slave
