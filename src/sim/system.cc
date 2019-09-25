@@ -323,7 +323,9 @@ void System::activateAccelerator(unsigned accel_id,
      */
     accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
     /* Set the accelerator params. */
-    accelerators[accel_id]->setParams(accel_params);
+    if (accel_params != NULL)
+        accelerators[accel_id]->setParams(accel_params);
+
     /* Adds the specified accelerator to the event queue with a given number
      * of delay cycles (to emulate software overhead during invocation).
      */

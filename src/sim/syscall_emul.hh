@@ -700,7 +700,7 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
           p->pTable->translate((Addr)params.finish_flag, paddr);
           // Read the accelerator params.
           int size = params.size;
-          uint8_t* accel_params_buf;
+          uint8_t* accel_params_buf = NULL;
           if (size > 0) {
               accel_params_buf = new uint8_t[size];
               memProxy.readBlob(
