@@ -18,7 +18,7 @@ int main() {
   float16 *inputs, *weights, *outputs;
   int input_dims[4] = { 1, 16, 16, 8 };
   int weight_dims[4] = { 16, 3, 3, 8 };
-  int output_dims[4] = { 1, 16, 16, 16 };
+  int output_dims[4] = { 1, 8, 8, 16 };
   int input_halo_pad[4] = { 1, 1, 1, 1 };
   int input_size = 1, weight_size = 1, output_size = 1;
   for (int i = 0; i < 4; i++) {
@@ -58,7 +58,7 @@ int main() {
   memcpy(data.input_dims, input_dims, sizeof(int) * 4);
   memcpy(data.weight_dims, weight_dims, sizeof(int) * 4);
   memcpy(data.output_dims, output_dims, sizeof(int) * 4);
-  data.stride = 1;
+  data.stride = 2;
   memcpy(data.input_halo_pad, input_halo_pad, sizeof(int) * 4);
   data.ifmap_start = 0;
   data.kern_start = 0;

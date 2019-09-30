@@ -241,7 +241,7 @@ void Commit::queueCommitRequest(int lineIndex) {
   if (iter.end()) {
     // We have finished a weight fold. Arrive at the barrier. Move the iterator
     // to the next weight fold.
-    iter.advanceOrigin({ 0, 0, 0, accel.peArrayCols });
+    iter.advanceOriginByStride({ 0, 0, 0, accel.peArrayCols });
     remainingWeightFolds--;
     if (iter.end()) {
       // We have finished all the weight folds.

@@ -173,12 +173,12 @@ void InputFetch::setParams() {
 
   // Set the tensor iterator.
   tensorIter = TensorRegionIndexIterator(
-      shape,
-      halo,
+      shape, halo,
       { 0, -accel.inputTopPad, -accel.inputLeftPad, accel.ifmapStart },
-      { 1, accel.weightRows, accel.weightCols, accel.weightChans });
+      { 1, accel.weightRows, accel.weightCols, accel.weightChans },
+      { 1, accel.stride, accel.stride, 1 });
   // Set the original indices.
-  tensorIter.advanceOrigin({ 0, 0, id, 0 });
+  tensorIter.advanceOriginByStride({ 0, 0, id, 0 });
   if (tensorIter.end()) {
     // This is the case where the number of output folds is smaller than the
     // PE row size, and such that some PEs will stay idle during the whole
@@ -198,7 +198,7 @@ void InputFetch::advanceTensorIter() {
     // We have finished a convolution window and need to move to the next.
     DPRINTF(SystolicFetch, "Finished output fold %d.\n", finishedOutputFolds);
     finishedOutputFolds++;
-    tensorIter.advanceOrigin(windowStride);
+    tensorIter.advanceOriginByStride(windowStride);
     if (tensorIter.end()) {
       // We have finished the all the work for the current weight fold, so move
       // back to the starting origins for the next weight fold. Check if we have
@@ -253,7 +253,7 @@ void WeightFetch::setParams() {
       { accel.kernStart, 0, 0, 0 },
       { 1, accel.weightRows, accel.weightCols, accel.weightChans });
   // Set the original indices.
-  tensorIter.advanceOrigin({ id, 0, 0, 0 });
+  tensorIter.advanceOriginByStride({ id, 0, 0, 0 });
   if (tensorIter.end()) {
     // This is the case where the number of weights is smaller than the PE
     // column size, and such that some PEs will stay idle during the whole
@@ -284,7 +284,7 @@ void WeightFetch::advanceTensorIter() {
       // We need to move on to the next weight fold.
       DPRINTF(SystolicFetch, "Finished weight fold %d\n", finishedWeightFolds);
       finishedWeightFolds++;
-      tensorIter.advanceOrigin(windowStride);
+      tensorIter.advanceOriginByStride(windowStride);
       // Before we start fetching the next weight fold, we need to barrier wait
       // other fetch units.
       weightFoldEnd = true;

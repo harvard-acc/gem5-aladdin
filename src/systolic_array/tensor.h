@@ -2,6 +2,7 @@
 #define __SYSTOLIC_ARRAY_TENSOR_H__
 
 #include <vector>
+#include <tuple>
 #include <cassert>
 
 namespace systolic {
@@ -189,7 +190,7 @@ class TensorIndexIterator {
     int carry = 0;
     for (int i = (int)state.size() - 1; i >= 0; i--) {
       int offset = carry + state[i] + region[i] + halo[i].first;
-      computeOffsetAndCarry(&offset, &carry, effecDims[i]);
+      std::tie(offset, carry) = computeOffsetAndCarry(offset, effecDims[i] - 1);
       state[i] = offset - halo[i].first;
     }
     atEnd = carry > 0;
@@ -199,17 +200,28 @@ class TensorIndexIterator {
   // boundary.
   //
   // Args:
-  //   offset: Pointer to the current offset, which may be greater than
-  //           boundary.
-  //   carry: Pointer to the carry size that will be added to the next
-  //          dimension.
+  //   offset: The current offset, which may be greater than boundary.
   //   bound: The boundary size of the this dimension.
-  void computeOffsetAndCarry(int* offset, int* carry, int bound) {
-    if (*offset >= bound) {
-      *carry = *offset / bound;
-      *offset %= bound;
+  //   stride: The stride size of this dimension.
+  //   nextStride: The stride size of the next dimension.
+  //
+  // Returns:
+  //   A pair of integers, of which the first the new offset and the second is
+  //   the carry size that will be added to the next dimension.
+  virtual std::pair<int, int> computeOffsetAndCarry(int offset,
+                                                    int bound,
+                                                    int stride = 1,
+                                                    int nextStride = 1) {
+    if (offset > bound) {
+      // The number of strides we are out of bound.
+      int stridesOutBound = (offset - bound) / stride;
+      // The number of strides this dimension can take.
+      int stridesThisDim = bound / stride + 1;
+      int carry = (stridesOutBound / stridesThisDim + 1) * nextStride;
+      int newOffset = (stridesOutBound % stridesThisDim - 1) * stride;
+      return {newOffset, carry};
     } else {
-      *carry = 0;
+      return { offset, 0 };
     }
   }
 
@@ -243,15 +255,16 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
                             const std::vector<int>& _origin,
                             const std::vector<int>& _regionSize)
       : TensorIndexIterator(shape, false), origin(_origin),
-        regionSize(_regionSize) {
+        regionSize(_regionSize), stride({ 1, 1, 1, 1 }) {
     state = origin;
   }
   TensorRegionIndexIterator(const TensorShape& shape,
                             std::vector<std::pair<int, int>> halo,
                             const std::vector<int>& _origin,
-                            const std::vector<int>& _regionSize)
+                            const std::vector<int>& _regionSize,
+                            const std::vector<int>& _stride)
       : TensorIndexIterator(shape, halo, false), origin(_origin),
-        regionSize(_regionSize) {
+        regionSize(_regionSize), stride(_stride) {
     state = origin;
   }
 
@@ -259,20 +272,16 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
     TensorIndexIterator::operator=(other);
     origin = other.origin;
     regionSize = other.regionSize;
+    stride = other.stride;
   }
 
-  // Advance the region to new origin indices. The advancing size is specified
-  // via advanceRegionSize.
-  void advanceOrigin(const std::vector<int>& advanceRegionSize) {
-    int carry = 0;
-    for (int i = (int)state.size() - 1; i >= 0; i--) {
-      // Offset relative to the origin of the whole tensor.
-      int offset = carry + origin[i] + advanceRegionSize[i] + halo[i].first;
-      computeOffsetAndCarry(&offset, &carry, effecDims[i] - regionSize[i] + 1);
-      origin[i] = offset - halo[i].first;
-    }
-    state = origin;
-    atEnd = carry > 0;
+  // Advance the region to new origin indices. The advancing number of strides
+  // is specified via advanceStrides.
+  void advanceOriginByStride(const std::vector<int>& advanceStrides) {
+    std::vector<int> advanceRegionSize(advanceStrides.size());
+    for (int i = 0; i < advanceRegionSize.size(); i++)
+      advanceRegionSize[i] = advanceStrides[i] * stride[i];
+    advanceOrigin(advanceRegionSize);
   }
 
   // Set the region to new origin indices. The indices of the new place is
@@ -289,14 +298,33 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
     for (int i = (int)state.size() - 1; i >= 0; i--) {
       // Offset relative to the origin of the region.
       int offset = carry + state[i] + advanceRegionSize[i] - origin[i];
-      computeOffsetAndCarry(&offset, &carry, regionSize[i]);
+      std::tie(offset, carry) =
+          computeOffsetAndCarry(offset, regionSize[i] - 1);
       state[i] = offset + origin[i];
     }
     atEnd = carry > 0;
   }
 
+  void advanceOrigin(const std::vector<int>& advanceRegionSize) {
+    int carry = 0;
+    for (int i = (int)state.size() - 1; i >= 0; i--) {
+      // Offset relative to the origin of the whole tensor.
+      int offset = carry + origin[i] + advanceRegionSize[i] + halo[i].first;
+      // Compute the bound size.
+      int strideThisDim = (effecDims[i] - regionSize[i]) / stride[i] + 1;
+      int bound = (strideThisDim - 1) * stride[i];
+      int nextStride = i > 0 ? stride[i - 1] : 1;
+      std::tie(offset, carry) =
+          computeOffsetAndCarry(offset, bound, stride[i], nextStride);
+      origin[i] = offset - halo[i].first;
+    }
+    state = origin;
+    atEnd = carry > 0;
+  }
+
   std::vector<int> origin;
   std::vector<int> regionSize;
+  std::vector<int> stride;
 };
 
 }  // namespace systolic
