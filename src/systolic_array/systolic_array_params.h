@@ -43,6 +43,8 @@ typedef struct _systolic_array_params_t {
   int ifmap_start;
   int kern_start;
   bool accum_results;
+  bool read_inputs;
+  bool read_weights;
   bool send_results;
   systolic_activation_type act_type;
   systolic_activation_params act_params;

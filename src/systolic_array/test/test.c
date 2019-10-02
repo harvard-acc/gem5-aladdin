@@ -63,6 +63,8 @@ int main() {
   data.ifmap_start = 0;
   data.kern_start = 0;
   data.accum_results = false;
+  data.read_inputs = true;
+  data.read_weights = true;
   data.send_results = true;
   data.act_type = SYSTOLIC_RELU;
   int accelerator_id = 4;

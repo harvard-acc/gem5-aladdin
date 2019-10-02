@@ -149,6 +149,8 @@ class SystolicArray : public Gem5Datapath {
     ifmapStart = accelParams->ifmap_start;
     kernStart = accelParams->kern_start;
     accumResults = accelParams->accum_results;
+    readInputs = accelParams->read_inputs;
+    readWeights = accelParams->read_weights;
     sendResults = accelParams->send_results;
     actType = accelParams->act_type;
     actParams = accelParams->act_params;
@@ -161,13 +163,14 @@ class SystolicArray : public Gem5Datapath {
             "Convolution parameters: inputs (%d, %d, %d, %d), weights (%d, %d, "
             "%d, %d), outputs (%d, %d, %d, %d), stride %d, input halo padding "
             "(%d, %d, %d, %d), ifmap start %d, kernel start %d, accumulate "
-            "results %d, send results %d, output folds %d, weight folds %d.\n",
+            "results %d, read inputs %d, read weights %d, send results %d, "
+            "output folds %d, weight folds %d.\n",
             accelParams->input_dims[0], inputRows, inputCols, inputChans,
             numKerns, weightRows, weightCols, weightChans,
             accelParams->output_dims[0], outputRows, outputCols, numOfmaps,
             stride, inputTopPad, inputBottomPad, inputLeftPad, inputRightPad,
-            ifmapStart, kernStart, accumResults, sendResults, numOutputFolds,
-            numWeightFolds);
+            ifmapStart, kernStart, accumResults, readInputs, readWeights,
+            sendResults, numOutputFolds, numWeightFolds);
 
     dataflow->setParams();
   }
@@ -175,12 +178,10 @@ class SystolicArray : public Gem5Datapath {
   void initializeDatapath(int delay) override {
     assert(state == Idle &&
            "The systolic array accelerator is not idle!");
-    // If ifmapStart is set to a non-zero value, the inputs scratchpad already
-    // has the data. Similarly, the weights scratchpad already has the data if
-    // kernStart is to non-zero.
-    if (ifmapStart == 0)
+    // Read inputs/weights if we need to.
+    if (readInputs)
       state = ReadyForDmaInputRead;
-    else if (kernStart == 0)
+    else if (readWeights)
       state = ReadyForDmaWeightRead;
     else
       state = ReadyToCompute;
@@ -309,7 +310,7 @@ class SystolicArray : public Gem5Datapath {
     if (state == WaitingForDmaInputRead) {
       DPRINTF(SystolicToplevel, "Completed DMA reads for inputs.\n");
       // Skip reading the weights if the scratchpad already has data filled.
-      if (kernStart == 0)
+      if (readWeights)
         state = ReadyForDmaWeightRead;
       else
         state = ReadyToCompute;
@@ -397,6 +398,9 @@ class SystolicArray : public Gem5Datapath {
   // This is used when the weight tensor is tiled channelwise, so we need to
   // accumulate the partial sums across invocations.
   bool accumResults;
+  // True if this invocation needs to read inputs/weights.
+  bool readInputs;
+  bool readWeights;
   // True if this invocation needs to send the results back to the memory using
   // DMA.
   bool sendResults;
