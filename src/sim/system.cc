@@ -48,6 +48,7 @@
 #include "sim/system.hh"
 
 #include <algorithm>
+#include <memory>
 
 #include "arch/remote_gdb.hh"
 #include "arch/utility.hh"
@@ -287,7 +288,7 @@ System::registerThreadContext(ThreadContext *tc, ContextID assigned)
     return id;
 }
 
-void System::checkAcceleratorExists(int id, std::string funcName) {
+void System::checkAcceleratorExists(int id, const std::string& funcName) {
     if (accelerators.find(id) == accelerators.end())
         fatal("Unable to %s: No accelerator with id %#x.", funcName, id);
 }
@@ -313,42 +314,52 @@ void System::activateAccelerator(unsigned accel_id,
                                  int context_id,
                                  int thread_id) {
     checkAcceleratorExists(accel_id, __func__);
-    DPRINTF(Aladdin, "Activating accelerator id %d\n", accel_id);
-    /* Register a pointer to use for communication between accelerator and
-     * CPU.
-     */
-    accelerators[accel_id]->setFinishFlag(finish_flag);
-    /* Sets context and thread ids for a given accelerator. These are needed
-     * for supporting cache prefetchers.
-     */
-    accelerators[accel_id]->setContextThreadIds(context_id, thread_id);
-    /* Set the accelerator params. */
-    if (accel_params != NULL)
-        accelerators[accel_id]->setParams(accel_params);
-
-    /* Adds the specified accelerator to the event queue with a given number
-     * of delay cycles (to emulate software overhead during invocation).
-     */
-    accelerators[accel_id]->initializeDatapath(1);
+    auto cmd = std::make_unique<ActivateAcceleratorCmd>(
+        finish_flag, accel_params, context_id, thread_id, 1);
+    bool success = accelerators[accel_id]->queueCommand(std::move(cmd));
+    // TODO: When the command is not successfully queued, we currently fatal
+    // here. We should return the information to the user and let the user retry
+    // later.
+    if (!success) {
+        fatal("Unable to send command %s to accelerator with id %d.\n",
+              __func__, accel_id);
+    }
 }
 
 void System::insertAddressTranslationMapping(int id,
                                              Addr sim_vaddr,
                                              Addr sim_paddr) {
     checkAcceleratorExists(id, __func__);
-    accelerators[id]->insertTLBEntry(sim_vaddr, sim_paddr);
+    auto cmd =
+        std::make_unique<InsertArrayLabelMappingCmd>(sim_vaddr, sim_paddr);
+    bool success = accelerators[id]->queueCommand(std::move(cmd));
+    if (!success) {
+        fatal("Unable to send command %s to accelerator with id %d.\n",
+              __func__, id);
+    }
 }
 
 void System::insertArrayLabelMapping(int id, std::string array_label,
                                      Addr sim_vaddr, size_t size) {
     checkAcceleratorExists(id, __func__);
-    accelerators[id]->insertArrayLabelToVirtual(array_label, sim_vaddr, size);
+    auto cmd = std::make_unique<InsertAddressTranslationMappingCmd>(
+        array_label, sim_vaddr, size);
+    bool success = accelerators[id]->queueCommand(std::move(cmd));
+    if (!success) {
+        fatal("Unable to send command %s to accelerator with id %d.\n",
+              __func__, id);
+    }
 }
 
 void System::setArrayMemoryType(int id, std::string array_label,
                                 MemoryType mem_type) {
     checkAcceleratorExists(id, __func__);
-    accelerators[id]->setArrayMemoryType(array_label, mem_type);
+    auto cmd = std::make_unique<SetArrayMemoryTypeCmd>(array_label, mem_type);
+    bool success = accelerators[id]->queueCommand(std::move(cmd));
+    if (!success) {
+        fatal("Unable to send command %s to accelerator with id %d.\n",
+              __func__, id);
+    }
 }
 
 Addr System::getArrayBaseAddress(int id, const char* array_name) {

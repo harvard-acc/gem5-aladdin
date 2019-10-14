@@ -2,6 +2,16 @@
 
 namespace systolic {
 
+bool SystolicArray::queueCommand(std::unique_ptr<AcceleratorCommand> cmd) {
+  if (state != Idle) {
+    return false;
+  } else {
+    // Directly run the command if the accelerator is not busy.
+    cmd->run(this);
+    return true;
+  }
+}
+
 void SystolicArray::processTick() {
   if (state == ReadyForDmaInputRead) {
     issueDmaInputRead();

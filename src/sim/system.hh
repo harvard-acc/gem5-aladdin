@@ -222,7 +222,7 @@ class System : public MemObject
     int numRunningAccelerators() { return accelerators.size(); }
 
     /* Check if the accelerator exists. */
-    void checkAcceleratorExists(int id, std::string funcName);
+    void checkAcceleratorExists(int id, const std::string& funcName);
 
     /* Registers the datapath pointer and list of dependencies with the system.
      * If the accelerator already exists, the simulation ends with a fatal

@@ -175,6 +175,11 @@ class SystolicArray : public Gem5Datapath {
     dataflow->setParams();
   }
 
+  // The systolic array doesn't support queued commands yet. The systolic array
+  // will directly run the command if it's idle, otherwise this function will
+  // return false (failure).
+  bool queueCommand(std::unique_ptr<AcceleratorCommand> cmd) override;
+
   void initializeDatapath(int delay) override {
     assert(state == Idle &&
            "The systolic array accelerator is not idle!");
