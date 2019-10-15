@@ -407,8 +407,8 @@ if main['GCC'] or main['CLANG']:
                          '-Wno-reorder',
                          '-Wno-maybe-uninitialized',
                          '-Wno-unused-but-set-variable'])
-    # We always compile using C++11
-    main.Append(CXXFLAGS=['-std=c++11'])
+    # We compile using C++14
+    main.Append(CXXFLAGS=['-std=c++14'])
     main.Append(CXXFLAGS=['-DNTHREADS=8'])
     if sys.platform.startswith('freebsd'):
         main.Append(CCFLAGS=['-I/usr/local/include'])
