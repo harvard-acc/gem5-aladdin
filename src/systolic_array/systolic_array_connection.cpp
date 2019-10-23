@@ -17,15 +17,23 @@ extern "C" {
 
 void invokeSystolicArrayAndBlock(int accelerator_id,
                                  systolic_array_params_t systolic_data) {
-  aladdin_params_t* params =
-      (aladdin_params_t*)malloc(sizeof(aladdin_params_t));
-  params->finish_flag = (volatile int*)malloc(sizeof(int));
-  *(params->finish_flag) = NOT_COMPLETED;
-  params->accel_params_ptr = &systolic_data;
-  params->size = sizeof(systolic_array_params_t);
+  aladdin_params_t* params = getParams(
+      NULL, NOT_COMPLETED, &systolic_data, sizeof(systolic_array_params_t));
   ioctl(ALADDIN_FD, accelerator_id, params);
   while (*(params->finish_flag) == NOT_COMPLETED)
     ;
+  free((void*)(params->finish_flag));
+  free(params);
+}
+
+volatile int* invokeSystolicArrayAndReturn(
+    int accelerator_id, systolic_array_params_t systolic_data) {
+  aladdin_params_t* params = getParams(
+      NULL, NOT_COMPLETED, &systolic_data, sizeof(systolic_array_params_t));
+  ioctl(ALADDIN_FD, accelerator_id, params);
+  volatile int* finish_flag = params->finish_flag;
+  free(params);
+  return finish_flag;
 }
 
 #ifdef __cplusplus
