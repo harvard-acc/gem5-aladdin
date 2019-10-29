@@ -75,6 +75,7 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     #
     # Accelerator cache
     datapaths = system.find_all(HybridDatapath)[0]
+    datapaths.extend(system.find_all(SystolicArray)[0])
     for i,datapath in enumerate(datapaths):
         l1i_cache = L1Cache(size = '256B',
                             assoc = 2,

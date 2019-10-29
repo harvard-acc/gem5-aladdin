@@ -383,8 +383,8 @@ if options.ruby:
         sys.exit(1)
 
     Ruby.create_system(options, False, system)
-    assert(options.num_cpus + 3*len(system.find_all(HybridDatapath)[0]) ==
-           len(system.ruby._cpu_ports))
+    assert(options.num_cpus + 3*len(system.find_all(HybridDatapath)[0] + \
+           system.find_all(SystolicArray)[0]) == len(system.ruby._cpu_ports))
 
     system.ruby.clk_domain = SrcClockDomain(clock = options.ruby_clock,
                                         voltage_domain = system.voltage_domain)

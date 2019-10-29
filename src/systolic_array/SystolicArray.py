@@ -38,6 +38,7 @@ class SystolicArray(MemObject):
   acceleratorId = Param.Int(-1, "Accelerator Id")
   spad_port = MasterPort("DMA port")
   cache_port = MasterPort("Cache coherent port")
+  acp_port = MasterPort("ACP port")
   system = Param.System(Parent.any, "System object")
 
   # DMA port parameters
@@ -49,6 +50,13 @@ class SystolicArray(MemObject):
       "that will be modified by a dmaStore before issuing the DMA request.")
   recordMemoryTrace = Param.Bool(
       False, "Record memory traffic going to/from the accelerator.")
+
+  # Cache parameters.
+  # This small cache is for the finish flag to be communicated via the shared
+  # memory.
+  cacheSize = Param.String("128B", "Private cache size")
+  cacheLineSize = Param.Int("32", "Cache line size (in bytes)")
+  cacheAssoc = Param.Int(2, "Private cache associativity")
 
   # Systolic array attributes.
   peArrayRows = Param.Unsigned(8, "Number of PEs per row.")
