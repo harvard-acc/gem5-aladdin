@@ -4,12 +4,15 @@ namespace systolic {
 
 bool SystolicArray::queueCommand(std::unique_ptr<AcceleratorCommand> cmd) {
   if (state != Idle) {
-    return false;
+    // Queue the command if the systolic array is busy.
+    DPRINTF(SystolicToplevel, "Queuing command %s on accelerator %d.\n",
+            cmd->name(), accelerator_id);
+    commandQueue.push_back(std::move(cmd));
   } else {
     // Directly run the command if the accelerator is not busy.
     cmd->run(this);
-    return true;
   }
+  return true;
 }
 
 void SystolicArray::processTick() {
@@ -20,6 +23,7 @@ void SystolicArray::processTick() {
     issueDmaWeightRead();
     state = WaitingForDmaWeightRead;
   } else if (state == ReadyToCompute) {
+    DPRINTF(SystolicToplevel, "Start compute.\n");
     dataflow->start();
     state = WaitingForCompute;
   } else if (state == ReadyForDmaWrite) {
@@ -31,6 +35,16 @@ void SystolicArray::processTick() {
   } else if (state == ReadyToWakeupCpu) {
     wakeupCpuThread();
     state = Idle;
+    // If there are more commands, run them until we reach the next
+    // ActivateAcceleratorCmd or the end of the queue.
+    while (!commandQueue.empty()) {
+      auto cmd = std::move(commandQueue.front());
+      bool blocking = cmd->blocking();
+      cmd->run(this);
+      commandQueue.pop_front();
+      if (blocking)
+        break;
+    }
   }
 
   // If the accelerator is still busy, schedule the next tick.

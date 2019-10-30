@@ -89,7 +89,7 @@ def _validateTags(commit_header):
         "fastmodel", "gem5", "gpu-compute", "learning-gem5", "mem", "mem-cache",
         "mem-garnet", "mem-ruby", "misc", "python", "scons", "sim", "sim-se",
         "sim-power", "stats", "system", "system-alpha", "system-arm", "systemc",
-        "tests", "util", "RFC", "WIP"]
+        "systolic-array", "tests", "util", "RFC", "WIP"]
 
     tags = ''.join(commit_header.split(':')[0].split()).split(',')
     if (any(tag not in valid_tags for tag in tags)):
