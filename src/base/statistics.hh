@@ -3229,7 +3229,7 @@ sum(Temp val)
 }
 
 /** Dump all statistics data to the registered outputs */
-void dump();
+void dump(const std::string& msg = "");
 void reset();
 void enable();
 bool enabled();
@@ -3240,8 +3240,9 @@ bool enabled();
  * including processing the reset/dump callbacks
  */
 typedef void (*Handler)();
+typedef void (*HandlerWithMsg)(const std::string& msg);
 
-void registerHandlers(Handler reset_handler, Handler dump_handler);
+void registerHandlers(Handler reset_handler, HandlerWithMsg dump_handler);
 
 /**
  * Register a callback that should be called whenever statistics are

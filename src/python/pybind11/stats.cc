@@ -55,10 +55,10 @@ namespace py = pybind11;
 namespace Stats {
 
 void
-pythonDump()
+pythonDump(const std::string& msg)
 {
     py::module m = py::module::import("m5.stats");
-    m.attr("dump")();
+    m.attr("dump")(msg);
 }
 
 void

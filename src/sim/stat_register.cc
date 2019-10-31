@@ -44,7 +44,7 @@
 namespace Stats
 {
 
-extern void pythonDump();
+extern void pythonDump(const std::string& msg = "");
 extern void pythonReset();
 
 void registerPythonStatsHandlers()

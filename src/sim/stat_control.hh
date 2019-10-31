@@ -73,9 +73,10 @@ void updateEvents();
  * @param reset Set true to reset the statistics.
  * @param when When the dump and/or reset should occur.
  * @param repeat How often the event should repeat. Set 0 to disable repeating.
+ * @param msg The message to be printed along with the dumped statistics.
  */
 void schedStatEvent(bool dump, bool reset, Tick when = curTick(),
-                    Tick repeat = 0);
+                    Tick repeat = 0, const std::string& msg = "");
 
 /**
  * Schedule periodic statistics dumping. This allows you to dump and reset the

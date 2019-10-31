@@ -56,6 +56,7 @@
 #include "base/hostinfo.hh"
 #include "base/statistics.hh"
 #include "base/time.hh"
+#include "base/output.hh"
 #include "cpu/base.hh"
 #include "sim/global_event.hh"
 
@@ -219,19 +220,20 @@ class StatEvent : public GlobalEvent
     bool dump;
     bool reset;
     Tick repeat;
+    std::string msg;
 
   public:
-    StatEvent(Tick _when, bool _dump, bool _reset, Tick _repeat)
-        : GlobalEvent(_when, Stat_Event_Pri, 0),
-          dump(_dump), reset(_reset), repeat(_repeat)
-    {
-    }
+    StatEvent(Tick _when,
+              bool _dump,
+              bool _reset,
+              Tick _repeat,
+              const std::string& _msg = "")
+        : GlobalEvent(_when, Stat_Event_Pri, 0), dump(_dump), reset(_reset),
+          repeat(_repeat), msg(_msg) {}
 
-    virtual void
-    process()
-    {
+    virtual void process() {
         if (dump)
-            Stats::dump();
+            Stats::dump(msg);
 
         if (reset)
             Stats::reset();
@@ -245,13 +247,13 @@ class StatEvent : public GlobalEvent
 };
 
 void
-schedStatEvent(bool dump, bool reset, Tick when, Tick repeat)
+schedStatEvent(bool dump, bool reset, Tick when, Tick repeat, const std::string& msg)
 {
     // simQuantum is being added to the time when the stats would be
     // dumped so as to ensure that this event happens only after the next
     // sync amongst the event queues.  Asingle event queue simulation
     // should remain unaffected.
-    dumpEvent = new StatEvent(when + simQuantum, dump, reset, repeat);
+    dumpEvent = new StatEvent(when + simQuantum, dump, reset, repeat, msg);
 }
 
 void

@@ -466,10 +466,10 @@ Formula::str() const
 }
 
 Handler resetHandler = NULL;
-Handler dumpHandler = NULL;
+HandlerWithMsg dumpHandler = NULL;
 
 void
-registerHandlers(Handler reset_handler, Handler dump_handler)
+registerHandlers(Handler reset_handler, HandlerWithMsg dump_handler)
 {
     resetHandler = reset_handler;
     dumpHandler = dump_handler;
@@ -514,10 +514,10 @@ enable()
 }
 
 void
-dump()
+dump(const std::string& msg)
 {
     if (dumpHandler)
-        dumpHandler();
+        dumpHandler(msg);
     else
         fatal("No registered Stats::dump handler");
 }
