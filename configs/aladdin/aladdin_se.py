@@ -93,8 +93,7 @@ def createAladdinDatapath(config, accel):
         cycleTime = cycleTime,
         useDb = config.getboolean(accel, "use_db"),
         experimentName = config.get(accel, "experiment_name"),
-        enableStatsDump = options.enable_stats_dump_and_resume,
-        executeStandalone = (np == 0))
+        enableStatsDump = options.enable_stats_dump_and_resume)
     datapath.cacheLineFlushLatency = config.getint(accel,
         "cacheline_flush_latency")
     datapath.cacheLineInvalidateLatency = config.getint(accel,

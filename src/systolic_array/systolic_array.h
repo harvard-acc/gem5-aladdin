@@ -74,7 +74,6 @@ class SystolicArray : public Gem5Datapath {
   SystolicArray(const Params* p)
       : Gem5Datapath(p,
                      p->acceleratorId,
-                     false,
                      p->maxDmaRequests,
                      p->dmaChunkSize,
                      p->numDmaChannels,
