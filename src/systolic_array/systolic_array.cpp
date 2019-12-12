@@ -27,8 +27,12 @@ void SystolicArray::processTick() {
     state = WaitingForDmaWrite;
   } else if (state == ReadyToSendFinish) {
     sendFinishedSignal();
+    state = WaitForFinishSignalAck;
+  } else if (state == ReadyToWakeupCpu) {
+    wakeupCpuThread();
     state = Idle;
   }
+
   // If the accelerator is still busy, schedule the next tick.
   if (state != Idle && !tickEvent.scheduled())
     schedule(tickEvent, clockEdge(Cycles(1)));

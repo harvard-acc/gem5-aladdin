@@ -206,8 +206,7 @@ class SystolicArray : public Gem5Datapath {
     MemCmd::Command cmd = MemCmd::WriteReq;
     PacketPtr pkt = new Packet(req, cmd);
     pkt->dataStatic<uint8_t>(data);
-    // We can have a more meaningful sender state if we need later.
-    Packet::SenderState* state = new Packet::SenderState();
+    SystolicSenderState* state = new SystolicSenderState(true);
     pkt->pushSenderState(state);
 
     if (!cachePort.sendTimingReq(pkt)) {
@@ -266,6 +265,8 @@ class SystolicArray : public Gem5Datapath {
     ReadyForDmaWrite,
     WaitingForDmaWrite,
     ReadyToSendFinish,
+    WaitForFinishSignalAck,
+    ReadyToWakeupCpu,
   };
 
   enum TensorType { Input, Weight, Output };
@@ -287,6 +288,18 @@ class SystolicArray : public Gem5Datapath {
 
    protected:
     TensorType tensorType;
+  };
+
+  class SystolicSenderState : public Packet::SenderState {
+   public:
+    SystolicSenderState(bool _is_ctrl_signal)
+        : is_ctrl_signal(_is_ctrl_signal) {}
+
+    /* Flag that determines whether a packet received on a data port is a
+     * control signal accessed through memory (which needs to be handled
+     * differently) or an ordinary memory access.
+     */
+    bool is_ctrl_signal;
   };
 
   void dmaRespCallback(PacketPtr pkt) override {
@@ -325,6 +338,19 @@ class SystolicArray : public Gem5Datapath {
       DPRINTF(SystolicToplevel, "Completed all DMA writes.\n");
       state = ReadyToSendFinish;
     }
+  }
+
+  virtual void cacheRespCallback(PacketPtr pkt) override {
+    if (state == WaitForFinishSignalAck) {
+      SystolicSenderState* senderState =
+          pkt->findNextSenderState<SystolicSenderState>();
+      assert(senderState && "Packet did not contain a SystolicSenderState!");
+      if (senderState->is_ctrl_signal)
+        state = ReadyToWakeupCpu;
+    }
+    // Currently the systolic array only uses the cache for sending the finish
+    // signal. Future use of the cache for storing normal data should be handled
+    // here.
   }
 
   Addr translateAtomic(Addr vaddr, int size) override {

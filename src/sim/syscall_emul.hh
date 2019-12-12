@@ -662,53 +662,60 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
     DPRINTF(SyscallVerbose, "ioctl(%d, 0x%x, ...)\n", tgt_fd, req);
 
     if (tgt_fd == ALADDIN_FD) {
-      if (req == DUMP_STATS || req == RESET_STATS) {
-        size_t max_desc_len = 100;
+        if (req == DUMP_STATS || req == RESET_STATS) {
+            size_t max_desc_len = 100;
 
-        // Read the description string out of simulated memory.  We make the
-        // char buffer one character longer than the max length so that we can
-        // set the last character to the terminating character in case the
-        // string actually exceeds the max length allowed.
-        Addr desc_addr = (Addr) p->getSyscallArg(tc, index);
-        std::string stat_final_desc;
-        if (desc_addr != 0) {
-          SETranslatingPortProxy& memProxy = tc->getMemProxy();
-          uint8_t* desc_buf = new uint8_t[max_desc_len+2];
-          memProxy.readBlob(desc_addr, desc_buf, max_desc_len);
-          desc_buf[max_desc_len] = static_cast<uint8_t>(0);
+            // Read the description string out of simulated memory.  We make the
+            // char buffer one character longer than the max length so that we
+            // can set the last character to the terminating character in case
+            // the string actually exceeds the max length allowed.
+            Addr desc_addr = (Addr)p->getSyscallArg(tc, index);
+            std::string stat_desc;
+            if (desc_addr != 0) {
+                BufferArg desc_buf(desc_addr, max_desc_len + 2);
+                desc_buf.copyIn(tc->getMemProxy());
+                char* desc_buf_ptr = (char*)desc_buf.bufferPtr();
+                desc_buf_ptr[max_desc_len] = static_cast<uint8_t>(0);
+                stat_desc = desc_buf_ptr;
+            }
 
-          char* stats_desc = (char*) desc_buf;
-          stat_final_desc = stats_desc;
-        }
+            // Create the final string to pass to exitSimLoop.
+            std::string exit_sim_loop_reason =
+                (req == DUMP_STATS)
+                    ? DUMP_STATS_EXIT_SIM_SIGNAL + stat_desc
+                    : RESET_STATS_EXIT_SIM_SIGNAL + stat_desc;
 
-        // Create the final string to pass to exitSimLoop.
-        std::string exit_sim_loop_reason = (req == DUMP_STATS) ?
-            DUMP_STATS_EXIT_SIM_SIGNAL + stat_final_desc :
-            RESET_STATS_EXIT_SIM_SIGNAL + stat_final_desc;
-
-        exitSimLoop(exit_sim_loop_reason);
+            exitSimLoop(exit_sim_loop_reason);
+      } else if (req == WAIT_FINISH_SIGNAL) {
+          Addr finish_flag_addr = (Addr)p->getSyscallArg(tc, index);
+          // Read the value of the finish flag.
+          BufferArg finish_flag_buf(finish_flag_addr, sizeof(int));
+          finish_flag_buf.copyIn(tc->getMemProxy());
+          int mem_val = *(int*)finish_flag_buf.bufferPtr();
+          if (mem_val == NOT_COMPLETED)
+              tc->suspend();
       } else {
-          Addr params_ptr = (Addr)p->getSyscallArg(tc, index);
-          SETranslatingPortProxy& memProxy = tc->getMemProxy();
+          Addr params_addr = (Addr)p->getSyscallArg(tc, index);
+
           // Read the aladdin_params_t struct.
-          aladdin_params_t params;
-          memProxy.readBlob(
-              params_ptr, (uint8_t*)&params, sizeof(aladdin_params_t));
+          BufferArg params_buf(params_addr, sizeof(aladdin_params_t));
+          params_buf.copyIn(tc->getMemProxy());
+          aladdin_params_t* params = (aladdin_params_t*)params_buf.bufferPtr();
           // Translate the finish flag pointer to a physical address that
           // the accelerator will write to when execution is completed.
           Addr paddr;
-          p->pTable->translate((Addr)params.finish_flag, paddr);
+          p->pTable->translate((Addr)params->finish_flag, paddr);
           // Read the accelerator params.
-          int size = params.size;
-          uint8_t* accel_params_buf = NULL;
+          int size = params->size;
+          void* accel_params_ptr = NULL;
           if (size > 0) {
-              accel_params_buf = new uint8_t[size];
-              memProxy.readBlob(
-                  (Addr)params.accel_params_ptr, accel_params_buf, size);
+              BufferArg accel_params_buf((Addr)params->accel_params_ptr, size);
+              accel_params_buf.copyIn(tc->getMemProxy());
+              accel_params_ptr = accel_params_buf.bufferPtr();
           }
           // We need the context and thread id of the calling thread.
-          p->system->activateAccelerator(req, paddr, (void*)accel_params_buf,
-                                         tc->contextId(), tc->threadId());
+          p->system->activateAccelerator(
+              req, paddr, accel_params_ptr, tc->contextId(), tc->threadId());
       }
       return -ENOTTY;
     }
