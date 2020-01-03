@@ -707,15 +707,15 @@ ioctlFunc(SyscallDesc *desc, int callnum, Process *p, ThreadContext *tc)
           p->pTable->translate((Addr)params->finish_flag, paddr);
           // Read the accelerator params.
           int size = params->size;
-          void* accel_params_ptr = NULL;
+          auto accel_params_buf = std::make_unique<uint8_t[]>(size);
           if (size > 0) {
-              BufferArg accel_params_buf((Addr)params->accel_params_ptr, size);
-              accel_params_buf.copyIn(tc->getMemProxy());
-              accel_params_ptr = accel_params_buf.bufferPtr();
+              tc->getMemProxy().readBlob(
+                  (Addr)params->accel_params_ptr, accel_params_buf.get(), size);
           }
           // We need the context and thread id of the calling thread.
-          p->system->activateAccelerator(
-              req, paddr, accel_params_ptr, tc->contextId(), tc->threadId());
+          p->system->activateAccelerator(req, paddr,
+                                         std::move(accel_params_buf),
+                                         tc->contextId(), tc->threadId());
       }
       return -ENOTTY;
     }

@@ -310,12 +310,13 @@ void System::deregisterAccelerator(int id) {
 
 void System::activateAccelerator(unsigned accel_id,
                                  Addr finish_flag,
-                                 void* accel_params,
+                                 std::unique_ptr<uint8_t[]>
+                                     accel_params,
                                  int context_id,
                                  int thread_id) {
     checkAcceleratorExists(accel_id, __func__);
     auto cmd = std::make_unique<ActivateAcceleratorCmd>(
-        finish_flag, accel_params, context_id, thread_id, 1);
+        finish_flag, std::move(accel_params), context_id, thread_id, 1);
     bool success = accelerators[accel_id]->queueCommand(std::move(cmd));
     // TODO: When the command is not successfully queued, we currently fatal
     // here. We should return the information to the user and let the user retry

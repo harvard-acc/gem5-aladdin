@@ -118,9 +118,9 @@ class SystolicArray : public Gem5Datapath {
   // Returns the tick event that will schedule the next step.
   Event& getTickEvent() override { return tickEvent; }
 
-  void setParams(void* accel_params) override {
+  void setParams(std::unique_ptr<uint8_t[]> accel_params) override {
     systolic_array_params_t* accelParams =
-        reinterpret_cast<systolic_array_params_t*>(accel_params);
+        reinterpret_cast<systolic_array_params_t*>(accel_params.get());
 
     inputBaseAddr = (Addr)accelParams->input_base_addr;
     weightBaseAddr = (Addr)accelParams->weight_base_addr;
