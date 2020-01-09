@@ -20,7 +20,7 @@ void invokeSystolicArrayAndBlock(int accelerator_id,
   aladdin_params_t* params = getParams(
       NULL, NOT_COMPLETED, &systolic_data, sizeof(systolic_array_params_t));
   ioctl(ALADDIN_FD, accelerator_id, params);
-  blockOnFinishSignal(params->finish_flag);
+  suspendCPUUntilFlagChanges(params->finish_flag);
   free((void*)(params->finish_flag));
   free(params);
 }
