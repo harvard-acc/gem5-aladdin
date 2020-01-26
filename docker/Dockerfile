@@ -89,3 +89,6 @@ RUN git clone https://github.com/harvard-acc/gem5-aladdin && \
     cd gem5-aladdin && \
     git submodule init && \
     git submodule update
+
+# Install a supported version of pyparsing.
+RUN pip install pyparsing==2.3.0

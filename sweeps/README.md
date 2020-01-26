@@ -7,6 +7,17 @@ tedious. We use the Xenon system to generate design sweep configurations.
 This README will show you how to get started. For more information about
 Xenon, please see [Xenon](https://github.com/xyzsam/xenon).
 
+
+Prerequisites
+--------------
+
+You need to have the pyparsing module installed. Versions supported are between
+2.2.0-2.3.0 (inclusive).
+
+  ```
+  pip install pyparsing==2.3.0
+  ```
+
 Getting started
 ---------------
 

@@ -122,7 +122,7 @@ found [here](https://github.com/xyzsam/xenon).
 Xenon requires:
 
 1. Python 2.7.6+
-2. The pyparsing module
+2. The pyparsing module (any version between 2.2.0 and 2.3.0, inclusive).
 
 ## Installation ##
 
