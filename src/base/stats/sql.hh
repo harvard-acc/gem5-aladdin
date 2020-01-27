@@ -54,19 +54,22 @@ class OutputSQL: public Output {
     void open(const std::string &filename);
 
     // Statistic object visitors.
-    virtual void visit(const ScalarInfo &info);
-    virtual void visit(const VectorInfo &info);
-    virtual void visit(const DistInfo &info);
-    virtual void visit(const Vector2dInfo &info);
-    virtual void visit(const FormulaInfo &info);
+    virtual void visit(const ScalarInfo &info) override;
+    virtual void visit(const VectorInfo &info) override;
+    virtual void visit(const DistInfo &info) override;
+    virtual void visit(const Vector2dInfo &info) override;
+    virtual void visit(const FormulaInfo &info) override;
 
     // TODO: Not supported for now.
-    virtual void visit(const VectorDistInfo &info);
-    virtual void visit(const SparseHistInfo &info);
+    virtual void visit(const VectorDistInfo &info) override;
+    virtual void visit(const SparseHistInfo &info) override;
 
-    virtual bool valid() const;
-    virtual void begin(std::string desc="");
-    virtual void end();
+    virtual bool valid() const override;
+    virtual void begin(std::string desc="") override;
+    virtual void end() override;
+
+    void beginGroup(const char *name) override {}
+    void endGroup() override {}
 
   protected:
     // Creates all the tables used to store statistics info and values.

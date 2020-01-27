@@ -27,6 +27,7 @@
 # Author: Tushar Krishna
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import m5
 from m5.objects import *
@@ -87,8 +88,6 @@ parser.add_option("--inj-vnet", type="int", default=-1,
 #
 Ruby.define_options(parser)
 
-execfile(os.path.join(config_root, "common", "Options.py"))
-
 (options, args) = parser.parse_args()
 
 if args:
@@ -112,7 +111,7 @@ cpus = [ GarnetSyntheticTraffic(
                      inj_vnet=options.inj_vnet,
                      precision=options.precision,
                      num_dest=options.num_dirs) \
-         for i in xrange(options.num_cpus) ]
+         for i in range(options.num_cpus) ]
 
 # create the desired simulated system
 system = System(cpu = cpus, mem_ranges = [AddrRange(options.mem_size)])

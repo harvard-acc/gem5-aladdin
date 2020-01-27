@@ -38,6 +38,7 @@ from m5.defines import buildEnv
 from m5.util import addToPath
 from Ruby import create_topology
 from Ruby import send_evicts
+from common import FileSystemConfig
 
 addToPath('../')
 
@@ -70,21 +71,21 @@ class L1DCache(RubyCache):
     def create(self, options):
         self.size = MemorySize(options.l1d_size)
         self.assoc = options.l1d_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L1ICache(RubyCache):
     resourceStalls = False
     def create(self, options):
         self.size = MemorySize(options.l1i_size)
         self.assoc = options.l1i_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L2Cache(RubyCache):
     resourceStalls = False
     def create(self, options):
         self.size = MemorySize(options.l2_size)
         self.assoc = options.l2_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class CPCntrl(CorePair_Controller, CntrlBase):
 
@@ -101,8 +102,6 @@ class CPCntrl(CorePair_Controller, CntrlBase):
         self.L2cache.create(options)
 
         self.sequencer = RubySequencer()
-        self.sequencer.icache_hit_latency = 2
-        self.sequencer.dcache_hit_latency = 2
         self.sequencer.version = self.seqCount()
         self.sequencer.icache = self.L1Icache
         self.sequencer.dcache = self.L1D0cache
@@ -114,11 +113,12 @@ class CPCntrl(CorePair_Controller, CntrlBase):
         self.sequencer1.version = self.seqCount()
         self.sequencer1.icache = self.L1Icache
         self.sequencer1.dcache = self.L1D1cache
-        self.sequencer1.icache_hit_latency = 2
-        self.sequencer1.dcache_hit_latency = 2
         self.sequencer1.ruby_system = ruby_system
         self.sequencer1.coreid = 1
         self.sequencer1.is_cpu_sequencer = True
+
+        # Defines icache/dcache hit latency
+        self.mandatory_queue_latency = 2
 
         self.issue_latency = options.cpu_to_dir_latency
         self.send_evictions = send_evicts(options)
@@ -143,7 +143,7 @@ class L3Cache(RubyCache):
         self.dataAccessLatency = options.l3_data_latency
         self.tagAccessLatency = options.l3_tag_latency
         self.resourceStalls = options.no_resource_stalls
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L3Cntrl(L3Cache_Controller, CntrlBase):
     def create(self, options, ruby_system, system):
@@ -248,7 +248,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         block_size_bits = int(math.log(options.cacheline_size, 2))
         numa_bit = block_size_bits + dir_bits - 1
 
-    for i in xrange(options.num_dirs):
+    for i in range(options.num_dirs):
         dir_ranges = []
         for r in system.mem_ranges:
             addr_range = m5.objects.AddrRange(r.start, size = r.size(),
@@ -294,7 +294,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
 
     # For an odd number of CPUs, still create the right number of controllers
     cpuCluster = Cluster(extBW = 512, intBW = 512)  # 1 TB/s
-    for i in xrange((options.num_cpus + 1) / 2):
+    for i in range((options.num_cpus + 1) // 2):
 
         cp_cntrl = CPCntrl()
         cp_cntrl.create(options, ruby_system, system)
@@ -325,6 +325,58 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         cp_cntrl.triggerQueue = MessageBuffer(ordered = True)
 
         cpuCluster.add(cp_cntrl)
+
+    # Register CPUs and caches for each CorePair and directory (SE mode only)
+    if not full_system:
+        for i in xrange((options.num_cpus + 1) // 2):
+            FileSystemConfig.register_cpu(physical_package_id = 0,
+                                          core_siblings =
+                                            xrange(options.num_cpus),
+                                          core_id = i*2,
+                                          thread_siblings = [])
+
+            FileSystemConfig.register_cpu(physical_package_id = 0,
+                                          core_siblings =
+                                            xrange(options.num_cpus),
+                                          core_id = i*2+1,
+                                          thread_siblings = [])
+
+            FileSystemConfig.register_cache(level = 0,
+                                            idu_type = 'Instruction',
+                                            size = options.l1i_size,
+                                            line_size = options.cacheline_size,
+                                            assoc = options.l1i_assoc,
+                                            cpus = [i*2, i*2+1])
+
+            FileSystemConfig.register_cache(level = 0,
+                                            idu_type = 'Data',
+                                            size = options.l1d_size,
+                                            line_size = options.cacheline_size,
+                                            assoc = options.l1d_assoc,
+                                            cpus = [i*2])
+
+            FileSystemConfig.register_cache(level = 0,
+                                            idu_type = 'Data',
+                                            size = options.l1d_size,
+                                            line_size = options.cacheline_size,
+                                            assoc = options.l1d_assoc,
+                                            cpus = [i*2+1])
+
+            FileSystemConfig.register_cache(level = 1,
+                                            idu_type = 'Unified',
+                                            size = options.l2_size,
+                                            line_size = options.cacheline_size,
+                                            assoc = options.l2_assoc,
+                                            cpus = [i*2, i*2+1])
+
+        for i in range(options.num_dirs):
+            FileSystemConfig.register_cache(level = 2,
+                                            idu_type = 'Unified',
+                                            size = options.l3_size,
+                                            line_size = options.cacheline_size,
+                                            assoc = options.l3_assoc,
+                                            cpus = [n for n in
+                                                xrange(options.num_cpus)])
 
     # Assuming no DMA devices
     assert(len(dma_devices) == 0)

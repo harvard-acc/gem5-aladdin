@@ -187,6 +187,9 @@ class DefaultCommit
     /** Initializes stage by sending back the number of free entries. */
     void startupStage();
 
+    /** Clear all thread-specific states */
+    void clearStates(ThreadID tid);
+
     /** Initializes the draining of commit. */
     void drain();
 
@@ -495,6 +498,8 @@ class DefaultCommit
     Stats::Vector statComRefs;
     /** Stat for the total number of committed loads. */
     Stats::Vector statComLoads;
+    /** Stat for the total number of committed atomics. */
+    Stats::Vector statComAmos;
     /** Total number of committed memory barriers. */
     Stats::Vector statComMembars;
     /** Total number of committed branches. */

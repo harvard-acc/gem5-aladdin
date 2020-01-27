@@ -35,7 +35,7 @@
 #include "sim/system.hh"
 
 SimpleCache::SimpleCache(SimpleCacheParams *params) :
-    MemObject(params),
+    ClockedObject(params),
     latency(params->latency),
     blockSize(params->system->cacheLineSize()),
     capacity(params->size / blockSize),
@@ -51,30 +51,20 @@ SimpleCache::SimpleCache(SimpleCacheParams *params) :
     }
 }
 
-BaseMasterPort&
-SimpleCache::getMasterPort(const std::string& if_name, PortID idx)
+Port &
+SimpleCache::getPort(const std::string &if_name, PortID idx)
 {
-    panic_if(idx != InvalidPortID, "This object doesn't support vector ports");
-
     // This is the name from the Python SimObject declaration in SimpleCache.py
     if (if_name == "mem_side") {
+        panic_if(idx != InvalidPortID,
+                 "Mem side of simple cache not a vector port");
         return memPort;
-    } else {
-        // pass it along to our super class
-        return MemObject::getMasterPort(if_name, idx);
-    }
-}
-
-BaseSlavePort&
-SimpleCache::getSlavePort(const std::string& if_name, PortID idx)
-{
-    // This is the name from the Python SimObject declaration (SimpleMemobj.py)
-    if (if_name == "cpu_side" && idx < cpuPorts.size()) {
+    } else if (if_name == "cpu_side" && idx < cpuPorts.size()) {
         // We should have already created all of the ports in the constructor
         return cpuPorts[idx];
     } else {
         // pass it along to our super class
-        return MemObject::getSlavePort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 
@@ -437,7 +427,7 @@ void
 SimpleCache::regStats()
 {
     // If you don't do this you get errors about uninitialized stats.
-    MemObject::regStats();
+    ClockedObject::regStats();
 
     hits.name(name() + ".hits")
         .desc("Number of hits")

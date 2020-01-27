@@ -36,6 +36,9 @@ Source('io_device.cc')
 Source('isa_fake.cc')
 Source('dma_device.cc')
 
+SimObject('IntPin.py')
+Source('intpin.cc')
+
 DebugFlag('IsaFake')
 DebugFlag('DMA')
 

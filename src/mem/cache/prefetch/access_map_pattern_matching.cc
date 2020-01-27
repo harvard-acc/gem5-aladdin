@@ -32,11 +32,12 @@
 
 #include "debug/HWPrefetch.hh"
 #include "mem/cache/prefetch/associative_set_impl.hh"
-#include "params/AccessMapPatternMatchingPrefetcher.hh"
+#include "params/AMPMPrefetcher.hh"
+#include "params/AccessMapPatternMatching.hh"
 
-AccessMapPatternMatchingPrefetcher::AccessMapPatternMatchingPrefetcher(
-    const AccessMapPatternMatchingPrefetcherParams *p)
-    : QueuedPrefetcher(p),
+AccessMapPatternMatching::AccessMapPatternMatching(
+    const AccessMapPatternMatchingParams *p)
+    : ClockedObject(p), blkSize(p->block_size), limitStride(p->limit_stride),
       startDegree(p->start_degree), hotZoneSize(p->hot_zone_size),
       highCoverageThreshold(p->high_coverage_threshold),
       lowCoverageThreshold(p->low_coverage_threshold),
@@ -56,13 +57,16 @@ AccessMapPatternMatchingPrefetcher::AccessMapPatternMatchingPrefetcher(
 {
     fatal_if(!isPowerOf2(hotZoneSize),
         "the hot zone size must be a power of 2");
-    if (!epochEvent.scheduled()) {
-        schedule(epochEvent, clockEdge(epochCycles));
-    }
 }
 
 void
-AccessMapPatternMatchingPrefetcher::processEpochEvent()
+AccessMapPatternMatching::startup()
+{
+    schedule(epochEvent, clockEdge(epochCycles));
+}
+
+void
+AccessMapPatternMatching::processEpochEvent()
 {
     schedule(epochEvent, clockEdge(epochCycles));
     double prefetch_accuracy =
@@ -95,8 +99,8 @@ AccessMapPatternMatchingPrefetcher::processEpochEvent()
     numRawCacheHits = 0.0;
 }
 
-AccessMapPatternMatchingPrefetcher::AccessMapEntry *
-AccessMapPatternMatchingPrefetcher::getAccessMapEntry(Addr am_addr,
+AccessMapPatternMatching::AccessMapEntry *
+AccessMapPatternMatching::getAccessMapEntry(Addr am_addr,
                 bool is_secure)
 {
     AccessMapEntry *am_entry = accessMapTable.findEntry(am_addr, is_secure);
@@ -112,7 +116,7 @@ AccessMapPatternMatchingPrefetcher::getAccessMapEntry(Addr am_addr,
 }
 
 void
-AccessMapPatternMatchingPrefetcher::setEntryState(AccessMapEntry &entry,
+AccessMapPatternMatching::setEntryState(AccessMapEntry &entry,
     Addr block, enum AccessMapState state)
 {
     enum AccessMapState old = entry.states[block];
@@ -147,10 +151,12 @@ AccessMapPatternMatchingPrefetcher::setEntryState(AccessMapEntry &entry,
 }
 
 void
-AccessMapPatternMatchingPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
-    std::vector<AddrPriority> &addresses)
+AccessMapPatternMatching::calculatePrefetch(
+    const BasePrefetcher::PrefetchInfo &pfi,
+    std::vector<QueuedPrefetcher::AddrPriority> &addresses)
 {
     assert(addresses.empty());
+
     bool is_secure = pfi.isSecure();
     Addr am_addr = pfi.getAddr() / hotZoneSize;
     Addr current_block = (pfi.getAddr() % hotZoneSize) / blkSize;
@@ -194,7 +200,8 @@ AccessMapPatternMatchingPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
     // index of the current_block in the new vector
     Addr states_current_block = current_block + lines_per_zone;
     // consider strides 1..lines_per_zone/2
-    for (int stride = 1; stride < lines_per_zone/2; stride += 1) {
+    int max_stride = limitStride == 0 ? lines_per_zone / 2 : limitStride + 1;
+    for (int stride = 1; stride < max_stride; stride += 1) {
         // Test accessed positive strides
         if (checkCandidate(states, states_current_block, stride)) {
             // candidate found, current_block - stride
@@ -213,7 +220,7 @@ AccessMapPatternMatchingPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
                 pf_addr = am_addr * hotZoneSize + blk * blkSize;
                 setEntryState(*am_entry_curr, blk, AM_PREFETCH);
             }
-            addresses.push_back(AddrPriority(pf_addr, 0));
+            addresses.push_back(QueuedPrefetcher::AddrPriority(pf_addr, 0));
             if (addresses.size() == degree) {
                 break;
             }
@@ -237,7 +244,7 @@ AccessMapPatternMatchingPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
                 pf_addr = am_addr * hotZoneSize + blk * blkSize;
                 setEntryState(*am_entry_curr, blk, AM_PREFETCH);
             }
-            addresses.push_back(AddrPriority(pf_addr, 0));
+            addresses.push_back(QueuedPrefetcher::AddrPriority(pf_addr, 0));
             if (addresses.size() == degree) {
                 break;
             }
@@ -245,8 +252,26 @@ AccessMapPatternMatchingPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
     }
 }
 
-AccessMapPatternMatchingPrefetcher*
-AccessMapPatternMatchingPrefetcherParams::create()
+AccessMapPatternMatching*
+AccessMapPatternMatchingParams::create()
 {
-    return new AccessMapPatternMatchingPrefetcher(this);
+    return new AccessMapPatternMatching(this);
+}
+
+AMPMPrefetcher::AMPMPrefetcher(const AMPMPrefetcherParams *p)
+  : QueuedPrefetcher(p), ampm(*p->ampm)
+{
+}
+
+void
+AMPMPrefetcher::calculatePrefetch(const PrefetchInfo &pfi,
+    std::vector<AddrPriority> &addresses)
+{
+    ampm.calculatePrefetch(pfi, addresses);
+}
+
+AMPMPrefetcher*
+AMPMPrefetcherParams::create()
+{
+    return new AMPMPrefetcher(this);
 }

@@ -50,10 +50,10 @@
 #include "base/logging.hh"
 #include "base/statistics.hh"
 #include "gpu-compute/compute_unit.hh"
-#include "mem/mem_object.hh"
 #include "mem/port.hh"
 #include "mem/request.hh"
 #include "params/X86GPUTLB.hh"
+#include "sim/clocked_object.hh"
 #include "sim/sim_object.hh"
 
 class BaseTLB;
@@ -62,7 +62,7 @@ class ThreadContext;
 
 namespace X86ISA
 {
-    class GpuTLB : public MemObject
+    class GpuTLB : public ClockedObject
     {
       protected:
         friend class Walker;
@@ -217,7 +217,7 @@ namespace X86ISA
         // the avg. over all pages.
         Stats::Scalar avgReuseDistance;
 
-        void regStats();
+        void regStats() override;
         void updatePageFootprint(Addr virt_page_addr);
         void printAccessPattern();
 
@@ -235,8 +235,8 @@ namespace X86ISA
         TlbEntry *insert(Addr vpn, TlbEntry &entry);
 
         // Checkpointing
-        virtual void serialize(CheckpointOut& cp) const;
-        virtual void unserialize(CheckpointIn& cp);
+        virtual void serialize(CheckpointOut& cp) const override;
+        virtual void unserialize(CheckpointIn& cp) override;
         void issueTranslation();
         enum tlbOutcome {TLB_HIT, TLB_MISS, PAGE_WALK, MISS_RETURN};
         bool tlbLookup(const RequestPtr &req,
@@ -308,11 +308,8 @@ namespace X86ISA
         // TLB ports on the memory side
         std::vector<MemSidePort*> memSidePort;
 
-        BaseMasterPort &getMasterPort(const std::string &if_name,
-                                      PortID idx=InvalidPortID);
-
-        BaseSlavePort &getSlavePort(const std::string &if_name,
-                                    PortID idx=InvalidPortID);
+        Port &getPort(const std::string &if_name,
+                      PortID idx=InvalidPortID) override;
 
         /**
          * TLB TranslationState: this currently is a somewhat bastardization of

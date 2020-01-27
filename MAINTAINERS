@@ -13,12 +13,14 @@ maintainers.
 
 PMC Members (general maintainers):
   Ali Saidi <asaidi@gmail.com>
-  Andreas Hansson <andreas.hansson@arm.com>
   Andreas Sandberg <andreas.sandberg@arm.com>
-  Tony Gutierrez <anthony.gutierrez@amd.com>
   Brad Beckmann <brad.beckmann@amd.com>
-  Jason Lowe-Power <jason@lowepower.com>
-  Nathan Binkert <nate@binkert.org>
+  David Wood <david@cs.wisc.edu>
+  Gabe Black <gabeblack@google.com>
+  Giacomo Travaglini <giacomo.travaglini@arm.com>
+  Jason Lowe-Power <jason@lowepower.com> (chair)
+  Matt Sinclair <sinclair@cs.wisc.edu>
+  Tony Gutierrez <anthony.gutierrez@amd.com>
   Steve Reinhardt <stever@gmail.com>
 
 arch: General architecture-specific components
@@ -26,6 +28,7 @@ arch: General architecture-specific components
 arch-alpha:
 arch-arm:
   Andreas Sandberg <andreas.sandberg@arm.com>
+  Giacomo Travaglini <giacomo.travaglini@arm.com>
 arch-hsail:
   Tony Gutierrez <anthony.gutierrez@amd.com>
 arch-mips:
@@ -53,7 +56,14 @@ dev:
 dev-virtio:
   Andreas Sandberg <andreas.sandberg@arm.com>
 
+dev-arm:
+  Andreas Sandberg <andreas.sandberg@arm.com>
+  Giacomo Travaglini <giacomo.travaglini@arm.com>
+
 ext: Components external to gem5
+
+fastmodel: Changes relating to ARM Fast Models
+  Gabe Black <gabeblack@google.com>
 
 gpu-compute:
   Tony Gutierrez <anthony.gutierrez@amd.com>
@@ -88,7 +98,16 @@ sim-power: Power modeling
 
 stats: Updates to statistics for regressions
 
-tests: testing changes (not stats updates for tests. See stats:)
+system: System boot code and related components
+system-alpha:
+system-arm:
   Andreas Sandberg <andreas.sandberg@arm.com>
+  Giacomo Travaglini <giacomo.travaglini@arm.com>
+
+systemc: Code for the gem5 SystemC implementation and interface
+  Gabe Black <gabeblack@google.com>
+
+tests: testing changes (not stats updates for tests. See stats:)
+  Bobby Bruce <bbruce@ucdavis.edu>
 
 util:

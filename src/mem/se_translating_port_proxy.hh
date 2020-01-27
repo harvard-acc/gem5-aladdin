@@ -80,23 +80,16 @@ class SETranslatingPortProxy : public PortProxy
     AllocType allocating;
 
   public:
-    SETranslatingPortProxy(MasterPort& port, Process* p, AllocType alloc);
-    ~SETranslatingPortProxy();
+    SETranslatingPortProxy(SendFunctionalFunc func,
+                           Process* p, AllocType alloc);
+    SETranslatingPortProxy(MasterPort &port, Process* p, AllocType alloc);
+    ~SETranslatingPortProxy() {}
 
     void setPageTable(EmulationPageTable *p) { pTable = p; }
     void setProcess(Process *p) { process = p; }
-    bool tryReadBlob(Addr addr, uint8_t *p, int size) const;
-    bool tryWriteBlob(Addr addr, const uint8_t *p, int size) const;
-    bool tryMemsetBlob(Addr addr, uint8_t val, int size) const;
-    bool tryWriteString(Addr addr, const char *str) const;
-    bool tryReadString(std::string &str, Addr addr) const;
-
-    void readBlob(Addr addr, uint8_t *p, int size) const override;
-    void writeBlob(Addr addr, const uint8_t *p, int size) const override;
-    void memsetBlob(Addr addr, uint8_t val, int size) const override;
-
-    void writeString(Addr addr, const char *str) const;
-    void readString(std::string &str, Addr addr) const;
+    bool tryReadBlob(Addr addr, void *p, int size) const override;
+    bool tryWriteBlob(Addr addr, const void *p, int size) const override;
+    bool tryMemsetBlob(Addr addr, uint8_t val, int size) const override;
 };
 
 #endif // __MEM_SE_TRANSLATING_PORT_PROXY_HH__

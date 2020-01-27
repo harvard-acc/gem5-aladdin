@@ -1,3 +1,15 @@
+# Copyright (c) 2020 ARM Limited
+# All rights reserved
+#
+# The license below extends only to copyright in the software and shall
+# not be construed as granting a license to any other intellectual
+# property including but not limited to intellectual property relating
+# to a hardware implementation of the functionality of the software
+# licensed hereunder.  You may use the software subject to the license
+# terms below provided that you ensure that this notice is replicated
+# unmodified and in its entirety in all distributions of the software,
+# modified or unmodified, in source code or in binary form.
+#
 # Copyright (c) 2017 Mark D. Hill and David A. Wood
 # All rights reserved.
 #
@@ -37,7 +49,15 @@ m5_exit_regex = re.compile(
 r'Exiting @ tick \d* because m5_exit instruction encountered'
 )
 
-test_program = DownloadedProgram('m5-exit/bin/x86/linux/', 'm5_exit')
+if config.bin_path:
+    path = config.bin_path
+else:
+    path = joinpath(absdirpath(__file__), '..',
+                    'test-progs', 'hello', 'bin', 'x86', 'linux')
+filename = 'm5_exit'
+url = ('http://dist.gem5.org/dist/current/test-progs/' +
+       'm5-exit/bin/x86/linux/m5_exit')
+test_program = DownloadedProgram(url, path, filename)
 
 a = verifier.MatchRegex(m5_exit_regex)
 gem5_verify_config(
@@ -45,6 +65,6 @@ gem5_verify_config(
     verifiers=[a],
     fixtures=(test_program,),
     config=os.path.join(config.base_dir, 'configs', 'example','se.py'),
-    config_args=['--cmd', test_program.path],
+    config_args=['--cmd', joinpath(test_program.path, filename)],
     valid_isas=('X86',)
 )

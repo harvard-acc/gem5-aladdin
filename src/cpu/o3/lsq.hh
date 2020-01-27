@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2014, 2018 ARM Limited
+ * Copyright (c) 2011-2012, 2014, 2018-2019 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -50,11 +50,15 @@
 #include "arch/generic/tlb.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/o3/lsq_unit.hh"
+#include "cpu/utils.hh"
 #include "enums/SMTQueuePolicy.hh"
 #include "mem/port.hh"
 #include "sim/sim_object.hh"
 
 struct DerivO3CPUParams;
+
+template <class Impl>
+class FullO3CPU;
 
 template <class Impl>
 class LSQ
@@ -112,6 +116,49 @@ class LSQ
         LSQRequest* request() { return _request; }
         virtual void complete() = 0;
         void writebackDone() { _request->writebackDone(); }
+    };
+
+    /**
+     * DcachePort class for the load/store queue.
+     */
+    class DcachePort : public MasterPort
+    {
+      protected:
+
+        /** Pointer to LSQ. */
+        LSQ<Impl> *lsq;
+        FullO3CPU<Impl> *cpu;
+
+      public:
+        /** Default constructor. */
+        DcachePort(LSQ<Impl> *_lsq, FullO3CPU<Impl>* _cpu)
+            : MasterPort(_cpu->name() + ".dcache_port", _cpu), lsq(_lsq),
+              cpu(_cpu)
+        { }
+
+      protected:
+
+        /** Timing version of receive.  Handles writing back and
+         * completing the load or store that has returned from
+         * memory. */
+        virtual bool recvTimingResp(PacketPtr pkt);
+        virtual void recvTimingSnoopReq(PacketPtr pkt);
+
+        virtual void recvFunctionalSnoop(PacketPtr pkt)
+        {
+            // @todo: Is there a need for potential invalidation here?
+        }
+
+        /** Handles doing a retry of the previous send. */
+        virtual void recvReqRetry();
+
+        /**
+         * As this CPU requires snooping to maintain the load store queue
+         * change the behaviour from the base CPU port.
+         *
+         * @return true since we have to snoop
+         */
+        virtual bool isSnooping() const { return true; }
     };
 
     /** Memory operation metadata.
@@ -191,7 +238,7 @@ class LSQ
         enum Flag : FlagsStorage
         {
             IsLoad              = 0x00000001,
-            /** True if this is a store that writes registers (SC). */
+            /** True if this is a store/atomic that writes registers (SC). */
             WbStore             = 0x00000002,
             Delayed             = 0x00000004,
             IsSplit             = 0x00000008,
@@ -211,7 +258,9 @@ class LSQ
             LSQEntryFreed       = 0x00000800,
             /** Store written back. */
             WritebackScheduled  = 0x00001000,
-            WritebackDone       = 0x00002000
+            WritebackDone       = 0x00002000,
+            /** True if this is an atomic request */
+            IsAtomic            = 0x00004000
         };
         FlagsType flags;
 
@@ -220,9 +269,8 @@ class LSQ
             NotIssued,
             Translation,
             Request,
-            Complete,
-            Squashed,
             Fault,
+            PartialFault,
         };
         State _state;
         LSQSenderState* _senderState;
@@ -234,7 +282,7 @@ class LSQ
         /** LQ/SQ entry idx. */
         uint32_t _entryIdx;
 
-        void markDelayed() { flags.set(Flag::Delayed); }
+        void markDelayed() override { flags.set(Flag::Delayed); }
         bool isDelayed() { return flags.isSet(Flag::Delayed); }
 
       public:
@@ -249,33 +297,41 @@ class LSQ
         const Addr _addr;
         const uint32_t _size;
         const Request::Flags _flags;
+        std::vector<bool> _byteEnable;
         uint32_t _numOutstandingPackets;
+        AtomicOpFunctorPtr _amo_op;
       protected:
         LSQUnit* lsqUnit() { return &_port; }
         LSQRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad) :
             _state(State::NotIssued), _senderState(nullptr),
             _port(*port), _inst(inst), _data(nullptr),
             _res(nullptr), _addr(0), _size(0), _flags(0),
-            _numOutstandingPackets(0)
+            _numOutstandingPackets(0), _amo_op(nullptr)
         {
             flags.set(Flag::IsLoad, isLoad);
-            flags.set(Flag::WbStore, _inst->isStoreConditional());
+            flags.set(Flag::WbStore,
+                      _inst->isStoreConditional() || _inst->isAtomic());
+            flags.set(Flag::IsAtomic, _inst->isAtomic());
             install();
         }
         LSQRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad,
                    const Addr& addr, const uint32_t& size,
                    const Request::Flags& flags_,
-                   PacketDataPtr data = nullptr, uint64_t* res = nullptr)
+                   PacketDataPtr data = nullptr, uint64_t* res = nullptr,
+                   AtomicOpFunctorPtr amo_op = nullptr)
             : _state(State::NotIssued), _senderState(nullptr),
             numTranslatedFragments(0),
             numInTranslationFragments(0),
             _port(*port), _inst(inst), _data(data),
             _res(res), _addr(addr), _size(size),
             _flags(flags_),
-            _numOutstandingPackets(0)
+            _numOutstandingPackets(0),
+            _amo_op(std::move(amo_op))
         {
             flags.set(Flag::IsLoad, isLoad);
-            flags.set(Flag::WbStore, _inst->isStoreConditional());
+            flags.set(Flag::WbStore,
+                      _inst->isStoreConditional() || _inst->isAtomic());
+            flags.set(Flag::IsAtomic, _inst->isAtomic());
             install();
         }
 
@@ -285,12 +341,20 @@ class LSQ
             return flags.isSet(Flag::IsLoad);
         }
 
+        bool
+        isAtomic() const
+        {
+            return flags.isSet(Flag::IsAtomic);
+        }
+
         /** Install the request in the LQ/SQ. */
         void install()
         {
             if (isLoad()) {
                 _port.loadQueue[_inst->lqIdx].setRequest(this);
             } else {
+                // Store, StoreConditional, and Atomic requests are pushed
+                // to this storeQueue
                 _port.storeQueue[_inst->sqIdx].setRequest(this);
             }
         }
@@ -331,6 +395,29 @@ class LSQ
                     _senderState->deleteRequest();
                 }
                 flags.set(reason);
+            }
+        }
+
+        /** Helper function used to add a (sub)request, given its address
+         * `addr`, size `size` and byte-enable mask `byteEnable`.
+         *
+         * The request is only added if the mask is empty or if there is at
+         * least an active element in it.
+         */
+        void
+        addRequest(Addr addr, unsigned size,
+                   const std::vector<bool>& byte_enable)
+        {
+            if (byte_enable.empty() ||
+                isAnyActiveElement(byte_enable.begin(), byte_enable.end())) {
+                auto request = std::make_shared<Request>(_inst->getASID(),
+                        addr, size, _flags, _inst->masterId(),
+                        _inst->instAddr(), _inst->contextId(),
+                        std::move(_amo_op));
+                if (!byte_enable.empty()) {
+                    request->setByteEnable(byte_enable);
+                }
+                _requests.push_back(request);
             }
         }
 
@@ -523,6 +610,25 @@ class LSQ
             return flags.isSet(Flag::Sent);
         }
 
+        bool
+        isPartialFault()
+        {
+            return _state == State::PartialFault;
+        }
+
+        bool
+        isMemAccessRequired()
+        {
+            return (_state == State::Request ||
+                    (isPartialFault() && isLoad()));
+        }
+
+        void
+        setStateToFault()
+        {
+            setState(State::Fault);
+        }
+
         /**
          * The LSQ entry is cleared
          */
@@ -592,11 +698,17 @@ class LSQ
          * declaration of the names in the parent class. */
         using Flag = typename LSQRequest::Flag;
         using State = typename LSQRequest::State;
+        using LSQRequest::_addr;
         using LSQRequest::_fault;
+        using LSQRequest::_flags;
+        using LSQRequest::_size;
+        using LSQRequest::_byteEnable;
+        using LSQRequest::_requests;
         using LSQRequest::_inst;
         using LSQRequest::_packets;
         using LSQRequest::_port;
         using LSQRequest::_res;
+        using LSQRequest::_taskId;
         using LSQRequest::_senderState;
         using LSQRequest::_state;
         using LSQRequest::flags;
@@ -609,19 +721,17 @@ class LSQ
         using LSQRequest::numInTranslationFragments;
         using LSQRequest::numTranslatedFragments;
         using LSQRequest::_numOutstandingPackets;
+        using LSQRequest::_amo_op;
       public:
         SingleDataRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad,
                           const Addr& addr, const uint32_t& size,
                           const Request::Flags& flags_,
                           PacketDataPtr data = nullptr,
-                          uint64_t* res = nullptr) :
-            LSQRequest(port, inst, isLoad, addr, size, flags_, data, res)
-        {
-            LSQRequest::_requests.push_back(
-                std::make_shared<Request>(inst->getASID(), addr, size, flags_,
-                    inst->masterId(), inst->instAddr(), inst->contextId()));
-            LSQRequest::_requests.back()->setReqInstSeqNum(inst->seqNum);
-        }
+                          uint64_t* res = nullptr,
+                          AtomicOpFunctorPtr amo_op = nullptr) :
+            LSQRequest(port, inst, isLoad, addr, size, flags_, data, res,
+                       std::move(amo_op)) {}
+
         inline virtual ~SingleDataRequest() {}
         virtual void initiateTranslation();
         virtual void finish(const Fault &fault, const RequestPtr &req,
@@ -650,6 +760,7 @@ class LSQ
         using LSQRequest::_port;
         using LSQRequest::_requests;
         using LSQRequest::_res;
+        using LSQRequest::_byteEnable;
         using LSQRequest::_senderState;
         using LSQRequest::_size;
         using LSQRequest::_state;
@@ -670,14 +781,14 @@ class LSQ
         RequestPtr mainReq;
         PacketPtr _mainPacket;
 
-
       public:
         SplitDataRequest(LSQUnit* port, const DynInstPtr& inst, bool isLoad,
                          const Addr& addr, const uint32_t& size,
                          const Request::Flags & flags_,
                          PacketDataPtr data = nullptr,
                          uint64_t* res = nullptr) :
-            LSQRequest(port, inst, isLoad, addr, size, flags_, data, res),
+            LSQRequest(port, inst, isLoad, addr, size, flags_, data, res,
+                       nullptr),
             numFragments(0),
             numReceivedPackets(0),
             mainReq(nullptr),
@@ -734,7 +845,7 @@ class LSQ
     int entryAmount(ThreadID num_threads);
 
     /** Ticks the LSQ. */
-    void tick() { usedStorePorts = 0; }
+    void tick();
 
     /** Inserts a load into the LSQ. */
     void insertLoad(const DynInstPtr &load_inst);
@@ -928,7 +1039,8 @@ class LSQ
 
     Fault pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
                       unsigned int size, Addr addr, Request::Flags flags,
-                      uint64_t *res);
+                      uint64_t *res, AtomicOpFunctorPtr amo_op,
+                      const std::vector<bool>& byte_enable);
 
     /** The CPU pointer. */
     O3CPU *cpu;
@@ -941,9 +1053,11 @@ class LSQ
     /** Set D-cache blocked status */
     void cacheBlocked(bool v);
     /** Is any store port available to use? */
-    bool storePortAvailable() const;
+    bool cachePortAvailable(bool is_load) const;
     /** Another store port is in use */
-    void storePortBusy();
+    void cachePortBusy(bool is_load);
+
+    MasterPort &getDataPort() { return dcachePort; }
 
   protected:
     /** D-cache is blocked */
@@ -952,6 +1066,10 @@ class LSQ
     int cacheStorePorts;
     /** The number of used cache ports in this cycle by stores. */
     int usedStorePorts;
+    /** The number of cache ports available each cycle (loads only). */
+    int cacheLoadPorts;
+    /** The number of used cache ports in this cycle by loads. */
+    int usedLoadPorts;
 
 
     /** The LSQ policy for SMT mode. */
@@ -993,6 +1111,9 @@ class LSQ
 
     /** Max SQ Size - Used to Enforce Sharing Policies. */
     unsigned maxSQEntries;
+
+    /** Data port. */
+    DcachePort dcachePort;
 
     /** The LSQ units for individual threads. */
     std::vector<LSQUnit> thread;

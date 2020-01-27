@@ -32,6 +32,7 @@
 #ifndef __ARCH_SPARC_INTERRUPT_HH__
 #define __ARCH_SPARC_INTERRUPT_HH__
 
+#include "arch/generic/interrupts.hh"
 #include "arch/sparc/faults.hh"
 #include "arch/sparc/isa_traits.hh"
 #include "arch/sparc/registers.hh"
@@ -43,7 +44,19 @@
 namespace SparcISA
 {
 
-class Interrupts : public SimObject
+enum InterruptTypes
+{
+    IT_TRAP_LEVEL_ZERO,
+    IT_HINTP,
+    IT_INT_VEC,
+    IT_CPU_MONDO,
+    IT_DEV_MONDO,
+    IT_RES_ERROR,
+    IT_SOFT_INT,
+    NumInterruptTypes
+};
+
+class Interrupts : public BaseInterrupts
 {
   private:
     BaseCPU * cpu;
@@ -67,7 +80,7 @@ class Interrupts : public SimObject
         return dynamic_cast<const Params *>(_params);
     }
 
-    Interrupts(Params * p) : SimObject(p), cpu(NULL)
+    Interrupts(Params * p) : BaseInterrupts(p), cpu(NULL)
     {
         clearAll();
     }

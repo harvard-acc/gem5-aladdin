@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 ARM Limited
+ * Copyright (c) 2018, 2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -47,7 +47,7 @@
 #include "debug/Semihosting.hh"
 #include "dev/serial/serial.hh"
 #include "mem/physical.hh"
-#include "mem/port_proxy.hh"
+#include "mem/secure_port_proxy.hh"
 #include "params/ArmSemihosting.hh"
 #include "sim/byteswap.hh"
 #include "sim/sim_exit.hh"
@@ -138,6 +138,9 @@ ArmSemihosting::ArmSemihosting(const ArmSemihostingParams *p)
       timeBase([p]{ struct tm t = p->time; return mkutctime(&t); }()),
       tickShift(calcTickShift()),
       semiErrno(0),
+      filesRootDir(!p->files_root_dir.empty() &&
+                   p->files_root_dir.back() != '/' ?
+                   p->files_root_dir + '/' : p->files_root_dir),
       stdin(getSTDIO("stdin", p->stdin, "r")),
       stdout(getSTDIO("stdout", p->stdout, "w")),
       stderr(p->stderr == p->stdout ?
@@ -176,7 +179,7 @@ ArmSemihosting::call64(ThreadContext *tc, uint32_t op, uint64_t param)
     DPRINTF(Semihosting, "Semihosting call64: %s(0x%x)\n", call->name, param);
     argv[0] = param;
     for (int i = 0; i < call->argc64; ++i) {
-        argv[i + 1] = proxy.readGtoH<uint64_t>(param + i * 8, endian);
+        argv[i + 1] = proxy.read<uint64_t>(param + i * 8, endian);
         DPRINTF(Semihosting, "\t: 0x%x\n", argv[i + 1]);
     }
 
@@ -211,7 +214,7 @@ ArmSemihosting::call32(ThreadContext *tc, uint32_t op, uint32_t param)
     DPRINTF(Semihosting, "Semihosting call32: %s(0x%x)\n", call->name, param);
     argv[0] = param;
     for (int i = 0; i < call->argc32; ++i) {
-        argv[i + 1] = proxy.readGtoH<uint32_t>(param + i * 4, endian);
+        argv[i + 1] = proxy.read<uint32_t>(param + i * 4, endian);
         DPRINTF(Semihosting, "\t: 0x%x\n", argv[i + 1]);
     }
 
@@ -272,7 +275,7 @@ ArmSemihosting::readString(ThreadContext *tc, Addr ptr, size_t len)
     std::vector<char> buf(len + 1);
 
     buf[len] = '\0';
-    physProxy(tc).readBlob(ptr, (uint8_t *)buf.data(), len);
+    physProxy(tc).readBlob(ptr, buf.data(), len);
 
     return std::string(buf.data());
 }
@@ -291,6 +294,8 @@ ArmSemihosting::callOpen(ThreadContext *tc, bool aarch64,
         return retError(EINVAL);
 
     std::string fname = readString(tc, name_base, name_size);
+    if (!fname.empty() && fname.front() != '/')
+        fname = filesRootDir + fname;
 
     std::unique_ptr<ArmSemihosting::FileBase> file =
         FileBase::create(*this, fname, mode);
@@ -454,11 +459,11 @@ ArmSemihosting::callFLen(ThreadContext *tc, bool aarch64,
     if (argv[1] > files.size() || !files[argv[1]])
         return retError(EBADF);
 
-    int64_t ret = files[argv[1]]->isTTY();
+    int64_t ret = files[argv[1]]->flen();
     if (ret < 0) {
         return retError(-ret);
     } else {
-        return retOK(0);
+        return retOK(ret);
     }
 }
 
@@ -479,8 +484,7 @@ ArmSemihosting::callTmpNam(ThreadContext *tc, bool aarch64,
     if (path_len >= max_len)
         return retError(ENOSPC);
 
-    physProxy(tc).writeBlob(
-        guest_buf, (const uint8_t *)path, path_len + 1);
+    physProxy(tc).writeBlob(guest_buf, path, path_len + 1);
     return retOK(0);
 }
 
@@ -551,14 +555,12 @@ ArmSemihosting::callGetCmdLine(ThreadContext *tc, bool aarch64,
     if (cmdLine.size() + 1 < argv[2]) {
         PortProxy &proxy = physProxy(tc);
         ByteOrder endian = ArmISA::byteOrder(tc);
-        proxy.writeBlob(
-            (Addr)argv[1],
-            (const uint8_t *)cmdLine.c_str(), cmdLine.size() + 1);
+        proxy.writeBlob((Addr)argv[1], cmdLine.c_str(), cmdLine.size() + 1);
 
         if (aarch64)
-            proxy.writeHtoG<uint64_t>(argv[0] + 1 * 8, cmdLine.size(), endian);
+            proxy.write<uint64_t>(argv[0] + 1 * 8, cmdLine.size(), endian);
         else
-            proxy.writeHtoG<uint32_t>(argv[0] + 1 * 4, cmdLine.size(), endian);
+            proxy.write<uint32_t>(argv[0] + 1 * 4, cmdLine.size(), endian);
         return retOK(0);
     } else {
         return retError(0);
@@ -609,15 +611,15 @@ ArmSemihosting::callHeapInfo(ThreadContext *tc, bool aarch64,
     PortProxy &proxy = physProxy(tc);
     ByteOrder endian = ArmISA::byteOrder(tc);
     if (aarch64) {
-        proxy.writeHtoG<uint64_t>(base + 0 * 8, heap_base, endian);
-        proxy.writeHtoG<uint64_t>(base + 1 * 8, heap_limit, endian);
-        proxy.writeHtoG<uint64_t>(base + 2 * 8, stack_base, endian);
-        proxy.writeHtoG<uint64_t>(base + 3 * 8, stack_limit, endian);
+        proxy.write<uint64_t>(base + 0 * 8, heap_base, endian);
+        proxy.write<uint64_t>(base + 1 * 8, heap_limit, endian);
+        proxy.write<uint64_t>(base + 2 * 8, stack_base, endian);
+        proxy.write<uint64_t>(base + 3 * 8, stack_limit, endian);
     } else {
-        proxy.writeHtoG<uint32_t>(base + 0 * 4, heap_base, endian);
-        proxy.writeHtoG<uint32_t>(base + 1 * 4, heap_limit, endian);
-        proxy.writeHtoG<uint32_t>(base + 2 * 4, stack_base, endian);
-        proxy.writeHtoG<uint32_t>(base + 3 * 4, stack_limit, endian);
+        proxy.write<uint32_t>(base + 0 * 4, heap_base, endian);
+        proxy.write<uint32_t>(base + 1 * 4, heap_limit, endian);
+        proxy.write<uint32_t>(base + 2 * 4, stack_base, endian);
+        proxy.write<uint32_t>(base + 3 * 4, stack_limit, endian);
     }
 
     return retOK(0);
@@ -666,10 +668,10 @@ ArmSemihosting::callElapsed(ThreadContext *tc, bool aarch64,
     const uint64_t tick = semiTick(curTick());
 
     if (aarch64) {
-        proxy.writeHtoG<uint64_t>(argv[0], tick, endian);
+        proxy.write<uint64_t>(argv[0], tick, endian);
     } else {
-        proxy.writeHtoG<uint32_t>(argv[0] + 0 * 4, tick, endian);
-        proxy.writeHtoG<uint32_t>(argv[0] + 1 * 4, tick >> 32, endian);
+        proxy.write<uint32_t>(argv[0] + 0 * 4, tick, endian);
+        proxy.write<uint32_t>(argv[0] + 1 * 4, tick >> 32, endian);
     }
 
     return retOK(0);

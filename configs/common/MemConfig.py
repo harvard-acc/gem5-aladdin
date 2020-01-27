@@ -37,62 +37,11 @@
 #          Andreas Hansson
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import m5.objects
-from m5.objects import CommMonitor, MemTraceProbe
-from m5.util import addToPath, fatal
-import inspect
-import sys
-import HMC
-from textwrap import  TextWrapper
-
-# Dictionary of mapping names of real memory controller models to
-# classes.
-_mem_classes = {}
-
-def is_mem_class(cls):
-    """Determine if a class is a memory controller that can be instantiated"""
-
-    # We can't use the normal inspect.isclass because the ParamFactory
-    # and ProxyFactory classes have a tendency to confuse it.
-    try:
-        return issubclass(cls, m5.objects.AbstractMemory) and \
-            not cls.abstract
-    except TypeError:
-        return False
-
-def get(name):
-    """Get a memory class from a user provided class name."""
-
-    try:
-        mem_class = _mem_classes[name]
-        return mem_class
-    except KeyError:
-        print("%s is not a valid memory controller." % (name,))
-        sys.exit(1)
-
-def print_mem_list():
-    """Print a list of available memory classes."""
-
-    print("Available memory classes:")
-    doc_wrapper = TextWrapper(initial_indent="\t\t", subsequent_indent="\t\t")
-    for name, cls in _mem_classes.items():
-        print("\t%s" % name)
-
-        # Try to extract the class documentation from the class help
-        # string.
-        doc = inspect.getdoc(cls)
-        if doc:
-            for line in doc_wrapper.wrap(doc):
-                print(line)
-
-def mem_names():
-    """Return a list of valid memory names."""
-    return _mem_classes.keys()
-
-# Add all memory controllers in the object hierarchy.
-for name, cls in inspect.getmembers(m5.objects, is_mem_class):
-    _mem_classes[name] = cls
+from common import ObjectList
+from . import HMC
 
 def create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits, intlv_size):
     """
@@ -117,10 +66,6 @@ def create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits, intlv_size):
 
     # Only do this for DRAMs
     if issubclass(cls, m5.objects.DRAMCtrl):
-        # Inform each controller how many channels to account
-        # for
-        ctrl.channels = nbr_mem_ctrls
-
         # If the channel bits are appearing after the column
         # bits, we need to add the appropriate number of bits
         # for the row buffer size
@@ -166,6 +111,7 @@ def config_mem(options, system):
                                          None)
     opt_elastic_trace_en = getattr(options, "elastic_trace_en", False)
     opt_mem_ranks = getattr(options, "mem_ranks", None)
+    opt_dram_powerdown = getattr(options, "enable_dram_powerdown", None)
 
     if opt_mem_type == "HMC_2500_1x32":
         HMChost = HMC.config_hmc_host_ctrl(options, system)
@@ -200,7 +146,7 @@ def config_mem(options, system):
     if 2 ** intlv_bits != nbr_mem_ctrls:
         fatal("Number of memory channels must be a power of 2")
 
-    cls = get(opt_mem_type)
+    cls = ObjectList.mem_list.get(opt_mem_type)
     mem_ctrls = []
 
     if opt_elastic_trace_en and not issubclass(cls, m5.objects.SimpleMemory):
@@ -218,13 +164,17 @@ def config_mem(options, system):
     # address mapping in the case of a DRAM
     #for r in [m5.objects.AddrRange(0x00000000, size='32MB')]:
     for r in system.mem_ranges:
-        for i in xrange(nbr_mem_ctrls):
+        for i in range(nbr_mem_ctrls):
             mem_ctrl = create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits,
                                        intlv_size)
             # Set the number of ranks based on the command-line
             # options if it was explicitly set
             if issubclass(cls, m5.objects.DRAMCtrl) and opt_mem_ranks:
                 mem_ctrl.ranks_per_channel = opt_mem_ranks
+
+            # Enable low-power DRAM states if option is set
+            if issubclass(cls, m5.objects.DRAMCtrl):
+                mem_ctrl.enable_dram_powerdown = opt_dram_powerdown
 
             if opt_elastic_trace_en:
                 mem_ctrl.latency = '1ns'
@@ -236,7 +186,7 @@ def config_mem(options, system):
     subsystem.mem_ctrls = mem_ctrls
 
     # Connect the controllers to the membus
-    for i in xrange(len(subsystem.mem_ctrls)):
+    for i in range(len(subsystem.mem_ctrls)):
         if opt_mem_type == "HMC_2500_1x32":
             subsystem.mem_ctrls[i].port = xbar[i/4].master
             # Set memory device size. There is an independent controller for

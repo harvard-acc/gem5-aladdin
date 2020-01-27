@@ -76,6 +76,8 @@ enum CacheBlkStatusBits : unsigned {
     BlkHWPrefetched =   0x20,
     /** block holds data from the secure memory space */
     BlkSecure =         0x40,
+    /** block holds compressed data */
+    BlkCompressed =     0x80
 };
 
 /**
@@ -272,6 +274,7 @@ class CacheBlk : public ReplaceableEntry
      */
     Tick getWhenReady() const
     {
+        assert(whenReady != MaxTick);
         return whenReady;
     }
 
@@ -342,7 +345,8 @@ class CacheBlk : public ReplaceableEntry
      *
      * @return string with basic state information
      */
-    virtual std::string print() const
+    std::string
+    print() const override
     {
         /**
          *  state       M   O   E   S   I
@@ -379,9 +383,9 @@ class CacheBlk : public ReplaceableEntry
           default:    s = 'T'; break; // @TODO add other types
         }
         return csprintf("state: %x (%c) valid: %d writable: %d readable: %d "
-                        "dirty: %d | tag: %#x set: %#x way: %#x", status, s,
+                        "dirty: %d | tag: %#x %s", status, s,
                         isValid(), isWritable(), isReadable(), isDirty(), tag,
-                        getSet(), getWay());
+                        ReplaceableEntry::print());
     }
 
     /**

@@ -4,7 +4,8 @@
 #include <queue>
 #include <utility>
 
-#include "mem/mem_object.hh"
+#include "sim/clocked_object.hh"
+#include "mem/port.hh"
 
 #include "params/Scratchpad.hh"
 #include "debug/SystolicSpad.hh"
@@ -33,13 +34,13 @@ class DataChunk {
   std::vector<uint8_t> chunk;
 };
 
-class Scratchpad : public MemObject {
+class Scratchpad : public ClockedObject {
  typedef ScratchpadParams Params;
  public:
   Scratchpad(const Params* p);
   ~Scratchpad() {}
 
-  BaseSlavePort& getSlavePort(const std::string& if_name, PortID idx) override {
+  Port& getPort(const std::string& if_name, PortID idx) override {
     if (if_name == "accelSidePort")
       return accelSidePort;
     else

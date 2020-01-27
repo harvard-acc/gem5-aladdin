@@ -36,45 +36,6 @@
 #include "base/logging.hh"
 #include "base/types.hh"
 
-// Returns the prime number one less than n.
-int prevPrime(int n);
-
-// Determine if a number is prime
-template <class T>
-inline bool
-isPrime(const T& n)
-{
-    T i;
-
-    if (n == 2 || n == 3)
-        return true;
-
-    // Don't try every odd number to prove if it is a prime.
-    // Toggle between every 2nd and 4th number.
-    // (This is because every 6th odd number is divisible by 3.)
-    for (i = 5; i*i <= n; i += 6) {
-        if (((n % i) == 0 ) || ((n % (i + 2)) == 0) ) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-template <class T>
-inline T
-leastSigBit(const T& n)
-{
-    return n & ~(n - 1);
-}
-
-template <class T>
-inline bool
-isPowerOf2(const T& n)
-{
-    return n != 0 && leastSigBit(n) == n;
-}
-
 inline uint64_t
 power(uint32_t n, uint32_t e)
 {
@@ -173,6 +134,7 @@ template <class T>
 inline int
 ceilLog2(const T& n)
 {
+    assert(n > 0);
     if (n == 1)
         return 0;
 
@@ -180,17 +142,10 @@ ceilLog2(const T& n)
 }
 
 template <class T>
-inline T
-floorPow2(const T& n)
+inline bool
+isPowerOf2(const T& n)
 {
-    return (T)1 << floorLog2(n);
-}
-
-template <class T>
-inline T
-ceilPow2(const T& n)
-{
-    return (T)1 << ceilLog2(n);
+    return n != 0 && floorLog2(n) == ceilLog2(n);
 }
 
 template <class T, class U>
@@ -200,55 +155,38 @@ divCeil(const T& a, const U& b)
     return (a + b - 1) / b;
 }
 
+/**
+ * This function is used to align addresses in memory.
+ *
+ * @param val is the address to be aligned.
+ * @param align is the alignment. Can only be a power of 2.
+ * @return The aligned address. The smallest number divisible
+ * by @param align which is greater than or equal to @param val.
+*/
 template <class T, class U>
 inline T
 roundUp(const T& val, const U& align)
 {
+    assert(isPowerOf2(align));
     T mask = (T)align - 1;
     return (val + mask) & ~mask;
 }
 
+/**
+ * This function is used to align addresses in memory.
+ *
+ * @param val is the address to be aligned.
+ * @param align is the alignment. Can only be a power of 2.
+ * @return The aligned address. The biggest number divisible
+ * by @param align which is less than or equal to @param val.
+*/
 template <class T, class U>
 inline T
 roundDown(const T& val, const U& align)
 {
+    assert(isPowerOf2(align));
     T mask = (T)align - 1;
     return val & ~mask;
-}
-
-inline bool
-isHex(char c)
-{
-    return (c >= '0' && c <= '9') ||
-        (c >= 'A' && c <= 'F') ||
-        (c >= 'a' && c <= 'f');
-}
-
-inline bool
-isOct(char c)
-{
-    return c >= '0' && c <= '7';
-}
-
-inline bool
-isDec(char c)
-{
-    return c >= '0' && c <= '9';
-}
-
-inline int
-hex2Int(char c)
-{
-  if (c >= '0' && c <= '9')
-    return (c - '0');
-
-  if (c >= 'A' && c <= 'F')
-    return (c - 'A') + 10;
-
-  if (c >= 'a' && c <= 'f')
-    return (c - 'a') + 10;
-
-  return 0;
 }
 
 #endif // __BASE_INTMATH_HH__

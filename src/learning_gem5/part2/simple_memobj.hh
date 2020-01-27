@@ -31,8 +31,9 @@
 #ifndef __LEARNING_GEM5_PART2_SIMPLE_MEMOBJ_HH__
 #define __LEARNING_GEM5_PART2_SIMPLE_MEMOBJ_HH__
 
-#include "mem/mem_object.hh"
+#include "mem/port.hh"
 #include "params/SimpleMemobj.hh"
+#include "sim/sim_object.hh"
 
 /**
  * A very simple memory object. Current implementation doesn't even cache
@@ -40,7 +41,7 @@
  * This memobj is fully blocking (not non-blocking). Only a single request can
  * be outstanding at a time.
  */
-class SimpleMemobj : public MemObject
+class SimpleMemobj : public SimObject
 {
   private:
 
@@ -235,30 +236,17 @@ class SimpleMemobj : public MemObject
     SimpleMemobj(SimpleMemobjParams *params);
 
     /**
-     * Get a master port with a given name and index. This is used at
+     * Get a port with a given name and index. This is used at
      * binding time and returns a reference to a protocol-agnostic
-     * base master port.
+     * port.
      *
      * @param if_name Port name
      * @param idx Index in the case of a VectorPort
      *
      * @return A reference to the given port
      */
-    BaseMasterPort& getMasterPort(const std::string& if_name,
-                                  PortID idx = InvalidPortID) override;
-
-    /**
-     * Get a slave port with a given name and index. This is used at
-     * binding time and returns a reference to a protocol-agnostic
-     * base master port.
-     *
-     * @param if_name Port name
-     * @param idx Index in the case of a VectorPort
-     *
-     * @return A reference to the given port
-     */
-    BaseSlavePort& getSlavePort(const std::string& if_name,
-                                PortID idx = InvalidPortID) override;
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 };
 
 

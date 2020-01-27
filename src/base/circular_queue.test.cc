@@ -198,8 +198,10 @@ TEST(CircularQueueTest, IteratorsOp)
     cq.push_back(first_value);
     cq.push_back(second_value);
 
+    auto negative_offset = -(cq_size + 1);
     auto it_1 = cq.begin();
     auto it_2 = cq.begin() + 1;
+    auto it_3 = cq.begin() - negative_offset;
 
     // Operators test
     ASSERT_TRUE(it_1 != it_2);
@@ -212,6 +214,8 @@ TEST(CircularQueueTest, IteratorsOp)
     ASSERT_EQ(it_1 + 1, it_2);
     ASSERT_EQ(it_1, it_2 - 1);
     ASSERT_EQ(it_2 - it_1, 1);
+    ASSERT_EQ(it_1 - it_2, -1);
+    ASSERT_EQ(it_3._round, 1);
 
     auto temp_it = it_1;
     ASSERT_EQ(++temp_it, it_2);
@@ -240,4 +244,28 @@ TEST(CircularQueueTest, FullLoop)
 
     ASSERT_EQ(starting_it._idx, ending_it._idx);
     ASSERT_TRUE(starting_it != ending_it);
+}
+
+/**
+ * Testing correct behaviour when rounding multiple times:
+ * - Round indexes in sync
+ * - Difference between begin() and end() iterator is still
+ * equal to the CircularQueue size.
+ */
+TEST(CircularQueueTest, MultipleRound)
+{
+    const auto cq_size = 8;
+    CircularQueue<uint32_t> cq(cq_size);
+
+    // Filling the queue making it round multiple times
+    auto items_added = cq_size * 3;
+    for (auto idx = 0; idx < items_added; idx++) {
+        cq.push_back(0);
+    }
+
+    auto starting_it = cq.begin();
+    auto ending_it = cq.end();
+
+    ASSERT_EQ(starting_it._round + 1, ending_it._round);
+    ASSERT_EQ(ending_it - starting_it, cq_size);
 }

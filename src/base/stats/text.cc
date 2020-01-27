@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2019 Arm Limited
+ * All rights reserved.
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2004-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -153,6 +165,32 @@ Text::end()
 {
     ccprintf(*stream, "\n---------- End Simulation Statistics   ----------\n");
     stream->flush();
+}
+
+std::string
+Text::statName(const std::string &name) const
+{
+    if (path.empty())
+        return name;
+    else
+        return csprintf("%s.%s", path.top(), name);
+}
+
+void
+Text::beginGroup(const char *name)
+{
+    if (path.empty()) {
+        path.push(name);
+    } else {
+        path.push(csprintf("%s.%s", path.top(), name));
+    }
+}
+
+void
+Text::endGroup()
+{
+    assert(!path.empty());
+    path.pop();
 }
 
 bool
@@ -360,8 +398,9 @@ DistPrint::DistPrint(const Text *text, const VectorDistInfo &info, int i)
 {
     init(text, info);
 
-    name = info.name + "_" +
-        (info.subnames[i].empty() ? (std::to_string(i)) : info.subnames[i]);
+    name = text->statName(
+        info.name + "_" +
+        (info.subnames[i].empty() ? (std::to_string(i)) : info.subnames[i]));
 
     if (!info.subdescs[i].empty())
         desc = info.subdescs[i];
@@ -370,7 +409,7 @@ DistPrint::DistPrint(const Text *text, const VectorDistInfo &info, int i)
 void
 DistPrint::init(const Text *text, const Info &info)
 {
-    name = info.name;
+    name = text->statName(info.name);
     separatorString = info.separatorString;
     desc = info.desc;
     flags = info.flags;
@@ -513,7 +552,7 @@ Text::visit(const ScalarInfo &info)
 
     ScalarPrint print;
     print.value = info.result();
-    print.name = info.name;
+    print.name = statName(info.name);
     print.desc = info.desc;
     print.flags = info.flags;
     print.descriptions = descriptions;
@@ -533,7 +572,7 @@ Text::visit(const VectorInfo &info)
     size_type size = info.size();
     VectorPrint print;
 
-    print.name = info.name;
+    print.name = statName(info.name);
     print.separatorString = info.separatorString;
     print.desc = info.desc;
     print.flags = info.flags;
@@ -608,8 +647,9 @@ Text::visit(const Vector2dInfo &info)
             total += yvec[j];
         }
 
-        print.name = info.name + "_" +
-            (havesub ? info.subnames[i] : std::to_string(i));
+        print.name = statName(
+            info.name + "_" +
+            (havesub ? info.subnames[i] : std::to_string(i)));
         print.desc = info.desc;
         print.vec = yvec;
         print.total = total;
@@ -621,7 +661,7 @@ Text::visit(const Vector2dInfo &info)
     total_subname.push_back("total");
 
     if (info.flags.isSet(::Stats::total) && (info.x > 1)) {
-        print.name = info.name;
+        print.name = statName(info.name);
         print.subnames = total_subname;
         print.desc = info.desc;
         print.vec = VResult(1, info.total());
@@ -689,7 +729,7 @@ SparseHistPrint::SparseHistPrint(const Text *text, const SparseHistInfo &info)
 void
 SparseHistPrint::init(const Text *text, const Info &info)
 {
-    name = info.name;
+    name = text->statName(info.name);
     separatorString = info.separatorString;
     desc = info.desc;
     flags = info.flags;

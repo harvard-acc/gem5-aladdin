@@ -49,7 +49,9 @@ from m5.util import addToPath, fatal
 
 addToPath('../')
 
+from common import ObjectList
 from common import MemConfig
+from common import FileSystemConfig
 
 from topologies import *
 from network import Network
@@ -81,7 +83,7 @@ def define_options(parser):
                       help="Recycle latency for ruby controller input buffers")
 
     protocol = buildEnv['PROTOCOL']
-    exec "import %s" % protocol
+    exec("from . import %s" % protocol)
     eval("%s.define_options(parser)" % protocol)
     Network.define_options(parser)
 
@@ -114,9 +116,10 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
 
         dir_ranges = []
         for r in system.mem_ranges:
-            mem_ctrl = MemConfig.create_mem_ctrl(
-                MemConfig.get(options.mem_type), r, index, options.num_dirs,
-                int(math.log(options.num_dirs, 2)), intlv_size)
+            mem_type = ObjectList.mem_list.get(options.mem_type)
+            mem_ctrl = MemConfig.create_mem_ctrl(mem_type, r, index,
+                options.num_dirs, int(math.log(options.num_dirs, 2)),
+                intlv_size)
 
             if options.access_backing_store:
                 mem_ctrl.kvm_map=False
@@ -128,6 +131,11 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
                 mem_ctrl.port = crossbar.master
             else:
                 mem_ctrl.port = dir_cntrl.memory
+
+            # Enable low-power DRAM states if option is set
+            if issubclass(mem_type, DRAMCtrl):
+                mem_ctrl.enable_dram_powerdown = \
+                        options.enable_dram_powerdown
 
         index += 1
         dir_cntrl.addr_ranges = dir_ranges
@@ -144,7 +152,7 @@ def create_topology(controllers, options):
         found in configs/topologies/BaseTopology.py
         This is a wrapper for the legacy topologies.
     """
-    exec "import topologies.%s as Topo" % options.topology
+    exec("import topologies.%s as Topo" % options.topology)
     topology = eval("Topo.%s(controllers)" % options.topology)
     return topology
 
@@ -154,13 +162,16 @@ def create_system(options, full_system, system, piobus = None, dma_ports = [],
     system.ruby = RubySystem()
     ruby = system.ruby
 
+    # Generate pseudo filesystem
+    FileSystemConfig.config_filesystem(system, options)
+
     # Create the network object
     (network, IntLinkClass, ExtLinkClass, RouterClass, InterfaceClass) = \
         Network.create_network(options, ruby)
     ruby.network = network
 
     protocol = buildEnv['PROTOCOL']
-    exec "import %s" % protocol
+    exec("from . import %s" % protocol)
     try:
         (cpu_sequencers, dir_cntrls, topology) = \
              eval("%s.create_system(options, full_system, system, dma_ports,\
@@ -173,6 +184,11 @@ def create_system(options, full_system, system, piobus = None, dma_ports = [],
     # Create the network topology
     topology.makeTopology(options, network, IntLinkClass, ExtLinkClass,
             RouterClass)
+
+    # Register the topology elements with faux filesystem (SE mode only)
+    if not full_system:
+        topology.registerTopology(options)
+
 
     # Initialize network based on topology
     Network.init_network(options, network, InterfaceClass)
@@ -214,7 +230,7 @@ def create_system(options, full_system, system, piobus = None, dma_ports = [],
 
 def create_directories(options, bootmem, ruby_system, system):
     dir_cntrl_nodes = []
-    for i in xrange(options.num_dirs):
+    for i in range(options.num_dirs):
         dir_cntrl = Directory_Controller()
         dir_cntrl.version = i
         dir_cntrl.directory = RubyDirectoryMemory()

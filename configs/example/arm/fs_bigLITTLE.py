@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2017 ARM Limited
+# Copyright (c) 2016-2017, 2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -41,6 +41,7 @@
 
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import argparse
 import os
@@ -51,15 +52,16 @@ from m5.objects import *
 
 m5.util.addToPath("../../")
 
+from common import FSConfig
 from common import SysPaths
-from common import CpuConfig
+from common import ObjectList
+from common import Options
 from common.cores.arm import ex5_big, ex5_LITTLE
 
 import devices
-from devices import AtomicCluster, KvmCluster
+from devices import AtomicCluster, KvmCluster, FastmodelCluster
 
 
-default_kernel = 'vmlinux4.3.aarch64'
 default_disk = 'aarch64-ubuntu-trusty-headless.img'
 default_rcs = 'bootscript.rcS'
 
@@ -84,37 +86,43 @@ def _using_pdes(root):
 class BigCluster(devices.CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock,
                  cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("O3_ARM_v7a_3"), devices.L1I, devices.L1D,
-                    devices.WalkCache, devices.L2 ]
+        cpu_config = [ ObjectList.cpu_list.get("O3_ARM_v7a_3"),
+            devices.L1I, devices.L1D, devices.WalkCache, devices.L2 ]
         super(BigCluster, self).__init__(system, num_cpus, cpu_clock,
                                          cpu_voltage, *cpu_config)
 
 class LittleCluster(devices.CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock,
                  cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("MinorCPU"), devices.L1I, devices.L1D,
-                       devices.WalkCache, devices.L2 ]
+        cpu_config = [ ObjectList.cpu_list.get("MinorCPU"), devices.L1I,
+            devices.L1D, devices.WalkCache, devices.L2 ]
         super(LittleCluster, self).__init__(system, num_cpus, cpu_clock,
                                          cpu_voltage, *cpu_config)
 
 class Ex5BigCluster(devices.CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock,
                  cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("ex5_big"), ex5_big.L1I, ex5_big.L1D,
-                    ex5_big.WalkCache, ex5_big.L2 ]
+        cpu_config = [ ObjectList.cpu_list.get("ex5_big"), ex5_big.L1I,
+            ex5_big.L1D, ex5_big.WalkCache, ex5_big.L2 ]
         super(Ex5BigCluster, self).__init__(system, num_cpus, cpu_clock,
                                          cpu_voltage, *cpu_config)
 
 class Ex5LittleCluster(devices.CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock,
                  cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("ex5_LITTLE"), ex5_LITTLE.L1I,
-                    ex5_LITTLE.L1D, ex5_LITTLE.WalkCache, ex5_LITTLE.L2 ]
+        cpu_config = [ ObjectList.cpu_list.get("ex5_LITTLE"),
+            ex5_LITTLE.L1I, ex5_LITTLE.L1D, ex5_LITTLE.WalkCache,
+            ex5_LITTLE.L2 ]
         super(Ex5LittleCluster, self).__init__(system, num_cpus, cpu_clock,
                                          cpu_voltage, *cpu_config)
 
-def createSystem(caches, kernel, bootscript, disks=[]):
-    sys = devices.SimpleSystem(caches, default_mem_size,
+def createSystem(caches, kernel, bootscript, machine_type="VExpress_GEM5",
+                 disks=[],  mem_size=default_mem_size):
+    platform = ObjectList.platform_list.get(machine_type)
+    m5.util.inform("Simulated platform: %s", platform.__name__)
+
+    sys = devices.simpleSystem(LinuxArmSystem,
+                               caches, mem_size, platform(),
                                kernel=SysPaths.binary(kernel),
                                readfile=bootscript)
 
@@ -136,7 +144,7 @@ def createSystem(caches, kernel, bootscript, disks=[]):
         for dev in sys.pci_vio_block:
             sys.attach_pci(dev)
 
-    sys.realview.setupBootLoader(sys.membus, sys, SysPaths.binary)
+    sys.realview.setupBootLoader(sys, SysPaths.binary)
 
     return sys
 
@@ -150,14 +158,23 @@ cpu_types = {
 if devices.have_kvm:
     cpu_types["kvm"] = (KvmCluster, KvmCluster)
 
+# Only add the FastModel CPU if it has been compiled into gem5
+if devices.have_fastmodel:
+    cpu_types["fastmodel"] = (FastmodelCluster, FastmodelCluster)
 
 def addOptions(parser):
     parser.add_argument("--restore-from", type=str, default=None,
                         help="Restore from checkpoint")
     parser.add_argument("--dtb", type=str, default=None,
                         help="DTB file to load")
-    parser.add_argument("--kernel", type=str, default=default_kernel,
+    parser.add_argument("--kernel", type=str, required=True,
                         help="Linux kernel")
+    parser.add_argument("--root", type=str, default="/dev/vda1",
+                        help="Specify the kernel CLI root= argument")
+    parser.add_argument("--machine-type", type=str,
+                        choices=ObjectList.platform_list.get_names(),
+                        default="VExpress_GEM5",
+                        help="Hardware platform class")
     parser.add_argument("--disk", action="append", type=str, default=[],
                         help="Disks to instantiate")
     parser.add_argument("--bootscript", type=str, default=default_rcs,
@@ -182,6 +199,10 @@ def addOptions(parser):
     parser.add_argument("--sim-quantum", type=str, default="1ms",
                         help="Simulation quantum for parallel simulation. " \
                         "Default: %(default)s")
+    parser.add_argument("--mem-size", type=str, default=default_mem_size,
+                        help="System memory size")
+    parser.add_argument("--kernel-cmd", type=str, default=None,
+                        help="Custom Linux kernel command")
     parser.add_argument("-P", "--param", action="append", default=[],
         help="Set a SimObject parameter relative to the root node. "
              "An extended Python multi range slicing syntax can be used "
@@ -190,6 +211,8 @@ def addOptions(parser):
              "sets max_insts_all_threads for cpus 0, 1, 3, 5 and 7 "
              "Direct parameters of the root object are not accessible, "
              "only parameters of its children.")
+    parser.add_argument("--vio-9p", action="store_true",
+                        help=Options.vio_9p_help)
     return parser
 
 def build(options):
@@ -201,8 +224,8 @@ def build(options):
         "lpj=19988480",
         "norandmaps",
         "loglevel=8",
-        "mem=%s" % default_mem_size,
-        "root=/dev/vda1",
+        "mem=%s" % options.mem_size,
+        "root=%s" % options.root,
         "rw",
         "init=%s" % options.kernel_init,
         "vmalloc=768MB",
@@ -214,10 +237,15 @@ def build(options):
     system = createSystem(options.caches,
                           options.kernel,
                           options.bootscript,
-                          disks=disks)
+                          options.machine_type,
+                          disks=disks,
+                          mem_size=options.mem_size)
 
     root.system = system
-    system.boot_osflags = " ".join(kernel_cmd)
+    if options.kernel_cmd:
+        system.boot_osflags = options.kernel_cmd
+    else:
+        system.boot_osflags = " ".join(kernel_cmd)
 
     if options.big_cpus + options.little_cpus == 0:
         m5.util.panic("Empty CPU clusters")
@@ -241,7 +269,7 @@ def build(options):
 
     # Figure out the memory mode
     if options.big_cpus > 0 and options.little_cpus > 0 and \
-       system.littleCluster.memoryMode() != system.littleCluster.memoryMode():
+       system.bigCluster.memoryMode() != system.littleCluster.memoryMode():
         m5.util.panic("Memory mode missmatch among CPU clusters")
 
 
@@ -261,16 +289,19 @@ def build(options):
     if options.dtb is not None:
         system.dtb_filename = SysPaths.binary(options.dtb)
     else:
-        def create_dtb_for_system(system, filename):
-            state = FdtState(addr_cells=2, size_cells=2, cpu_cells=1)
-            rootNode = system.generateDeviceTree(state)
+        system.generateDtb(m5.options.outdir, 'system.dtb')
 
-            fdt = Fdt()
-            fdt.add_rootnode(rootNode)
-            dtb_filename = os.path.join(m5.options.outdir, filename)
-            return fdt.writeDtbFile(dtb_filename)
+    if devices.have_fastmodel and issubclass(big_model, FastmodelCluster):
+        from m5 import arm_fast_model as fm, systemc as sc
+        # setup FastModels for simulation
+        fm.setup_simulation("cortexa76")
+        # setup SystemC
+        root.systemc_kernel = m5.objects.SystemC_Kernel()
+        m5.tlm.tlm_global_quantum_instance().set(
+            sc.sc_time(10000.0 / 100000000.0, sc.sc_time.SC_SEC))
 
-        system.dtb_filename = create_dtb_for_system(system, 'system.dtb')
+    if options.vio_9p:
+        FSConfig.attach_9p(system.realview, system.iobus)
 
     return root
 

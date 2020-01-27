@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2015, 2018 ARM Limited
+ * Copyright (c) 2012-2013, 2015, 2018-2019 ARM Limited
  * Copyright (c) 2016 Google Inc.
  * Copyright (c) 2017, Centre National de la Recherche Scientifique
  * All rights reserved.
@@ -46,12 +46,13 @@
 #define __MEM_COMM_MONITOR_HH__
 
 #include "base/statistics.hh"
-#include "mem/mem_object.hh"
+#include "mem/port.hh"
 #include "params/CommMonitor.hh"
 #include "sim/probe/mem.hh"
+#include "sim/sim_object.hh"
 
 /**
- * The communication monitor is a MemObject which can monitor statistics of
+ * The communication monitor is a SimObject which can monitor statistics of
  * the communication happening between two ports in the memory system.
  *
  * Currently the following stats are implemented: Histograms of read/write
@@ -61,7 +62,7 @@
  * to capture the number of accesses to an address over time ("heat map").
  * All stats can be disabled from Python.
  */
-class CommMonitor : public MemObject
+class CommMonitor : public SimObject
 {
 
   public: // Construction & SimObject interfaces
@@ -79,16 +80,12 @@ class CommMonitor : public MemObject
     CommMonitor(Params* params);
 
     void init() override;
-    void regStats() override;
     void startup() override;
     void regProbePoints() override;
 
-  public: // MemObject interfaces
-    BaseMasterPort& getMasterPort(const std::string& if_name,
-                                  PortID idx = InvalidPortID) override;
-
-    BaseSlavePort& getSlavePort(const std::string& if_name,
-                                PortID idx = InvalidPortID) override;
+  public: // SimObject interfaces
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 
   private:
 
@@ -277,9 +274,8 @@ class CommMonitor : public MemObject
     bool tryTiming(PacketPtr pkt);
 
     /** Stats declarations, all in a struct for convenience. */
-    struct MonitorStats
+    struct MonitorStats : public Stats::Group
     {
-
         /** Disable flag for burst length histograms **/
         bool disableBurstLengthHists;
 
@@ -298,8 +294,8 @@ class CommMonitor : public MemObject
          */
         unsigned int readBytes;
         Stats::Histogram readBandwidthHist;
-        Stats::Formula averageReadBW;
         Stats::Scalar totalReadBytes;
+        Stats::Formula averageReadBandwidth;
 
         /**
          * Histogram for write bandwidth per sample window. The
@@ -307,8 +303,8 @@ class CommMonitor : public MemObject
          */
         unsigned int writtenBytes;
         Stats::Histogram writeBandwidthHist;
-        Stats::Formula averageWriteBW;
         Stats::Scalar totalWrittenBytes;
+        Stats::Formula averageWriteBandwidth;
 
         /** Disable flag for latency histograms. */
         bool disableLatencyHists;
@@ -391,21 +387,7 @@ class CommMonitor : public MemObject
          * that are not statistics themselves, but used to control the
          * stats or track values during a sample period.
          */
-        MonitorStats(const CommMonitorParams* params) :
-            disableBurstLengthHists(params->disable_burst_length_hists),
-            disableBandwidthHists(params->disable_bandwidth_hists),
-            readBytes(0), writtenBytes(0),
-            disableLatencyHists(params->disable_latency_hists),
-            disableITTDists(params->disable_itt_dists),
-            timeOfLastRead(0), timeOfLastWrite(0), timeOfLastReq(0),
-            disableOutstandingHists(params->disable_outstanding_hists),
-            outstandingReadReqs(0), outstandingWriteReqs(0),
-            disableTransactionHists(params->disable_transaction_hists),
-            readTrans(0), writeTrans(0),
-            disableAddrDists(params->disable_addr_dists),
-            readAddrMask(params->read_addr_mask),
-            writeAddrMask(params->write_addr_mask)
-        { }
+        MonitorStats(Stats::Group *parent, const CommMonitorParams* params);
 
         void updateReqStats(const ProbePoints::PacketInfo& pkt, bool is_atomic,
                             bool expects_response);

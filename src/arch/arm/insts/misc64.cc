@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013,2017-2018 ARM Limited
+ * Copyright (c) 2011-2013,2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -35,9 +35,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Gabe Black
+ *          Giacomo Travaglini
  */
 
 #include "arch/arm/insts/misc64.hh"
+#include "arch/arm/isa.hh"
 
 std::string
 ImmOp64::generateDisassembly(Addr pc, const SymbolTable *symtab) const
@@ -78,39 +80,30 @@ RegRegRegImmOp64::generateDisassembly(
 std::string
 UnknownOp64::generateDisassembly(Addr pc, const SymbolTable *symtab) const
 {
-    return csprintf("%-10s (inst %#08x)", "unknown", machInst & mask(32));
+    return csprintf("%-10s (inst %#08x)", "unknown", encoding());
 }
 
 Fault
 MiscRegOp64::trap(ThreadContext *tc, MiscRegIndex misc_reg,
                   ExceptionLevel el, uint32_t immediate) const
 {
-    bool is_vfp_neon = false;
+    ExceptionClass ec = EC_TRAPPED_MSR_MRS_64;
 
     // Check for traps to supervisor (FP/SIMD regs)
-    if (el <= EL1 && checkEL1Trap(tc, misc_reg, el)) {
-
-        return std::make_shared<SupervisorTrap>(machInst, 0x1E00000,
-                                                EC_TRAPPED_SIMD_FP);
+    if (el <= EL1 && checkEL1Trap(tc, misc_reg, el, ec, immediate)) {
+        return std::make_shared<SupervisorTrap>(machInst, immediate, ec);
     }
 
     // Check for traps to hypervisor
     if ((ArmSystem::haveVirtualization(tc) && el <= EL2) &&
-        checkEL2Trap(tc, misc_reg, el, &is_vfp_neon)) {
-
-        return std::make_shared<HypervisorTrap>(
-            machInst, is_vfp_neon ? 0x1E00000 : immediate,
-            is_vfp_neon ? EC_TRAPPED_SIMD_FP : EC_TRAPPED_MSR_MRS_64);
+        checkEL2Trap(tc, misc_reg, el, ec, immediate)) {
+        return std::make_shared<HypervisorTrap>(machInst, immediate, ec);
     }
 
     // Check for traps to secure monitor
     if ((ArmSystem::haveSecurity(tc) && el <= EL3) &&
-        checkEL3Trap(tc, misc_reg, el, &is_vfp_neon)) {
-
-        return std::make_shared<SecureMonitorTrap>(
-            machInst,
-            is_vfp_neon ? 0x1E00000 : immediate,
-            is_vfp_neon ? EC_TRAPPED_SIMD_FP : EC_TRAPPED_MSR_MRS_64);
+        checkEL3Trap(tc, misc_reg, el, ec, immediate)) {
+        return std::make_shared<SecureMonitorTrap>(machInst, immediate, ec);
     }
 
     return NoFault;
@@ -118,7 +111,8 @@ MiscRegOp64::trap(ThreadContext *tc, MiscRegIndex misc_reg,
 
 bool
 MiscRegOp64::checkEL1Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
-                          ExceptionLevel el) const
+                          ExceptionLevel el, ExceptionClass &ec,
+                          uint32_t &immediate) const
 {
     const CPACR cpacr = tc->readMiscReg(MISCREG_CPACR_EL1);
 
@@ -128,8 +122,11 @@ MiscRegOp64::checkEL1Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
       case MISCREG_FPSR:
       case MISCREG_FPEXC32_EL2:
         if ((el == EL0 && cpacr.fpen != 0x3) ||
-            (el == EL1 && !(cpacr.fpen & 0x1)))
+            (el == EL1 && !(cpacr.fpen & 0x1))) {
             trap_to_sup = true;
+            ec = EC_TRAPPED_SIMD_FP;
+            immediate = 0x1E00000;
+        }
         break;
       default:
         break;
@@ -139,7 +136,8 @@ MiscRegOp64::checkEL1Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
 
 bool
 MiscRegOp64::checkEL2Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
-                          ExceptionLevel el, bool * is_vfp_neon) const
+                          ExceptionLevel el, ExceptionClass &ec,
+                          uint32_t &immediate) const
 {
     const CPTR cptr = tc->readMiscReg(MISCREG_CPTR_EL2);
     const HCR hcr = tc->readMiscReg(MISCREG_HCR_EL2);
@@ -147,7 +145,6 @@ MiscRegOp64::checkEL2Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
     const CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
 
     bool trap_to_hyp = false;
-    *is_vfp_neon = false;
 
     if (!inSecureState(scr, cpsr) && (el != EL2)) {
         switch (misc_reg) {
@@ -156,7 +153,8 @@ MiscRegOp64::checkEL2Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
           case MISCREG_FPSR:
           case MISCREG_FPEXC32_EL2:
             trap_to_hyp = cptr.tfp;
-            *is_vfp_neon = true;
+            ec = EC_TRAPPED_SIMD_FP;
+            immediate = 0x1E00000;
             break;
           // CPACR
           case MISCREG_CPACR_EL1:
@@ -268,6 +266,17 @@ MiscRegOp64::checkEL2Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
             break;
           case MISCREG_IMPDEF_UNIMPL:
             trap_to_hyp = hcr.tidcp && el == EL1;
+            break;
+          // GICv3 regs
+          case MISCREG_ICC_SGI0R_EL1:
+            if (tc->getIsaPtr()->haveGICv3CpuIfc())
+                trap_to_hyp = hcr.fmo && el == EL1;
+            break;
+          case MISCREG_ICC_SGI1R_EL1:
+          case MISCREG_ICC_ASGI1R_EL1:
+            if (tc->getIsaPtr()->haveGICv3CpuIfc())
+                trap_to_hyp = hcr.imo && el == EL1;
+            break;
           default:
             break;
         }
@@ -277,12 +286,12 @@ MiscRegOp64::checkEL2Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
 
 bool
 MiscRegOp64::checkEL3Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
-                          ExceptionLevel el, bool * is_vfp_neon) const
+                          ExceptionLevel el, ExceptionClass &ec,
+                          uint32_t &immediate) const
 {
     const CPTR cptr = tc->readMiscReg(MISCREG_CPTR_EL3);
 
     bool trap_to_mon = false;
-    *is_vfp_neon = false;
 
     switch (misc_reg) {
       // FP/SIMD regs
@@ -290,7 +299,8 @@ MiscRegOp64::checkEL3Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
       case MISCREG_FPSR:
       case MISCREG_FPEXC32_EL2:
         trap_to_mon = cptr.tfp;
-        *is_vfp_neon = true;
+        ec = EC_TRAPPED_SIMD_FP;
+        immediate = 0x1E00000;
         break;
       // CPACR, CPTR
       case MISCREG_CPACR_EL1:
@@ -307,6 +317,29 @@ MiscRegOp64::checkEL3Trap(ThreadContext *tc, const MiscRegIndex misc_reg,
         break;
     }
     return trap_to_mon;
+}
+
+RegVal
+MiscRegImmOp64::miscRegImm() const
+{
+    if (dest == MISCREG_SPSEL) {
+        return imm & 0x1;
+    } else if (dest == MISCREG_PAN) {
+        return (imm & 0x1) << 22;
+    } else {
+        panic("Not a valid PSTATE field register\n");
+    }
+}
+
+std::string
+MiscRegImmOp64::generateDisassembly(Addr pc, const SymbolTable *symtab) const
+{
+    std::stringstream ss;
+    printMnemonic(ss);
+    printMiscReg(ss, dest);
+    ss << ", ";
+    ccprintf(ss, "#0x%x", imm);
+    return ss.str();
 }
 
 std::string

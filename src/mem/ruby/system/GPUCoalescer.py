@@ -34,7 +34,8 @@
 
 from m5.params import *
 from m5.proxy import *
-from Sequencer import *
+
+from m5.objects.Sequencer import *
 
 class RubyGPUCoalescer(RubyPort):
    type = 'RubyGPUCoalescer'
@@ -53,4 +54,3 @@ class RubyGPUCoalescer(RubyPort):
        "max outstanding cycles for a request before " \
        "deadlock/livelock declared")
    garnet_standalone = Param.Bool(False, "")
-   dcache_hit_latency = Param.Cycles(1, "Data cache hit latency")

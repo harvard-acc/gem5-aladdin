@@ -156,9 +156,12 @@ class ArmStaticInst : public StaticInst
 
     /// Print a register name for disassembly given the unique
     /// dependence tag number (FP or int).
-    void printIntReg(std::ostream &os, RegIndex reg_idx) const;
+    void printIntReg(std::ostream &os, RegIndex reg_idx,
+                     uint8_t opWidth = 0) const;
     void printFloatReg(std::ostream &os, RegIndex reg_idx) const;
-    void printVecReg(std::ostream &os, RegIndex reg_idx) const;
+    void printVecReg(std::ostream &os, RegIndex reg_idx,
+                     bool isSveVecReg = false) const;
+    void printVecPredReg(std::ostream &os, RegIndex reg_idx) const;
     void printCCReg(std::ostream &os, RegIndex reg_idx) const;
     void printMiscReg(std::ostream &os, RegIndex reg_idx) const;
     void printMnemonic(std::ostream &os,
@@ -311,9 +314,9 @@ class ArmStaticInst : public StaticInst
     cSwap(T val, bool big)
     {
         if (big) {
-            return gtobe(val);
+            return letobe(val);
         } else {
-            return gtole(val);
+            return val;
         }
     }
 
@@ -326,17 +329,17 @@ class ArmStaticInst : public StaticInst
             T tVal;
             E eVals[count];
         } conv;
-        conv.tVal = htog(val);
+        conv.tVal = htole(val);
         if (big) {
             for (unsigned i = 0; i < count; i++) {
-                conv.eVals[i] = gtobe(conv.eVals[i]);
+                conv.eVals[i] = letobe(conv.eVals[i]);
             }
         } else {
             for (unsigned i = 0; i < count; i++) {
-                conv.eVals[i] = gtole(conv.eVals[i]);
+                conv.eVals[i] = conv.eVals[i];
             }
         }
-        return gtoh(conv.tVal);
+        return letoh(conv.tVal);
     }
 
     // Perform an interworking branch.
@@ -467,6 +470,23 @@ class ArmStaticInst : public StaticInst
     Fault undefinedFault64(ThreadContext *tc, ExceptionLevel el) const;
 
     /**
+     * Trap an access to SVE registers due to access control bits.
+     *
+     * @param el Target EL for the trap.
+     */
+    Fault sveAccessTrap(ExceptionLevel el) const;
+
+    /**
+     * Check an SVE access against CPTR_EL2 and CPTR_EL3.
+     */
+    Fault checkSveTrap(ThreadContext *tc, CPSR cpsr) const;
+
+    /**
+     * Check an SVE access against CPACR_EL1, CPTR_EL2, and CPTR_EL3.
+     */
+    Fault checkSveEnabled(ThreadContext *tc, CPSR cpsr, CPACR cpacr) const;
+
+    /**
      * Get the new PSTATE from a SPSR register in preparation for an
      * exception return.
      *
@@ -519,6 +539,21 @@ class ArmStaticInst : public StaticInst
     asBytes(void *buf, size_t max_size) override
     {
         return simpleAsBytes(buf, max_size, machInst);
+    }
+
+    static unsigned getCurSveVecLenInBits(ThreadContext *tc);
+
+    static unsigned
+    getCurSveVecLenInQWords(ThreadContext *tc)
+    {
+        return getCurSveVecLenInBits(tc) >> 6;
+    }
+
+    template<typename T>
+    static unsigned
+    getCurSveVecLen(ThreadContext *tc)
+    {
+        return getCurSveVecLenInBits(tc) / (8 * sizeof(T));
     }
 };
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 ARM Limited
+ * Copyright (c) 2010-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -55,7 +55,7 @@ namespace ArmISA
         Bitfield<27> q;
         Bitfield<26, 25> it1;
         Bitfield<24> j;
-        Bitfield<23, 22> res0_23_22;
+        Bitfield<22> pan;
         Bitfield<21> ss;        // AArch64
         Bitfield<20> il;        // AArch64
         Bitfield<19, 16> ge;
@@ -201,6 +201,7 @@ namespace ArmISA
         Bitfield<10> tfp;  // AArch64
         Bitfield<9>  tcp9;
         Bitfield<8>  tcp8;
+        Bitfield<8>  tz;  // SVE
         Bitfield<7>  tcp7;
         Bitfield<6>  tcp6;
         Bitfield<5>  tcp5;
@@ -233,8 +234,8 @@ namespace ArmISA
 
     BitUnion64(HCR)
         Bitfield<34>     e2h;   // AArch64
-        Bitfield<33>     id;    // AArch64
-        Bitfield<32>     cd;    // AArch64
+        Bitfield<33>     id;
+        Bitfield<32>     cd;
         Bitfield<31>     rw;    // AArch64
         Bitfield<30>     trvm;  // AArch64
         Bitfield<29>     hcd;   // AArch64
@@ -293,14 +294,15 @@ namespace ArmISA
     EndBitUnion(NSACR)
 
     BitUnion32(SCR)
+        Bitfield<18> eel2; // AArch64 (Armv8.4-SecEL2)
         Bitfield<13> twe;
         Bitfield<12> twi;
-        Bitfield<11> st;  // AArch64
-        Bitfield<10> rw;  // AArch64
+        Bitfield<11> st;   // AArch64
+        Bitfield<10> rw;   // AArch64
         Bitfield<9> sif;
         Bitfield<8> hce;
         Bitfield<7> scd;
-        Bitfield<7> smd;  // AArch64
+        Bitfield<7> smd;   // AArch64
         Bitfield<6> nEt;
         Bitfield<5> aw;
         Bitfield<4> fw;
@@ -321,6 +323,8 @@ namespace ArmISA
         Bitfield<25>   ee;      // Exception Endianness
         Bitfield<24>   e0e;     // Endianness of explicit data accesses at EL0
                                 // (AArch64 SCTLR_EL1 only)
+        Bitfield<23>   span;    // Set Priviledge Access Never on taking
+                                // an exception
         Bitfield<23>   xp;      // Extended page table enable (dropped in ARMv7)
         Bitfield<22>   u;       // Alignment (dropped in ARMv7)
         Bitfield<21>   fi;      // Fast interrupts configuration enable
@@ -375,6 +379,7 @@ namespace ArmISA
         Bitfield<13, 12> cp6;
         Bitfield<15, 14> cp7;
         Bitfield<17, 16> cp8;
+        Bitfield<17, 16> zen;  // SVE
         Bitfield<19, 18> cp9;
         Bitfield<21, 20> cp10;
         Bitfield<21, 20> fpen;  // AArch64
@@ -500,6 +505,7 @@ namespace ArmISA
         Bitfield<21, 16> t1sz; // EL1
         Bitfield<22> a1; // EL1
         Bitfield<23> epd1; // EL1
+        Bitfield<24> hpd; // EL2/EL3, E2H=0
         Bitfield<25, 24> irgn1; // EL1
         Bitfield<27, 26> orgn1; // EL1
         Bitfield<29, 28> sh1; // EL1
@@ -636,8 +642,16 @@ namespace ArmISA
         Bitfield<20> tta;
         Bitfield<13, 12> res1_13_12_el2;
         Bitfield<10> tfp;
-        Bitfield<9, 0> res1_9_0_el2;
+        Bitfield<9> res1_9_el2;
+        Bitfield<8> res1_8_el2;
+        Bitfield<8> ez;  // SVE (CPTR_EL3)
+        Bitfield<8> tz;  // SVE (CPTR_EL2)
+        Bitfield<7, 0> res1_7_0_el2;
    EndBitUnion(CPTR)
+
+    BitUnion64(ZCR)
+        Bitfield<3, 0> len;
+    EndBitUnion(ZCR)
 
 }
 

@@ -18,7 +18,7 @@ class LocalSpadInterface {
                      SystolicArray& accel,
                      const SystolicArrayParams& params);
 
-  BaseMasterPort& getLocalSpadPort() { return localSpadPort; }
+  Port& getLocalSpadPort() { return localSpadPort; }
 
   virtual void evaluate() = 0;
 

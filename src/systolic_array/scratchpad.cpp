@@ -3,7 +3,7 @@
 namespace systolic {
 
 Scratchpad::Scratchpad(const Params* p)
-    : MemObject(p), accelSidePort(name() + ".accel_side_port", this),
+    : ClockedObject(p), accelSidePort(name() + ".accel_side_port", this),
       addrRanges(p->addrRanges.begin(), p->addrRanges.end()), chunk(p->size),
       lineSize(p->lineSize), partType(InvalidPartType), numBanks(p->numBanks),
       numPorts(p->numPorts), numBankAccess(0, std::vector<int>(numBanks)),

@@ -29,6 +29,7 @@
 #          Brad Beckmann
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import m5
 from m5.objects import *
@@ -65,7 +66,9 @@ parser.add_option("--suppress-func-warnings", action="store_true",
 #
 Ruby.define_options(parser)
 
-execfile(os.path.join(config_root, "common", "Options.py"))
+exec(compile( \
+    open(os.path.join(config_root, "common", "Options.py")).read(), \
+    os.path.join(config_root, "common", "Options.py"), 'exec'))
 
 (options, args) = parser.parse_args()
 
@@ -101,7 +104,7 @@ cpus = [ MemTest(max_loads = options.maxloads,
                  percent_uncacheable = 0,
                  progress_interval = options.progress,
                  suppress_func_warnings = options.suppress_func_warnings) \
-         for i in xrange(options.num_cpus) ]
+         for i in range(options.num_cpus) ]
 
 system = System(cpu = cpus,
                 clk_domain = SrcClockDomain(clock = options.sys_clock),
@@ -114,7 +117,7 @@ if options.num_dmas > 0:
                      progress_interval = options.progress,
                      suppress_func_warnings =
                                         not options.suppress_func_warnings) \
-             for i in xrange(options.num_dmas) ]
+             for i in range(options.num_dmas) ]
     system.dma_devices = dmas
 else:
     dmas = []

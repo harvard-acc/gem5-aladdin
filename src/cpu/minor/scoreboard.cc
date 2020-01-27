@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, 2016 ARM Limited
+ * Copyright (c) 2013-2014, 2016-2017 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -73,6 +73,11 @@ Scoreboard::findIndex(const RegId& reg, Index &scoreboard_index)
             ret = true;
             break;
           case VecElemClass:
+            scoreboard_index = TheISA::NumIntRegs + TheISA::NumCCRegs +
+                TheISA::NumFloatRegs + reg.flatIndex();
+            ret = true;
+            break;
+          case VecPredRegClass:
             scoreboard_index = TheISA::NumIntRegs + TheISA::NumCCRegs +
                 TheISA::NumFloatRegs + TheISA::NumVecRegs + reg.index();
             ret = true;

@@ -120,7 +120,7 @@ RiscvFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
 
         // Set fault cause, privilege, and return PC
         tc->setMiscReg(cause,
-                       (isInterrupt() << (sizeof(MiscReg) * 4 - 1)) | _code);
+                       (isInterrupt() << (sizeof(uint64_t) * 4 - 1)) | _code);
         tc->setMiscReg(epc, tc->instAddr());
         tc->setMiscReg(tval, trap_value());
         tc->setMiscReg(MISCREG_PRV, prv);
@@ -191,7 +191,7 @@ void
 SyscallFault::invokeSE(ThreadContext *tc, const StaticInstPtr &inst)
 {
     Fault *fault = NoFault;
-    tc->syscall(tc->readIntReg(SyscallNumReg), fault);
+    tc->syscall(fault);
 }
 
 } // namespace RiscvISA

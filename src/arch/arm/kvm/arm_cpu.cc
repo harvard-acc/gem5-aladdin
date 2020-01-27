@@ -318,10 +318,10 @@ ArmKvmCPU::onKvmExitHypercall()
     ThreadContext *tc(getContext(0));
     const uint32_t reg_ip(tc->readIntRegFlat(INTREG_R12));
     const uint8_t func((reg_ip >> 8) & 0xFF);
-    const uint8_t subfunc(reg_ip & 0xFF);
 
-    DPRINTF(Kvm, "KVM Hypercall: 0x%x/0x%x\n", func, subfunc);
-    const uint64_t ret(PseudoInst::pseudoInst(getContext(0), func, subfunc));
+    DPRINTF(Kvm, "KVM Hypercall: %#x/%#x\n", func, subfunc);
+    const uint64_t ret =
+        PseudoInst::pseudoInst<PseudoInstABI>(getContext(0), func);
 
     // Just set the return value using the KVM API instead of messing
     // with the context. We could have used the context, but that
@@ -697,8 +697,8 @@ ArmKvmCPU::updateKvmStateVFP(uint64_t id, bool show_warnings)
         const unsigned idx_hi(idx_base + 1);
         const unsigned idx_lo(idx_base + 0);
         uint64_t value(
-            ((uint64_t)tc->readFloatRegBitsFlat(idx_hi) << 32) |
-            tc->readFloatRegBitsFlat(idx_lo));
+            ((uint64_t)tc->readFloatRegFlat(idx_hi) << 32) |
+            tc->readFloatRegFlat(idx_lo));
 
         setOneReg(id, value);
     } else if (REG_IS_VFP_CTRL(id)) {
@@ -839,8 +839,8 @@ ArmKvmCPU::updateTCStateVFP(uint64_t id, bool show_warnings)
         const unsigned idx_lo(idx_base + 0);
         uint64_t value(getOneRegU64(id));
 
-        tc->setFloatRegBitsFlat(idx_hi, (value >> 32) & 0xFFFFFFFF);
-        tc->setFloatRegBitsFlat(idx_lo, value & 0xFFFFFFFF);
+        tc->setFloatRegFlat(idx_hi, (value >> 32) & 0xFFFFFFFF);
+        tc->setFloatRegFlat(idx_lo, value & 0xFFFFFFFF);
     } else if (REG_IS_VFP_CTRL(id)) {
         MiscRegIndex idx(decodeVFPCtrlReg(id));
         if (idx == NUM_MISCREGS) {

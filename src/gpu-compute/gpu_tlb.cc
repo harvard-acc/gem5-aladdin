@@ -61,7 +61,7 @@ namespace X86ISA
 {
 
     GpuTLB::GpuTLB(const Params *p)
-        : MemObject(p), configAddress(0), size(p->size),
+        : ClockedObject(p), configAddress(0), size(p->size),
           cleanupEvent([this]{ cleanup(); }, name(), false,
                        Event::Maximum_Pri),
           exitEvent([this]{ exitCallback(); }, name())
@@ -98,12 +98,6 @@ namespace X86ISA
          */
         setMask = numSets - 1;
 
-    #if 0
-        // GpuTLB doesn't yet support full system
-        walker = p->walker;
-        walker->setTLB(this);
-    #endif
-
         maxCoalescedReqs = p->maxOutstandingReqs;
 
         // Do not allow maxCoalescedReqs to be more than the TLB associativity
@@ -137,33 +131,25 @@ namespace X86ISA
         assert(translationReturnEvent.empty());
     }
 
-    BaseSlavePort&
-    GpuTLB::getSlavePort(const std::string &if_name, PortID idx)
+    Port &
+    GpuTLB::getPort(const std::string &if_name, PortID idx)
     {
         if (if_name == "slave") {
             if (idx >= static_cast<PortID>(cpuSidePort.size())) {
-                panic("TLBCoalescer::getSlavePort: unknown index %d\n", idx);
+                panic("TLBCoalescer::getPort: unknown index %d\n", idx);
             }
 
             return *cpuSidePort[idx];
-        } else {
-            panic("TLBCoalescer::getSlavePort: unknown port %s\n", if_name);
-        }
-    }
-
-    BaseMasterPort&
-    GpuTLB::getMasterPort(const std::string &if_name, PortID idx)
-    {
-        if (if_name == "master") {
+        } else if (if_name == "master") {
             if (idx >= static_cast<PortID>(memSidePort.size())) {
-                panic("TLBCoalescer::getMasterPort: unknown index %d\n", idx);
+                panic("TLBCoalescer::getPort: unknown index %d\n", idx);
             }
 
             hasMemSidePort = true;
 
             return *memSidePort[idx];
         } else {
-            panic("TLBCoalescer::getMasterPort: unknown port %s\n", if_name);
+            panic("TLBCoalescer::getPort: unknown port %s\n", if_name);
         }
     }
 
@@ -958,7 +944,7 @@ namespace X86ISA
     void
     GpuTLB::regStats()
     {
-        MemObject::regStats();
+        ClockedObject::regStats();
 
         localNumTLBAccesses
             .name(name() + ".local_TLB_accesses")

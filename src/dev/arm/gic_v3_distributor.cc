@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2019 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2018 Metempsy Technology Consulting
  * All rights reserved.
  *
@@ -27,91 +39,99 @@
  *
  * Authors: Jairo Balart
  */
+
 #include "dev/arm/gic_v3_distributor.hh"
 
 #include <algorithm>
 
+#include "base/intmath.hh"
 #include "debug/GIC.hh"
 #include "dev/arm/gic_v3.hh"
 #include "dev/arm/gic_v3_cpu_interface.hh"
 #include "dev/arm/gic_v3_redistributor.hh"
 
-const AddrRange Gicv3Distributor::GICD_IGROUPR(0x0080, 0x00ff);
-const AddrRange Gicv3Distributor::GICD_ISENABLER(0x0100, 0x017f);
-const AddrRange Gicv3Distributor::GICD_ICENABLER(0x0180, 0x01ff);
-const AddrRange Gicv3Distributor::GICD_ISPENDR(0x0200, 0x027f);
-const AddrRange Gicv3Distributor::GICD_ICPENDR(0x0280, 0x02ff);
-const AddrRange Gicv3Distributor::GICD_ISACTIVER(0x0300, 0x037f);
-const AddrRange Gicv3Distributor::GICD_ICACTIVER(0x0380, 0x03ff);
-const AddrRange Gicv3Distributor::GICD_IPRIORITYR(0x0400, 0x07ff);
-const AddrRange Gicv3Distributor::GICD_ITARGETSR(0x0800, 0x08ff);
-const AddrRange Gicv3Distributor::GICD_ICFGR(0x0c00, 0x0cff);
-const AddrRange Gicv3Distributor::GICD_IGRPMODR(0x0d00, 0x0d7f);
-const AddrRange Gicv3Distributor::GICD_NSACR(0x0e00, 0x0eff);
-const AddrRange Gicv3Distributor::GICD_CPENDSGIR(0x0f10, 0x0f1f);
-const AddrRange Gicv3Distributor::GICD_SPENDSGIR(0x0f20, 0x0f2f);
-const AddrRange Gicv3Distributor::GICD_IROUTER(0x6000, 0x7fe0);
+const AddrRange Gicv3Distributor::GICD_IGROUPR   (0x0080, 0x0100);
+const AddrRange Gicv3Distributor::GICD_ISENABLER (0x0100, 0x0180);
+const AddrRange Gicv3Distributor::GICD_ICENABLER (0x0180, 0x0200);
+const AddrRange Gicv3Distributor::GICD_ISPENDR   (0x0200, 0x0280);
+const AddrRange Gicv3Distributor::GICD_ICPENDR   (0x0280, 0x0300);
+const AddrRange Gicv3Distributor::GICD_ISACTIVER (0x0300, 0x0380);
+const AddrRange Gicv3Distributor::GICD_ICACTIVER (0x0380, 0x0400);
+const AddrRange Gicv3Distributor::GICD_IPRIORITYR(0x0400, 0x0800);
+const AddrRange Gicv3Distributor::GICD_ITARGETSR (0x0800, 0x0900);
+const AddrRange Gicv3Distributor::GICD_ICFGR     (0x0c00, 0x0d00);
+const AddrRange Gicv3Distributor::GICD_IGRPMODR  (0x0d00, 0x0d80);
+const AddrRange Gicv3Distributor::GICD_NSACR     (0x0e00, 0x0f00);
+const AddrRange Gicv3Distributor::GICD_CPENDSGIR (0x0f10, 0x0f20);
+const AddrRange Gicv3Distributor::GICD_SPENDSGIR (0x0f20, 0x0f30);
+const AddrRange Gicv3Distributor::GICD_IROUTER   (0x6000, 0x7fe0);
 
 Gicv3Distributor::Gicv3Distributor(Gicv3 * gic, uint32_t it_lines)
     : gic(gic),
       itLines(it_lines),
-      irqGroup(it_lines),
-      irqEnabled(it_lines),
-      irqPending(it_lines),
-      irqActive(it_lines),
-      irqPriority(it_lines),
-      irqConfig(it_lines),
-      irqGrpmod(it_lines),
-      irqNsacr(it_lines),
-      irqAffinityRouting(it_lines)
+      ARE(true),
+      EnableGrp1S(0),
+      EnableGrp1NS(0),
+      EnableGrp0(0),
+      irqGroup(it_lines, 0),
+      irqEnabled(it_lines, false),
+      irqPending(it_lines, false),
+      irqActive(it_lines, false),
+      irqPriority(it_lines, 0xAA),
+      irqConfig(it_lines, Gicv3::INT_LEVEL_SENSITIVE),
+      irqGrpmod(it_lines, 0),
+      irqNsacr(it_lines, 0),
+      irqAffinityRouting(it_lines, 0),
+      gicdTyper(0),
+      gicdPidr0(0x92),
+      gicdPidr1(0xb4),
+      gicdPidr2(0x3b),
+      gicdPidr3(0),
+      gicdPidr4(0x44)
 {
     panic_if(it_lines > Gicv3::INTID_SECURE, "Invalid value for it_lines!");
-}
-
-Gicv3Distributor::~Gicv3Distributor()
-{
-}
-
-void
-Gicv3Distributor::init()
-{
-}
-
-void
-Gicv3Distributor::initState()
-{
-    reset();
-}
-
-void
-Gicv3Distributor::reset()
-{
-    std::fill(irqGroup.begin(), irqGroup.end(), 0);
-    // Imp. defined reset value
-    std::fill(irqEnabled.begin(), irqEnabled.end(), false);
-    std::fill(irqPending.begin(), irqPending.end(), false);
-    std::fill(irqActive.begin(), irqActive.end(), false);
-    // Imp. defined reset value
-    std::fill(irqPriority.begin(), irqPriority.end(), 0xAAAAAAAA);
-    std::fill(irqConfig.begin(), irqConfig.end(),
-              Gicv3::INT_LEVEL_SENSITIVE); // Imp. defined reset value
-    std::fill(irqGrpmod.begin(), irqGrpmod.end(), 0);
-    std::fill(irqNsacr.begin(), irqNsacr.end(), 0);
     /*
-     * For our implementation affinity routing is always enabled,
-     * no GICv2 legacy
+     * RSS           [26]    == 1
+     * (The implementation does supports targeted SGIs with affinity
+     * level 0 values of 0 - 255)
+     * No1N          [25]    == 1
+     * (1 of N SPI interrupts are not supported)
+     * A3V           [24]    == 1
+     * (Supports nonzero values of Affinity level 3)
+     * IDbits        [23:19] == 0xf
+     * (The number of interrupt identifier bits supported, minus one)
+     * DVIS          [18]    == 0
+     * (The implementation does not support Direct Virtual LPI
+     * injection)
+     * LPIS          [17]    == 1
+     * (The implementation does not support LPIs)
+     * MBIS          [16]    == 1
+     * (The implementation supports message-based interrupts
+     * by writing to Distributor registers)
+     * SecurityExtn  [10]    == X
+     * (The GIC implementation supports two Security states)
+     * CPUNumber     [7:5]   == 0
+     * (since for us ARE is always 1 [(ARE = 0) == Gicv2 legacy])
+     * ITLinesNumber [4:0]   == N
+     * (MaxSPIIntId = 32 (N + 1) - 1)
      */
-    ARE = true;
+    int max_spi_int_id = itLines - 1;
+    int it_lines_number = divCeil(max_spi_int_id + 1, 32) - 1;
+    gicdTyper = (1 << 26) | (1 << 25) | (1 << 24) | (IDBITS << 19) |
+        (1 << 17) | (1 << 16) |
+        ((gic->getSystem()->haveSecurity() ? 1 : 0) << 10) |
+        (it_lines_number << 0);
 
     if (gic->getSystem()->haveSecurity()) {
         DS = false;
     } else {
         DS = true;
     }
+}
 
-    EnableGrp0 = 0;
-    EnableGrp1NS = 0;
-    EnableGrp1S = 0;
+void
+Gicv3Distributor::init()
+{
 }
 
 uint64_t
@@ -132,13 +152,13 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
             val |= irqGroup[int_id] << i;
         }
 
         return val;
-        // Interrupt Set-Enable Registers
     } else if (GICD_ISENABLER.contains(addr)) {
+        // Interrupt Set-Enable Registers
         uint64_t val = 0x0;
         int first_intid = (addr - GICD_ISENABLER.start()) * 8;
 
@@ -147,7 +167,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -167,7 +188,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -178,6 +200,7 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
 
         return val;
     } else if (GICD_ISPENDR.contains(addr)) {
+        // Interrupt Set-Pending Registers
         uint64_t val = 0x0;
         int first_intid = (addr - GICD_ISPENDR.start()) * 8;
 
@@ -186,7 +209,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 if (irqNsacr[int_id] == 0) {
@@ -200,6 +224,7 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
 
         return val;
     } else if (GICD_ICPENDR.contains(addr)) {
+        // Interrupt Clear-Pending Registers
         uint64_t val = 0x0;
         int first_intid = (addr - GICD_ICPENDR.start()) * 8;
 
@@ -208,7 +233,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 if (irqNsacr[int_id] < 2) {
@@ -221,8 +247,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         return val;
-        // Interrupt Set-Active Registers
     } else if (GICD_ISACTIVER.contains(addr)) {
+        // Interrupt Set-Active Registers
         int first_intid = (addr - GICD_ISACTIVER.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -232,7 +258,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         uint64_t val = 0x0;
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 // Group 0 or Secure Group 1 interrupts are RAZ/WI
@@ -245,8 +272,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         return val;
-        // Interrupt Clear-Active Registers
     } else if (GICD_ICACTIVER.contains(addr)) {
+        // Interrupt Clear-Active Registers
         int first_intid = (addr - GICD_ICACTIVER.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -256,7 +283,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         uint64_t val = 0x0;
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 if (irqNsacr[int_id] < 2) {
@@ -268,8 +296,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         return val;
-        // Interrupt Priority Registers
     } else if (GICD_IPRIORITYR.contains(addr)) {
+        // Interrupt Priority Registers
         uint64_t val = 0x0;
         int first_intid = addr - GICD_IPRIORITYR.start();
 
@@ -278,7 +306,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
         for (int i = 0, int_id = first_intid; i < size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             uint8_t prio = irqPriority[int_id];
 
             if (!DS && !is_secure_access) {
@@ -301,8 +330,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         warn("Gicv3Distributor::read(): "
              "GICD_ITARGETSR is RAZ/WI, legacy not supported!\n");
         return 0;
-        // Interrupt Configuration Registers
     } else if (GICD_ICFGR.contains(addr)) {
+        // Interrupt Configuration Registers
         int first_intid = (addr - GICD_ICFGR.start()) * 4;
 
         if (isNotSPI(first_intid)) {
@@ -312,7 +341,8 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         uint64_t val = 0x0;
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i = i + 2, int_id++) {
+             i = i + 2, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -343,16 +373,15 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
                 uint64_t val = 0x0;
 
                 for (int i = 0, int_id = first_intid;
-                        i < 8 * size && int_id < itLines; i++, int_id++) {
+                     i < 8 * size && int_id < itLines; i++, int_id++) {
                     val |= irqGrpmod[int_id] << i;
                 }
 
                 return val;
             }
         }
-
-        // Non-secure Access Control Registers
     } else if (GICD_NSACR.contains(addr)) {
+        // Non-secure Access Control Registers
         // 2 bits per interrupt
         int first_intid = (addr - GICD_NSACR.start()) * 4;
 
@@ -367,7 +396,7 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         uint64_t val = 0x0;
 
         for (int i = 0, int_id = first_intid;
-                i < 8 * size && int_id < itLines; i = i + 2, int_id++) {
+             i < 8 * size && int_id < itLines; i = i + 2, int_id++) {
             val |= irqNsacr[int_id] << i;
         }
 
@@ -438,38 +467,7 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
       case GICD_TYPER: // Interrupt Controller Type Register
-        /*
-         * RSS           [26]    == 1
-         * (The implementation does supports targeted SGIs with affinity
-         * level 0 values of 0 - 255)
-         * No1N          [25]    == 1
-         * (1 of N SPI interrupts are not supported)
-         * A3V           [24]    == 1
-         * (Supports nonzero values of Affinity level 3)
-         * IDbits        [23:19] == 0xf
-         * (The number of interrupt identifier bits supported, minus one)
-         * DVIS          [18]    == 0
-         * (The implementation does not support Direct Virtual LPI
-         * injection)
-         * LPIS          [17]    == 0
-         * (The implementation does not support LPIs)
-         * MBIS          [16]    == 0
-         * (The implementation does not support message-based interrupts
-         * by writing to Distributor registers)
-         * SecurityExtn  [10]    == X
-         * (The GIC implementation supports two Security states)
-         * CPUNumber     [7:5]   == 0
-         * (since for us ARE is always 1 [(ARE = 0) == Gicv2 legacy])
-         * ITLinesNumber [4:0]   == N
-         * (MaxSPIIntId = 32 (N + 1) - 1)
-         */
-        {
-            int max_spi_int_id = itLines - 1;
-            int it_lines_number = ceil((max_spi_int_id + 1) / 32.0) - 1;
-            return (1 << 26) | (1 << 25) | (1 << 24) | (0xf << 19) |
-                (gic->getSystem()->haveSecurity() << 10) |
-                (it_lines_number << 0);
-        }
+        return gicdTyper;
 
       case GICD_IIDR: // Implementer Identification Register
         //return 0x43b; // ARM JEP106 code (r0p0 GIC-500)
@@ -479,32 +477,20 @@ Gicv3Distributor::read(Addr addr, size_t size, bool is_secure_access)
         // Optional register, RAZ/WI
         return 0x0;
 
-      case GICD_PIDR0: { // Peripheral ID0 Register
-          uint8_t part_0 = 0x92; // Part number, bits[7:0]
-          return part_0;
-      }
+      case GICD_PIDR0: // Peripheral ID0 Register
+        return gicdPidr0;
 
-      case GICD_PIDR1: { // Peripheral ID1 Register
-          uint8_t des_0 = 0xB; // JEP106 identification code, bits[3:0]
-          uint8_t part_1 = 0x4; // Part number, bits[11:8]
-          return (des_0 << 4) | (part_1 << 0);
-      }
+      case GICD_PIDR1: // Peripheral ID1 Register
+        return gicdPidr1;
 
-      case GICD_PIDR2: { // Peripheral ID2 Register
-          uint8_t arch_rev = 0x3; // 0x3 GICv3
-          uint8_t jdec = 0x1; // JEP code
-          uint8_t des_1 = 0x3; // JEP106 identification code, bits[6:4]
-          return (arch_rev << 4) | (jdec << 3) | (des_1 << 0);
-      }
+      case GICD_PIDR2: // Peripheral ID2 Register
+        return gicdPidr2;
 
       case GICD_PIDR3: // Peripheral ID3 Register
-        return 0x0; // Implementation defined
+        return gicdPidr3;
 
-      case GICD_PIDR4: { // Peripheral ID4 Register
-          uint8_t size = 0x4; // 64 KB software visible page
-          uint8_t des_2 = 0x4; // ARM implementation
-          return (size << 4) | (des_2 << 0);
-      }
+      case GICD_PIDR4: // Peripheral ID4 Register
+        return gicdPidr4;
 
       case GICD_PIDR5: // Peripheral ID5 Register
       case GICD_PIDR6: // Peripheral ID6 Register
@@ -534,15 +520,15 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
             irqGroup[int_id] = data & (1 << i) ? 1 : 0;
             DPRINTF(GIC, "Gicv3Distributor::write(): int_id %d group %d\n",
                     int_id, irqGroup[int_id]);
         }
 
         return;
-        // Interrupt Set-Enable Registers
     } else if (GICD_ISENABLER.contains(addr)) {
+        // Interrupt Set-Enable Registers
         int first_intid = (addr - GICD_ISENABLER.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -550,7 +536,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -573,8 +560,13 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         // Interrupt Clear-Enable Registers
         int first_intid = (addr - GICD_ICENABLER.start()) * 8;
 
+        if (isNotSPI(first_intid)) {
+            return;
+        }
+
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -594,6 +586,7 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
 
         return;
     } else if (GICD_ISPENDR.contains(addr)) {
+        // Interrupt Set-Pending Registers
         int first_intid = (addr - GICD_ISPENDR.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -601,7 +594,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 if (irqNsacr[int_id] == 0) {
@@ -619,9 +613,10 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
             }
         }
 
-        updateAndInformCPUInterfaces();
+        update();
         return;
     } else if (GICD_ICPENDR.contains(addr)) {
+        // Interrupt Clear-Pending Registers
         int first_intid = (addr - GICD_ICPENDR.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -629,7 +624,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 if (irqNsacr[int_id] < 2) {
@@ -642,13 +638,14 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
 
             if (clear) {
                 irqPending[int_id] = false;
+                clearIrqCpuInterface(int_id);
             }
         }
 
-        updateAndInformCPUInterfaces();
+        update();
         return;
-        // Interrupt Set-Active Registers
     } else if (GICD_ISACTIVER.contains(addr)) {
+        // Interrupt Set-Active Registers
         int first_intid = (addr - GICD_ISACTIVER.start()) * 8;
 
         if (isNotSPI(first_intid)) {
@@ -656,7 +653,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -679,7 +677,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i++, int_id++) {
+             i++, int_id++) {
+
             if (nsAccessToSecInt(int_id, is_secure_access))
             {
                 continue;
@@ -698,8 +697,8 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         return;
-        // Interrupt Priority Registers
     } else if (GICD_IPRIORITYR.contains(addr)) {
+        // Interrupt Priority Registers
         int first_intid = addr - GICD_IPRIORITYR.start();
 
         if (isNotSPI(first_intid)) {
@@ -731,9 +730,13 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         warn("Gicv3Distributor::write(): "
              "GICD_ITARGETSR is RAZ/WI, legacy not supported!\n");
         return;
-        // Interrupt Configuration Registers
     } else if (GICD_ICFGR.contains(addr)) {
-        /* Here only the odd bits are used; even bits are RES0 */
+        // Interrupt Configuration Registers
+        // for x = 0 to 15:
+        //   GICD_ICFGR[2x] = RES0
+        //   GICD_ICFGR[2x + 1] =
+        //     0 level-sensitive
+        //     1 edge-triggered
         int first_intid = (addr - GICD_ICFGR.start()) * 4;
 
         if (isNotSPI(first_intid)) {
@@ -741,7 +744,7 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid; i < 8 * size && int_id < itLines;
-                i = i + 2, int_id++) {
+             i = i + 2, int_id++) {
             irqConfig[int_id] = data & (0x2 << i) ?
                                 Gicv3::INT_EDGE_TRIGGERED :
                                 Gicv3::INT_LEVEL_SENSITIVE;
@@ -766,16 +769,16 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
                 }
 
                 for (int i = 0, int_id = first_intid;
-                        i < 8 * size && int_id < itLines; i++, int_id++) {
-                    irqGrpmod[int_id] = data & (0x1 << i);
+                     i < 8 * size && int_id < itLines; i++, int_id++) {
+                    irqGrpmod[int_id] = bits(data, i);
                 }
 
                 return ;
             }
         }
 
-        // Non-secure Access Control Registers
     } else if (GICD_NSACR.contains(addr)) {
+        // Non-secure Access Control Registers
         // 2 bits per interrupt
         int first_intid = (addr - GICD_NSACR.start()) * 4;
 
@@ -788,7 +791,7 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         for (int i = 0, int_id = first_intid;
-                i < 8 * size && int_id < itLines; i = i + 2, int_id++) {
+             i < 8 * size && int_id < itLines; i = i + 2, int_id++) {
             irqNsacr[int_id] = (data >> (2 * int_id)) & 0x3;
         }
 
@@ -904,7 +907,83 @@ Gicv3Distributor::write(Addr addr, uint64_t data, size_t size,
             }
         }
 
+        update();
+
         break;
+
+      case GICD_SGIR: // Error Reporting Status Register
+        // Only if affinity routing is disabled, RES0
+        break;
+
+      case GICD_SETSPI_NSR: {
+        // Writes to this register have no effect if:
+        // * The value written specifies an invalid SPI.
+        // * The SPI is already pending.
+        // * The value written specifies a Secure SPI, the value is
+        // written by a Non-secure access, and the value of the
+        // corresponding GICD_NSACR<n> register is 0.
+        const uint32_t intid = bits(data, 9, 0);
+        if (isNotSPI(intid) || irqPending[intid] ||
+            (nsAccessToSecInt(intid, is_secure_access) &&
+             irqNsacr[intid] == 0)) {
+            return;
+        } else {
+            // Valid SPI, set interrupt pending
+            sendInt(intid);
+        }
+        break;
+      }
+
+      case GICD_CLRSPI_NSR: {
+        // Writes to this register have no effect if:
+        // * The value written specifies an invalid SPI.
+        // * The SPI is not pending.
+        // * The value written specifies a Secure SPI, the value is
+        // written by a Non-secure access, and the value of the
+        // corresponding GICD_NSACR<n> register is less than 0b10.
+        const uint32_t intid = bits(data, 9, 0);
+        if (isNotSPI(intid) || !irqPending[intid] ||
+            (nsAccessToSecInt(intid, is_secure_access) &&
+             irqNsacr[intid] < 2)) {
+            return;
+        } else {
+            // Valid SPI, clear interrupt pending
+            deassertSPI(intid);
+        }
+        break;
+      }
+
+      case GICD_SETSPI_SR: {
+        // Writes to this register have no effect if:
+        // * GICD_CTLR.DS = 1 (WI)
+        // * The value written specifies an invalid SPI.
+        // * The SPI is already pending.
+        // * The value is written by a Non-secure access.
+        const uint32_t intid = bits(data, 9, 0);
+        if (DS || isNotSPI(intid) || irqPending[intid] || !is_secure_access) {
+            return;
+        } else {
+            // Valid SPI, set interrupt pending
+            sendInt(intid);
+        }
+        break;
+      }
+
+      case GICD_CLRSPI_SR: {
+        // Writes to this register have no effect if:
+        // * GICD_CTLR.DS = 1 (WI)
+        // * The value written specifies an invalid SPI.
+        // * The SPI is not pending.
+        // * The value is written by a Non-secure access.
+        const uint32_t intid = bits(data, 9, 0);
+        if (DS || isNotSPI(intid) || !irqPending[intid] || !is_secure_access) {
+            return;
+        } else {
+            // Valid SPI, clear interrupt pending
+            deassertSPI(intid);
+        }
+        break;
+      }
 
       default:
         panic("Gicv3Distributor::write(): invalid offset %#x\n", addr);
@@ -920,122 +999,102 @@ Gicv3Distributor::sendInt(uint32_t int_id)
     irqPending[int_id] = true;
     DPRINTF(GIC, "Gicv3Distributor::sendInt(): "
             "int_id %d (SPI) pending bit set\n", int_id);
-    updateAndInformCPUInterfaces();
+    update();
 }
 
 void
-Gicv3Distributor::intDeasserted(uint32_t int_id)
+Gicv3Distributor::deassertSPI(uint32_t int_id)
 {
     panic_if(int_id < Gicv3::SGI_MAX + Gicv3::PPI_MAX, "Invalid SPI!");
     panic_if(int_id > itLines, "Invalid SPI!");
     irqPending[int_id] = false;
-    updateAndInformCPUInterfaces();
+    clearIrqCpuInterface(int_id);
+
+    update();
+}
+
+Gicv3CPUInterface*
+Gicv3Distributor::route(uint32_t int_id)
+{
+    IROUTER affinity_routing = irqAffinityRouting[int_id];
+    Gicv3Redistributor * target_redistributor = nullptr;
+
+    const Gicv3::GroupId int_group = getIntGroup(int_id);
+
+    if (affinity_routing.IRM) {
+        // Interrupts routed to any PE defined as a participating node
+        for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
+            Gicv3Redistributor * redistributor_i =
+                gic->getRedistributor(i);
+
+            if (redistributor_i->
+                    canBeSelectedFor1toNInterrupt(int_group)) {
+                target_redistributor = redistributor_i;
+                break;
+            }
+        }
+    } else {
+        uint32_t affinity = (affinity_routing.Aff3 << 24) |
+                            (affinity_routing.Aff2 << 16) |
+                            (affinity_routing.Aff1 << 8) |
+                            (affinity_routing.Aff0 << 0);
+        target_redistributor =
+            gic->getRedistributorByAffinity(affinity);
+    }
+
+    if (!target_redistributor) {
+        // Interrrupts targeting not present cpus must remain pending
+        return nullptr;
+    } else {
+        return target_redistributor->getCPUInterface();
+    }
 }
 
 void
-Gicv3Distributor::updateAndInformCPUInterfaces()
+Gicv3Distributor::clearIrqCpuInterface(uint32_t int_id)
 {
-    update();
-
-    for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
-        gic->getCPUInterface(i)->update();
-    }
-}
-
-void
-Gicv3Distributor::fullUpdate()
-{
-    for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
-        Gicv3CPUInterface * cpu_interface_i = gic->getCPUInterface(i);
-        cpu_interface_i->hppi.prio = 0xff;
-    }
-
-    update();
-
-    for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
-        Gicv3Redistributor * redistributor_i = gic->getRedistributor(i);
-        redistributor_i->update();
-    }
+    auto cpu_interface = route(int_id);
+    if (cpu_interface)
+        cpu_interface->resetHppi(int_id);
 }
 
 void
 Gicv3Distributor::update()
 {
-    std::vector<bool> new_hppi(gic->getSystem()->numContexts(), false);
-
     // Find the highest priority pending SPI
     for (int int_id = Gicv3::SGI_MAX + Gicv3::PPI_MAX; int_id < itLines;
-            int_id++) {
+         int_id++) {
         Gicv3::GroupId int_group = getIntGroup(int_id);
         bool group_enabled = groupEnabled(int_group);
 
         if (irqPending[int_id] && irqEnabled[int_id] &&
-                !irqActive[int_id] && group_enabled) {
-            IROUTER affinity_routing = irqAffinityRouting[int_id];
-            Gicv3Redistributor * target_redistributor = nullptr;
+            !irqActive[int_id] && group_enabled) {
 
-            if (affinity_routing.IRM) {
-                // Interrupts routed to any PE defined as a participating node
-                for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
-                    Gicv3Redistributor * redistributor_i =
-                        gic->getRedistributor(i);
+            // Find the cpu interface where to route the interrupt
+            Gicv3CPUInterface *target_cpu_interface = route(int_id);
 
-                    if (redistributor_i->
-                            canBeSelectedFor1toNInterrupt(int_group)) {
-                        target_redistributor = redistributor_i;
-                        break;
-                    }
-                }
-            } else {
-                uint32_t affinity = (affinity_routing.Aff3 << 24) |
-                                    (affinity_routing.Aff3 << 16) |
-                                    (affinity_routing.Aff1 << 8) |
-                                    (affinity_routing.Aff0 << 0);
-                target_redistributor =
-                    gic->getRedistributorByAffinity(affinity);
-            }
-
-            if (!target_redistributor) {
-                // Interrrupts targeting not present cpus must remain pending
-                return;
-            }
-
-            Gicv3CPUInterface * target_cpu_interface =
-                target_redistributor->getCPUInterface();
-            uint32_t target_cpu = target_redistributor->cpuId;
+            // Invalid routing
+            if (!target_cpu_interface) continue;
 
             if ((irqPriority[int_id] < target_cpu_interface->hppi.prio) ||
-                    /*
-                    * Multiple pending ints with same priority.
-                    * Implementation choice which one to signal.
-                    * Our implementation selects the one with the lower id.
-                    */
-                    (irqPriority[int_id] == target_cpu_interface->hppi.prio &&
-                     int_id < target_cpu_interface->hppi.intid)) {
+                (irqPriority[int_id] == target_cpu_interface->hppi.prio &&
+                int_id < target_cpu_interface->hppi.intid)) {
+
                 target_cpu_interface->hppi.intid = int_id;
                 target_cpu_interface->hppi.prio = irqPriority[int_id];
                 target_cpu_interface->hppi.group = int_group;
-                new_hppi[target_cpu] = true;
             }
         }
     }
 
+    // Update all redistributors
     for (int i = 0; i < gic->getSystem()->numContexts(); i++) {
-        Gicv3Redistributor * redistributor_i = gic->getRedistributor(i);
-        Gicv3CPUInterface * cpu_interface_i =
-            redistributor_i->getCPUInterface();
-
-        if (!new_hppi[i] && cpu_interface_i->hppi.prio != 0xff &&
-                cpu_interface_i->hppi.intid >=
-                (Gicv3::SGI_MAX + Gicv3::PPI_MAX) &&
-                cpu_interface_i->hppi.intid < Gicv3::INTID_SECURE) {
-            fullUpdate();
-        }
+        gic->getRedistributor(i)->update();
     }
 }
 
 Gicv3::IntStatus
-Gicv3Distributor::intStatus(uint32_t int_id)
+Gicv3Distributor::intStatus(uint32_t int_id) const
 {
     panic_if(int_id < Gicv3::SGI_MAX + Gicv3::PPI_MAX, "Invalid SPI!");
     panic_if(int_id > itLines, "Invalid SPI!");
@@ -1054,7 +1113,7 @@ Gicv3Distributor::intStatus(uint32_t int_id)
 }
 
 Gicv3::GroupId
-Gicv3Distributor::getIntGroup(int int_id)
+Gicv3Distributor::getIntGroup(int int_id) const
 {
     panic_if(int_id < Gicv3::SGI_MAX + Gicv3::PPI_MAX, "Invalid SPI!");
     panic_if(int_id > itLines, "Invalid SPI!");

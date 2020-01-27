@@ -53,6 +53,7 @@
 
 #include <memory>
 
+#include "arch/x86/faults.hh"
 #include "arch/x86/pagetable.hh"
 #include "arch/x86/tlb.hh"
 #include "arch/x86/vtophys.hh"
@@ -167,13 +168,13 @@ bool Walker::sendTiming(WalkerState* sendingState, PacketPtr pkt)
 
 }
 
-BaseMasterPort &
-Walker::getMasterPort(const std::string &if_name, PortID idx)
+Port &
+Walker::getPort(const std::string &if_name, PortID idx)
 {
     if (if_name == "port")
         return port;
     else
-        return MemObject::getMasterPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
 }
 
 void
@@ -205,8 +206,14 @@ Walker::startWalkWrapper()
             std::make_shared<UnimpFault>("Squashed Inst"),
             currState->req, currState->tc, currState->mode);
 
-        // delete the current request
-        delete currState;
+        // delete the current request if there are no inflight packets.
+        // if there is something in flight, delete when the packets are
+        // received and inflight is zero.
+        if (currState->numInflight() == 0) {
+            delete currState;
+        } else {
+            currState->squash();
+        }
 
         // check the next translation request, if it exists
         if (currStates.size())
@@ -597,6 +604,11 @@ Walker::WalkerState::recvPacket(PacketPtr pkt)
     assert(inflight);
     assert(state == Waiting);
     inflight--;
+    if (squashed) {
+        // if were were squashed, return true once inflight is zero and
+        // this WalkerState will be freed there.
+        return (inflight == 0);
+    }
     if (pkt->isRead()) {
         // should not have a pending read it we also had one outstanding
         assert(!read);
@@ -678,6 +690,12 @@ Walker::WalkerState::sendPackets()
     }
 }
 
+unsigned
+Walker::WalkerState::numInflight() const
+{
+    return inflight;
+}
+
 bool
 Walker::WalkerState::isRetrying()
 {
@@ -694,6 +712,12 @@ bool
 Walker::WalkerState::wasStarted()
 {
     return started;
+}
+
+void
+Walker::WalkerState::squash()
+{
+    squashed = true;
 }
 
 void

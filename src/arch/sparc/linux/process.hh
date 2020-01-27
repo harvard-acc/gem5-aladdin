@@ -70,6 +70,8 @@ class Sparc32LinuxProcess : public SparcLinuxProcess, public Sparc32Process
         return SparcLinuxProcess::getDesc32(callnum);
     }
 
+    void syscall(ThreadContext *tc, Fault *fault) override;
+
     void handleTrap(int trapNum, ThreadContext *tc, Fault *fault);
 };
 
@@ -86,11 +88,12 @@ class Sparc64LinuxProcess : public SparcLinuxProcess, public Sparc64Process
         return SparcLinuxProcess::getDesc(callnum);
     }
 
+    void syscall(ThreadContext *tc, Fault *fault) override;
+
     void handleTrap(int trapNum, ThreadContext *tc, Fault *fault);
 };
 
-SyscallReturn getresuidFunc(SyscallDesc *desc, int num,
-                            Process *p, ThreadContext *tc);
+SyscallReturn getresuidFunc(SyscallDesc *desc, int num, ThreadContext *tc);
 
 } // namespace SparcISA
 #endif // __SPARC_LINUX_PROCESS_HH__

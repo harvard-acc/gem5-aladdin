@@ -1,4 +1,4 @@
-# Copyright (c) 2012, 2017 ARM Limited
+# Copyright (c) 2012, 2017, 2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -46,6 +46,8 @@ from base_config import *
 from common.cores.arm.O3_ARM_v7a import *
 from common.Benchmarks import SysConfig
 
+from common import SysPaths
+
 class ArmSESystemUniprocessor(BaseSESystemUniprocessor):
     """Syscall-emulation builder for ARM uniprocessor systems.
 
@@ -54,7 +56,7 @@ class ArmSESystemUniprocessor(BaseSESystemUniprocessor):
     """
 
     def __init__(self, **kwargs):
-        BaseSESystem.__init__(self, **kwargs)
+        super(ArmSESystemUniprocessor, self).__init__(**kwargs)
 
     def create_caches_private(self, cpu):
         # The atomic SE configurations do not use caches
@@ -71,7 +73,7 @@ class LinuxArmSystemBuilder(object):
     ARM-specific create_system method to a class deriving from one of
     the generic base systems.
     """
-    def __init__(self, machine_type, **kwargs):
+    def __init__(self, machine_type, aarch64_kernel, **kwargs):
         """
         Arguments:
           machine_type -- String describing the platform to simulate
@@ -82,9 +84,21 @@ class LinuxArmSystemBuilder(object):
         self.num_cpus = kwargs.get('num_cpus', 1)
         self.mem_size = kwargs.get('mem_size', '256MB')
         self.use_ruby = kwargs.get('use_ruby', False)
+        self.aarch64_kernel = aarch64_kernel
 
     def create_system(self):
-        sc = SysConfig(None, self.mem_size, None)
+        if self.aarch64_kernel:
+            gem5_kernel = "vmlinux.arm64"
+            disk_image = "m5_exit.squashfs.arm64"
+        else:
+            gem5_kernel = "vmlinux.arm"
+            disk_image = "m5_exit.squashfs.arm"
+
+        default_kernels = {
+            "VExpress_GEM5_V1": gem5_kernel,
+        }
+
+        sc = SysConfig(None, self.mem_size, disk_image, "/dev/sda")
         system = FSConfig.makeArmSystem(self.mem_mode,
                                         self.machine_type, self.num_cpus,
                                         sc, False, ruby=self.use_ruby)
@@ -95,14 +109,21 @@ class LinuxArmSystemBuilder(object):
         system.panic_on_panic = True
         system.panic_on_oops = True
 
+        system.kernel = SysPaths.binary(default_kernels[self.machine_type])
+
         self.init_system(system)
+
+        system.generateDtb(m5.options.outdir, 'system.dtb')
         return system
 
 class LinuxArmFSSystem(LinuxArmSystemBuilder,
                        BaseFSSystem):
     """Basic ARM full system builder."""
 
-    def __init__(self, machine_type='VExpress_EMM', **kwargs):
+    def __init__(self,
+                 machine_type='VExpress_GEM5_V1',
+                 aarch64_kernel=True,
+                 **kwargs):
         """Initialize an ARM system that supports full system simulation.
 
         Note: Keyword arguments that are not listed below will be
@@ -111,8 +132,9 @@ class LinuxArmFSSystem(LinuxArmSystemBuilder,
         Keyword Arguments:
           machine_type -- String describing the platform to simulate
         """
-        BaseSystem.__init__(self, **kwargs)
-        LinuxArmSystemBuilder.__init__(self, machine_type, **kwargs)
+        BaseFSSystem.__init__(self, **kwargs)
+        LinuxArmSystemBuilder.__init__(
+            self, machine_type, aarch64_kernel, **kwargs)
 
     def create_caches_private(self, cpu):
         # Use the more representative cache configuration
@@ -129,13 +151,21 @@ class LinuxArmFSSystemUniprocessor(LinuxArmSystemBuilder,
     test cases.
     """
 
-    def __init__(self, machine_type='VExpress_EMM', **kwargs):
+    def __init__(self,
+                 machine_type='VExpress_GEM5_V1',
+                 aarch64_kernel=True,
+                 **kwargs):
         BaseFSSystemUniprocessor.__init__(self, **kwargs)
-        LinuxArmSystemBuilder.__init__(self, machine_type, **kwargs)
+        LinuxArmSystemBuilder.__init__(
+            self, machine_type, aarch64_kernel, **kwargs)
 
 class LinuxArmFSSwitcheroo(LinuxArmSystemBuilder, BaseFSSwitcheroo):
     """Uniprocessor ARM system prepared for CPU switching"""
 
-    def __init__(self, machine_type='VExpress_EMM', **kwargs):
+    def __init__(self,
+                 machine_type='VExpress_GEM5_V1',
+                 aarch64_kernel=True,
+                 **kwargs):
         BaseFSSwitcheroo.__init__(self, **kwargs)
-        LinuxArmSystemBuilder.__init__(self, machine_type, **kwargs)
+        LinuxArmSystemBuilder.__init__(
+            self, machine_type, aarch64_kernel, **kwargs)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2016 ARM Limited
+ * Copyright (c) 2011-2012, 2016-2018 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -51,12 +51,14 @@
 #include "arch/types.hh"
 #include "base/types.hh"
 #include "config/the_isa.hh"
+#include "cpu/pc_event.hh"
 #include "cpu/reg_class.hh"
 
 // @todo: Figure out a more architecture independent way to obtain the ITB and
 // DTB pointers.
 namespace TheISA
 {
+    class ISA;
     class Decoder;
 }
 class BaseCPU;
@@ -64,15 +66,11 @@ class BaseTLB;
 class CheckerCPU;
 class Checkpoint;
 class EndQuiesceEvent;
-class SETranslatingPortProxy;
-class FSTranslatingPortProxy;
 class PortProxy;
 class Process;
 class System;
-namespace TheISA {
-    namespace Kernel {
-        class Statistics;
-    }
+namespace Kernel {
+    class Statistics;
 }
 
 /**
@@ -80,8 +78,8 @@ namespace TheISA {
  * anything outside of the CPU. It provides all accessor methods to
  * state that might be needed by external objects, ranging from
  * register values to things such as kernel stats. It is an abstract
- * base class; the CPU can create its own ThreadContext by either
- * deriving from it, or using the templated ProxyThreadContext.
+ * base class; the CPU can create its own ThreadContext by
+ * deriving from it.
  *
  * The ThreadContext is slightly different than the ExecContext.  The
  * ThreadContext provides access to an individual thread's state; an
@@ -91,13 +89,14 @@ namespace TheISA {
  * interface; the ExecContext is a more implicit interface that must
  * be implemented so that the ISA can access whatever state it needs.
  */
-class ThreadContext
+class ThreadContext : public PCEventScope
 {
   protected:
     typedef TheISA::MachInst MachInst;
-    typedef TheISA::CCReg CCReg;
     using VecRegContainer = TheISA::VecRegContainer;
     using VecElem = TheISA::VecElem;
+    using VecPredRegContainer = TheISA::VecPredRegContainer;
+
   public:
 
     enum Status
@@ -109,6 +108,10 @@ class ThreadContext
         /// Temporarily inactive.  Entered while waiting for
         /// synchronization, etc.
         Suspended,
+
+        /// Trying to exit and waiting for an event to completely exit.
+        /// Entered when target executes an exit syscall.
+        Halting,
 
         /// Permanently shut down.  Entered when target executes
         /// m5exit pseudo-instruction.  When all contexts enter
@@ -128,9 +131,9 @@ class ThreadContext
 
     virtual void setThreadId(int id) = 0;
 
-    virtual int contextId() const = 0;
+    virtual ContextID contextId() const = 0;
 
-    virtual void setContextId(int id) = 0;
+    virtual void setContextId(ContextID id) = 0;
 
     virtual BaseTLB *getITBPtr() = 0;
 
@@ -138,15 +141,17 @@ class ThreadContext
 
     virtual CheckerCPU *getCheckerCpuPtr() = 0;
 
+    virtual TheISA::ISA *getIsaPtr() = 0;
+
     virtual TheISA::Decoder *getDecoderPtr() = 0;
 
     virtual System *getSystemPtr() = 0;
 
-    virtual TheISA::Kernel::Statistics *getKernelStats() = 0;
+    virtual ::Kernel::Statistics *getKernelStats() = 0;
 
     virtual PortProxy &getPhysProxy() = 0;
 
-    virtual FSTranslatingPortProxy &getVirtProxy() = 0;
+    virtual PortProxy &getVirtProxy() = 0;
 
     /**
      * Initialise the physical and virtual port proxies and tie them to
@@ -155,8 +160,6 @@ class ThreadContext
      * tc ThreadContext for the virtual-to-physical translation
      */
     virtual void initMemProxies(ThreadContext *tc) = 0;
-
-    virtual SETranslatingPortProxy &getMemProxy() = 0;
 
     virtual Process *getProcessPtr() = 0;
 
@@ -189,6 +192,10 @@ class ThreadContext
 
     virtual EndQuiesceEvent *getQuiesceEvent() = 0;
 
+    virtual void scheduleInstCountEvent(Event *event, Tick count) = 0;
+    virtual void descheduleInstCountEvent(Event *event) = 0;
+    virtual Tick getCurrentInstCount() = 0;
+
     // Not necessarily the best location for these...
     // Having an extra function just to read these is obnoxious
     virtual Tick readLastActivate() = 0;
@@ -204,9 +211,9 @@ class ThreadContext
     //
     // New accessors for new decoder.
     //
-    virtual RegVal readIntReg(int reg_idx) = 0;
+    virtual RegVal readIntReg(RegIndex reg_idx) const = 0;
 
-    virtual RegVal readFloatRegBits(int reg_idx) = 0;
+    virtual RegVal readFloatReg(RegIndex reg_idx) const = 0;
 
     virtual const VecRegContainer& readVecReg(const RegId& reg) const = 0;
     virtual VecRegContainer& getWritableVecReg(const RegId& reg) = 0;
@@ -242,19 +249,26 @@ class ThreadContext
 
     virtual const VecElem& readVecElem(const RegId& reg) const = 0;
 
-    virtual CCReg readCCReg(int reg_idx) = 0;
+    virtual const VecPredRegContainer& readVecPredReg(const RegId& reg)
+        const = 0;
+    virtual VecPredRegContainer& getWritableVecPredReg(const RegId& reg) = 0;
 
-    virtual void setIntReg(int reg_idx, RegVal val) = 0;
+    virtual RegVal readCCReg(RegIndex reg_idx) const = 0;
 
-    virtual void setFloatRegBits(int reg_idx, RegVal val) = 0;
+    virtual void setIntReg(RegIndex reg_idx, RegVal val) = 0;
+
+    virtual void setFloatReg(RegIndex reg_idx, RegVal val) = 0;
 
     virtual void setVecReg(const RegId& reg, const VecRegContainer& val) = 0;
 
     virtual void setVecElem(const RegId& reg, const VecElem& val) = 0;
 
-    virtual void setCCReg(int reg_idx, CCReg val) = 0;
+    virtual void setVecPredReg(const RegId& reg,
+                               const VecPredRegContainer& val) = 0;
 
-    virtual TheISA::PCState pcState() = 0;
+    virtual void setCCReg(RegIndex reg_idx, RegVal val) = 0;
+
+    virtual TheISA::PCState pcState() const = 0;
 
     virtual void pcState(const TheISA::PCState &val) = 0;
 
@@ -268,43 +282,32 @@ class ThreadContext
 
     virtual void pcStateNoRecord(const TheISA::PCState &val) = 0;
 
-    virtual Addr instAddr() = 0;
+    virtual Addr instAddr() const = 0;
 
-    virtual Addr nextInstAddr() = 0;
+    virtual Addr nextInstAddr() const = 0;
 
-    virtual MicroPC microPC() = 0;
+    virtual MicroPC microPC() const = 0;
 
-    virtual RegVal readMiscRegNoEffect(int misc_reg) const = 0;
+    virtual RegVal readMiscRegNoEffect(RegIndex misc_reg) const = 0;
 
-    virtual RegVal readMiscReg(int misc_reg) = 0;
+    virtual RegVal readMiscReg(RegIndex misc_reg) = 0;
 
-    virtual void setMiscRegNoEffect(int misc_reg, RegVal val) = 0;
+    virtual void setMiscRegNoEffect(RegIndex misc_reg, RegVal val) = 0;
 
-    virtual void setMiscReg(int misc_reg, RegVal val) = 0;
+    virtual void setMiscReg(RegIndex misc_reg, RegVal val) = 0;
 
     virtual RegId flattenRegId(const RegId& regId) const = 0;
 
-    virtual RegVal
-    readRegOtherThread(const RegId& misc_reg, ThreadID tid)
-    {
-        return 0;
-    }
-
-    virtual void
-    setRegOtherThread(const RegId& misc_reg, RegVal val, ThreadID tid)
-    {
-    }
-
     // Also not necessarily the best location for these two.  Hopefully will go
     // away once we decide upon where st cond failures goes.
-    virtual unsigned readStCondFailures() = 0;
+    virtual unsigned readStCondFailures() const = 0;
 
     virtual void setStCondFailures(unsigned sc_failures) = 0;
 
     // Same with st cond failures.
-    virtual Counter readFuncExeInst() = 0;
+    virtual Counter readFuncExeInst() const = 0;
 
-    virtual void syscall(int64_t callnum, Fault *fault) = 0;
+    virtual void syscall(Fault *fault) = 0;
 
     // This function exits the thread context in the CPU and returns
     // 1 if the CPU has no more active threads (meaning it's OK to exit);
@@ -326,275 +329,31 @@ class ThreadContext
      * serialization code to access all registers.
      */
 
-    virtual RegVal readIntRegFlat(int idx) = 0;
-    virtual void setIntRegFlat(int idx, RegVal val) = 0;
+    virtual RegVal readIntRegFlat(RegIndex idx) const = 0;
+    virtual void setIntRegFlat(RegIndex idx, RegVal val) = 0;
 
-    virtual RegVal readFloatRegBitsFlat(int idx) = 0;
-    virtual void setFloatRegBitsFlat(int idx, RegVal val) = 0;
+    virtual RegVal readFloatRegFlat(RegIndex idx) const = 0;
+    virtual void setFloatRegFlat(RegIndex idx, RegVal val) = 0;
 
-    virtual const VecRegContainer& readVecRegFlat(int idx) const = 0;
-    virtual VecRegContainer& getWritableVecRegFlat(int idx) = 0;
-    virtual void setVecRegFlat(int idx, const VecRegContainer& val) = 0;
+    virtual const VecRegContainer& readVecRegFlat(RegIndex idx) const = 0;
+    virtual VecRegContainer& getWritableVecRegFlat(RegIndex idx) = 0;
+    virtual void setVecRegFlat(RegIndex idx, const VecRegContainer& val) = 0;
 
-    virtual const VecElem& readVecElemFlat(const RegIndex& idx,
+    virtual const VecElem& readVecElemFlat(RegIndex idx,
                                            const ElemIndex& elemIdx) const = 0;
-    virtual void setVecElemFlat(const RegIndex& idx, const ElemIndex& elemIdx,
+    virtual void setVecElemFlat(RegIndex idx, const ElemIndex& elemIdx,
                                 const VecElem& val) = 0;
 
-    virtual CCReg readCCRegFlat(int idx) = 0;
-    virtual void setCCRegFlat(int idx, CCReg val) = 0;
+    virtual const VecPredRegContainer &
+        readVecPredRegFlat(RegIndex idx) const = 0;
+    virtual VecPredRegContainer& getWritableVecPredRegFlat(RegIndex idx) = 0;
+    virtual void setVecPredRegFlat(RegIndex idx,
+                                   const VecPredRegContainer& val) = 0;
+
+    virtual RegVal readCCRegFlat(RegIndex idx) const = 0;
+    virtual void setCCRegFlat(RegIndex idx, RegVal val) = 0;
     /** @} */
 
-};
-
-/**
- * ProxyThreadContext class that provides a way to implement a
- * ThreadContext without having to derive from it. ThreadContext is an
- * abstract class, so anything that derives from it and uses its
- * interface will pay the overhead of virtual function calls.  This
- * class is created to enable a user-defined Thread object to be used
- * wherever ThreadContexts are used, without paying the overhead of
- * virtual function calls when it is used by itself.  See
- * simple_thread.hh for an example of this.
- */
-template <class TC>
-class ProxyThreadContext : public ThreadContext
-{
-  public:
-    ProxyThreadContext(TC *actual_tc)
-    { actualTC = actual_tc; }
-
-  private:
-    TC *actualTC;
-
-  public:
-
-    BaseCPU *getCpuPtr() { return actualTC->getCpuPtr(); }
-
-    int cpuId() const { return actualTC->cpuId(); }
-
-    uint32_t socketId() const { return actualTC->socketId(); }
-
-    int threadId() const { return actualTC->threadId(); }
-
-    void setThreadId(int id) { actualTC->setThreadId(id); }
-
-    int contextId() const { return actualTC->contextId(); }
-
-    void setContextId(int id) { actualTC->setContextId(id); }
-
-    BaseTLB *getITBPtr() { return actualTC->getITBPtr(); }
-
-    BaseTLB *getDTBPtr() { return actualTC->getDTBPtr(); }
-
-    CheckerCPU *getCheckerCpuPtr() { return actualTC->getCheckerCpuPtr(); }
-
-    TheISA::Decoder *getDecoderPtr() { return actualTC->getDecoderPtr(); }
-
-    System *getSystemPtr() { return actualTC->getSystemPtr(); }
-
-    TheISA::Kernel::Statistics *getKernelStats()
-    { return actualTC->getKernelStats(); }
-
-    PortProxy &getPhysProxy() { return actualTC->getPhysProxy(); }
-
-    FSTranslatingPortProxy &getVirtProxy() { return actualTC->getVirtProxy(); }
-
-    void initMemProxies(ThreadContext *tc) { actualTC->initMemProxies(tc); }
-
-    SETranslatingPortProxy &getMemProxy() { return actualTC->getMemProxy(); }
-
-    Process *getProcessPtr() { return actualTC->getProcessPtr(); }
-
-    void setProcessPtr(Process *p) { actualTC->setProcessPtr(p); }
-
-    Status status() const { return actualTC->status(); }
-
-    void setStatus(Status new_status) { actualTC->setStatus(new_status); }
-
-    /// Set the status to Active.
-    void activate() { actualTC->activate(); }
-
-    /// Set the status to Suspended.
-    void suspend() { actualTC->suspend(); }
-
-    /// Set the status to Halted.
-    void halt() { actualTC->halt(); }
-
-    /// Quiesce thread context
-    void quiesce() { actualTC->quiesce(); }
-
-    /// Quiesce, suspend, and schedule activate at resume
-    void quiesceTick(Tick resume) { actualTC->quiesceTick(resume); }
-
-    void dumpFuncProfile() { actualTC->dumpFuncProfile(); }
-
-    void takeOverFrom(ThreadContext *oldContext)
-    { actualTC->takeOverFrom(oldContext); }
-
-    void regStats(const std::string &name) { actualTC->regStats(name); }
-
-    EndQuiesceEvent *getQuiesceEvent() { return actualTC->getQuiesceEvent(); }
-
-    Tick readLastActivate() { return actualTC->readLastActivate(); }
-    Tick readLastSuspend() { return actualTC->readLastSuspend(); }
-
-    void profileClear() { return actualTC->profileClear(); }
-    void profileSample() { return actualTC->profileSample(); }
-
-    // @todo: Do I need this?
-    void copyArchRegs(ThreadContext *tc) { actualTC->copyArchRegs(tc); }
-
-    void clearArchRegs() { actualTC->clearArchRegs(); }
-
-    //
-    // New accessors for new decoder.
-    //
-    RegVal readIntReg(int reg_idx)
-    { return actualTC->readIntReg(reg_idx); }
-
-    RegVal readFloatRegBits(int reg_idx)
-    { return actualTC->readFloatRegBits(reg_idx); }
-
-    const VecRegContainer& readVecReg(const RegId& reg) const
-    { return actualTC->readVecReg(reg); }
-
-    VecRegContainer& getWritableVecReg(const RegId& reg)
-    { return actualTC->getWritableVecReg(reg); }
-
-    /** Vector Register Lane Interfaces. */
-    /** @{ */
-    /** Reads source vector 8bit operand. */
-    ConstVecLane8
-    readVec8BitLaneReg(const RegId& reg) const
-    { return actualTC->readVec8BitLaneReg(reg); }
-
-    /** Reads source vector 16bit operand. */
-    ConstVecLane16
-    readVec16BitLaneReg(const RegId& reg) const
-    { return actualTC->readVec16BitLaneReg(reg); }
-
-    /** Reads source vector 32bit operand. */
-    ConstVecLane32
-    readVec32BitLaneReg(const RegId& reg) const
-    { return actualTC->readVec32BitLaneReg(reg); }
-
-    /** Reads source vector 64bit operand. */
-    ConstVecLane64
-    readVec64BitLaneReg(const RegId& reg) const
-    { return actualTC->readVec64BitLaneReg(reg); }
-
-    /** Write a lane of the destination vector register. */
-    virtual void setVecLane(const RegId& reg,
-            const LaneData<LaneSize::Byte>& val)
-    { return actualTC->setVecLane(reg, val); }
-    virtual void setVecLane(const RegId& reg,
-            const LaneData<LaneSize::TwoByte>& val)
-    { return actualTC->setVecLane(reg, val); }
-    virtual void setVecLane(const RegId& reg,
-            const LaneData<LaneSize::FourByte>& val)
-    { return actualTC->setVecLane(reg, val); }
-    virtual void setVecLane(const RegId& reg,
-            const LaneData<LaneSize::EightByte>& val)
-    { return actualTC->setVecLane(reg, val); }
-    /** @} */
-
-    const VecElem& readVecElem(const RegId& reg) const
-    { return actualTC->readVecElem(reg); }
-
-    CCReg readCCReg(int reg_idx)
-    { return actualTC->readCCReg(reg_idx); }
-
-    void setIntReg(int reg_idx, RegVal val)
-    { actualTC->setIntReg(reg_idx, val); }
-
-    void setFloatRegBits(int reg_idx, RegVal val)
-    { actualTC->setFloatRegBits(reg_idx, val); }
-
-    void setVecReg(const RegId& reg, const VecRegContainer& val)
-    { actualTC->setVecReg(reg, val); }
-
-    void setVecElem(const RegId& reg, const VecElem& val)
-    { actualTC->setVecElem(reg, val); }
-
-    void setCCReg(int reg_idx, CCReg val)
-    { actualTC->setCCReg(reg_idx, val); }
-
-    TheISA::PCState pcState() { return actualTC->pcState(); }
-
-    void pcState(const TheISA::PCState &val) { actualTC->pcState(val); }
-
-    void pcStateNoRecord(const TheISA::PCState &val) { actualTC->pcState(val); }
-
-    Addr instAddr() { return actualTC->instAddr(); }
-    Addr nextInstAddr() { return actualTC->nextInstAddr(); }
-    MicroPC microPC() { return actualTC->microPC(); }
-
-    bool readPredicate() { return actualTC->readPredicate(); }
-
-    void setPredicate(bool val)
-    { actualTC->setPredicate(val); }
-
-    RegVal readMiscRegNoEffect(int misc_reg) const
-    { return actualTC->readMiscRegNoEffect(misc_reg); }
-
-    RegVal readMiscReg(int misc_reg)
-    { return actualTC->readMiscReg(misc_reg); }
-
-    void setMiscRegNoEffect(int misc_reg, RegVal val)
-    { return actualTC->setMiscRegNoEffect(misc_reg, val); }
-
-    void setMiscReg(int misc_reg, RegVal val)
-    { return actualTC->setMiscReg(misc_reg, val); }
-
-    RegId flattenRegId(const RegId& regId) const
-    { return actualTC->flattenRegId(regId); }
-
-    unsigned readStCondFailures()
-    { return actualTC->readStCondFailures(); }
-
-    void setStCondFailures(unsigned sc_failures)
-    { actualTC->setStCondFailures(sc_failures); }
-
-    void syscall(int64_t callnum, Fault *fault)
-    { actualTC->syscall(callnum, fault); }
-
-    Counter readFuncExeInst() { return actualTC->readFuncExeInst(); }
-
-    RegVal readIntRegFlat(int idx)
-    { return actualTC->readIntRegFlat(idx); }
-
-    void setIntRegFlat(int idx, RegVal val)
-    { actualTC->setIntRegFlat(idx, val); }
-
-    RegVal readFloatRegBitsFlat(int idx)
-    { return actualTC->readFloatRegBitsFlat(idx); }
-
-    void setFloatRegBitsFlat(int idx, RegVal val)
-    { actualTC->setFloatRegBitsFlat(idx, val); }
-
-    const VecRegContainer& readVecRegFlat(int id) const
-    { return actualTC->readVecRegFlat(id); }
-
-    VecRegContainer& getWritableVecRegFlat(int id)
-    { return actualTC->getWritableVecRegFlat(id); }
-
-    void setVecRegFlat(int idx, const VecRegContainer& val)
-    { actualTC->setVecRegFlat(idx, val); }
-
-    const VecElem& readVecElemFlat(const RegIndex& id,
-                                   const ElemIndex& elemIndex) const
-    { return actualTC->readVecElemFlat(id, elemIndex); }
-
-    void setVecElemFlat(const RegIndex& id, const ElemIndex& elemIndex,
-                        const VecElem& val)
-    { actualTC->setVecElemFlat(id, elemIndex, val); }
-
-    CCReg readCCRegFlat(int idx)
-    { return actualTC->readCCRegFlat(idx); }
-
-    void setCCRegFlat(int idx, CCReg val)
-    { actualTC->setCCRegFlat(idx, val); }
 };
 
 /** @{ */
@@ -607,7 +366,7 @@ class ProxyThreadContext : public ThreadContext
  * be confusing when the ThreadContext is exported via a proxy.
  */
 
-void serialize(ThreadContext &tc, CheckpointOut &cp);
+void serialize(const ThreadContext &tc, CheckpointOut &cp);
 void unserialize(ThreadContext &tc, CheckpointIn &cp);
 
 /** @} */

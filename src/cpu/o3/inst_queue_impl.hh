@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2017-2018 ARM Limited
+ * Copyright (c) 2011-2014, 2017-2019 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved.
  *
@@ -104,6 +104,7 @@ InstructionQueue<Impl>::InstructionQueue(O3CPU *cpu_ptr, IEW *iew_ptr,
     numPhysRegs = params->numPhysIntRegs + params->numPhysFloatRegs +
                     params->numPhysVecRegs +
                     params->numPhysVecRegs * TheISA::NumVecElemPerVecReg +
+                    params->numPhysVecPredRegs +
                     params->numPhysCCRegs;
 
     //Create an entry for each physical register within the
@@ -588,7 +589,7 @@ InstructionQueue<Impl>::insert(const DynInstPtr &new_inst)
     // Make sure the instruction is valid
     assert(new_inst);
 
-    DPRINTF(IQ, "Adding instruction [sn:%lli] PC %s to the IQ.\n",
+    DPRINTF(IQ, "Adding instruction [sn:%llu] PC %s to the IQ.\n",
             new_inst->seqNum, new_inst->pcState());
 
     assert(freeEntries != 0);
@@ -638,7 +639,7 @@ InstructionQueue<Impl>::insertNonSpec(const DynInstPtr &new_inst)
 
     nonSpecInsts[new_inst->seqNum] = new_inst;
 
-    DPRINTF(IQ, "Adding non-speculative instruction [sn:%lli] PC %s "
+    DPRINTF(IQ, "Adding non-speculative instruction [sn:%llu] PC %s "
             "to the IQ.\n",
             new_inst->seqNum, new_inst->pcState());
 
@@ -750,7 +751,7 @@ template <class Impl>
 void
 InstructionQueue<Impl>::processFUCompletion(const DynInstPtr &inst, int fu_idx)
 {
-    DPRINTF(IQ, "Processing FU completion [sn:%lli]\n", inst->seqNum);
+    DPRINTF(IQ, "Processing FU completion [sn:%llu]\n", inst->seqNum);
     assert(!cpu->switchedOut());
     // The CPU could have been sleeping until this op completed (*extremely*
     // long latency op).  Wake it if it was.  This may be overkill.
@@ -885,7 +886,7 @@ InstructionQueue<Impl>::scheduleReadyInsts()
             }
 
             DPRINTF(IQ, "Thread %i: Issuing instruction PC %s "
-                    "[sn:%lli]\n",
+                    "[sn:%llu]\n",
                     tid, issuing_inst->pcState(),
                     issuing_inst->seqNum);
 
@@ -942,7 +943,7 @@ template <class Impl>
 void
 InstructionQueue<Impl>::scheduleNonSpec(const InstSeqNum &inst)
 {
-    DPRINTF(IQ, "Marking nonspeculative instruction [sn:%lli] as ready "
+    DPRINTF(IQ, "Marking nonspeculative instruction [sn:%llu] as ready "
             "to execute.\n", inst);
 
     NonSpecMapIt inst_it = nonSpecInsts.find(inst);
@@ -970,7 +971,7 @@ template <class Impl>
 void
 InstructionQueue<Impl>::commit(const InstSeqNum &inst, ThreadID tid)
 {
-    DPRINTF(IQ, "[tid:%i]: Committing instructions older than [sn:%i]\n",
+    DPRINTF(IQ, "[tid:%i] Committing instructions older than [sn:%llu]\n",
             tid,inst);
 
     ListIt iq_it = instList[tid].begin();
@@ -1032,6 +1033,17 @@ InstructionQueue<Impl>::wakeDependents(const DynInstPtr &completed_inst)
             continue;
         }
 
+        // Avoid waking up dependents if the register is pinned
+        dest_reg->decrNumPinnedWritesToComplete();
+        if (dest_reg->isPinned())
+            completed_inst->setPinnedRegsWritten();
+
+        if (dest_reg->getNumPinnedWritesToComplete() != 0) {
+            DPRINTF(IQ, "Reg %d [%s] is pinned, skipping\n",
+                    dest_reg->index(), dest_reg->className());
+            continue;
+        }
+
         DPRINTF(IQ, "Waking any dependents on register %i (%s).\n",
                 dest_reg->index(),
                 dest_reg->className());
@@ -1041,7 +1053,7 @@ InstructionQueue<Impl>::wakeDependents(const DynInstPtr &completed_inst)
         DynInstPtr dep_inst = dependGraph.pop(dest_reg->flatIndex());
 
         while (dep_inst) {
-            DPRINTF(IQ, "Waking up a dependent instruction, [sn:%lli] "
+            DPRINTF(IQ, "Waking up a dependent instruction, [sn:%llu] "
                     "PC %s.\n", dep_inst->seqNum, dep_inst->pcState());
 
             // Might want to give more information to the instruction
@@ -1087,7 +1099,7 @@ InstructionQueue<Impl>::addReadyMemInst(const DynInstPtr &ready_inst)
     }
 
     DPRINTF(IQ, "Instruction is ready to issue, putting it onto "
-            "the ready list, PC %s opclass:%i [sn:%lli].\n",
+            "the ready list, PC %s opclass:%i [sn:%llu].\n",
             ready_inst->pcState(), op_class, ready_inst->seqNum);
 }
 
@@ -1095,7 +1107,7 @@ template <class Impl>
 void
 InstructionQueue<Impl>::rescheduleMemInst(const DynInstPtr &resched_inst)
 {
-    DPRINTF(IQ, "Rescheduling mem inst [sn:%lli]\n", resched_inst->seqNum);
+    DPRINTF(IQ, "Rescheduling mem inst [sn:%llu]\n", resched_inst->seqNum);
 
     // Reset DTB translation state
     resched_inst->translationStarted(false);
@@ -1118,7 +1130,7 @@ InstructionQueue<Impl>::completeMemInst(const DynInstPtr &completed_inst)
 {
     ThreadID tid = completed_inst->threadNumber;
 
-    DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%lli]\n",
+    DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%llu]\n",
             completed_inst->pcState(), completed_inst->seqNum);
 
     ++freeEntries;
@@ -1195,7 +1207,7 @@ template <class Impl>
 void
 InstructionQueue<Impl>::squash(ThreadID tid)
 {
-    DPRINTF(IQ, "[tid:%i]: Starting to squash instructions in "
+    DPRINTF(IQ, "[tid:%i] Starting to squash instructions in "
             "the IQ.\n", tid);
 
     // Read instruction sequence number of last instruction out of the
@@ -1216,7 +1228,7 @@ InstructionQueue<Impl>::doSquash(ThreadID tid)
     ListIt squash_it = instList[tid].end();
     --squash_it;
 
-    DPRINTF(IQ, "[tid:%i]: Squashing until sequence number %i!\n",
+    DPRINTF(IQ, "[tid:%i] Squashing until sequence number %i!\n",
             tid, squashedSeqNum[tid]);
 
     // Squash any instructions younger than the squashed sequence number
@@ -1245,18 +1257,19 @@ InstructionQueue<Impl>::doSquash(ThreadID tid)
             (squashed_inst->isMemRef() &&
              !squashed_inst->memOpDone())) {
 
-            DPRINTF(IQ, "[tid:%i]: Instruction [sn:%lli] PC %s squashed.\n",
+            DPRINTF(IQ, "[tid:%i] Instruction [sn:%llu] PC %s squashed.\n",
                     tid, squashed_inst->seqNum, squashed_inst->pcState());
 
             bool is_acq_rel = squashed_inst->isMemBarrier() &&
                          (squashed_inst->isLoad() ||
-                           (squashed_inst->isStore() &&
+                          (squashed_inst->isStore() &&
                              !squashed_inst->isStoreConditional()));
 
             // Remove the instruction from the dependency list.
             if (is_acq_rel ||
                 (!squashed_inst->isNonSpeculative() &&
                  !squashed_inst->isStoreConditional() &&
+                 !squashed_inst->isAtomic() &&
                  !squashed_inst->isMemBarrier() &&
                  !squashed_inst->isWriteBarrier())) {
 
@@ -1457,7 +1470,7 @@ InstructionQueue<Impl>::addIfReady(const DynInstPtr &inst)
         OpClass op_class = inst->opClass();
 
         DPRINTF(IQ, "Instruction is ready to issue, putting it onto "
-                "the ready list, PC %s opclass:%i [sn:%lli].\n",
+                "the ready list, PC %s opclass:%i [sn:%llu].\n",
                 inst->pcState(), op_class, inst->seqNum);
 
         readyInsts[op_class].push(inst);
@@ -1478,36 +1491,7 @@ template <class Impl>
 int
 InstructionQueue<Impl>::countInsts()
 {
-#if 0
-    //ksewell:This works but definitely could use a cleaner write
-    //with a more intuitive way of counting. Right now it's
-    //just brute force ....
-    // Change the #if if you want to use this method.
-    int total_insts = 0;
-
-    for (ThreadID tid = 0; tid < numThreads; ++tid) {
-        ListIt count_it = instList[tid].begin();
-
-        while (count_it != instList[tid].end()) {
-            if (!(*count_it)->isSquashed() && !(*count_it)->isSquashedInIQ()) {
-                if (!(*count_it)->isIssued()) {
-                    ++total_insts;
-                } else if ((*count_it)->isMemRef() &&
-                           !(*count_it)->memOpDone) {
-                    // Loads that have not been marked as executed still count
-                    // towards the total instructions.
-                    ++total_insts;
-                }
-            }
-
-            ++count_it;
-        }
-    }
-
-    return total_insts;
-#else
     return numEntries - freeEntries;
-#endif
 }
 
 template <class Impl>
@@ -1528,7 +1512,7 @@ InstructionQueue<Impl>::dumpLists()
     cprintf("Non speculative list: ");
 
     while (non_spec_it != non_spec_end_it) {
-        cprintf("%s [sn:%lli]", (*non_spec_it).second->pcState(),
+        cprintf("%s [sn:%llu]", (*non_spec_it).second->pcState(),
                 (*non_spec_it).second->seqNum);
         ++non_spec_it;
     }
@@ -1542,7 +1526,7 @@ InstructionQueue<Impl>::dumpLists()
     cprintf("List order: ");
 
     while (list_order_it != list_order_end_it) {
-        cprintf("%i OpClass:%i [sn:%lli] ", i, (*list_order_it).queueType,
+        cprintf("%i OpClass:%i [sn:%llu] ", i, (*list_order_it).queueType,
                 (*list_order_it).oldestInst);
 
         ++list_order_it;
@@ -1577,7 +1561,7 @@ InstructionQueue<Impl>::dumpInsts()
                 }
             }
 
-            cprintf("PC: %s\n[sn:%lli]\n[tid:%i]\n"
+            cprintf("PC: %s\n[sn:%llu]\n[tid:%i]\n"
                     "Issued:%i\nSquashed:%i\n",
                     (*inst_list_it)->pcState(),
                     (*inst_list_it)->seqNum,
@@ -1619,7 +1603,7 @@ InstructionQueue<Impl>::dumpInsts()
             }
         }
 
-        cprintf("PC: %s\n[sn:%lli]\n[tid:%i]\n"
+        cprintf("PC: %s\n[sn:%llu]\n[tid:%i]\n"
                 "Issued:%i\nSquashed:%i\n",
                 (*inst_list_it)->pcState(),
                 (*inst_list_it)->seqNum,

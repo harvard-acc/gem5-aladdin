@@ -62,17 +62,31 @@ initiateMemRead(XC *xc, Trace::InstRecord *traceData, Addr addr,
 }
 
 /// Extract the data returned from a timing mode read.
-template <class MemT>
+template <ByteOrder Order, class MemT>
 void
 getMem(PacketPtr pkt, MemT &mem, Trace::InstRecord *traceData)
 {
-    mem = pkt->get<MemT>(TheISA::GuestByteOrder);
+    mem = pkt->get<MemT>(Order);
     if (traceData)
         traceData->setData(mem);
 }
 
+template <class MemT>
+void
+getMemLE(PacketPtr pkt, MemT &mem, Trace::InstRecord *traceData)
+{
+    getMem<LittleEndianByteOrder>(pkt, mem, traceData);
+}
+
+template <class MemT>
+void
+getMemBE(PacketPtr pkt, MemT &mem, Trace::InstRecord *traceData)
+{
+    getMem<BigEndianByteOrder>(pkt, mem, traceData);
+}
+
 /// Read from memory in atomic mode.
-template <class XC, class MemT>
+template <ByteOrder Order, class XC, class MemT>
 Fault
 readMemAtomic(XC *xc, Trace::InstRecord *traceData, Addr addr, MemT &mem,
               Request::Flags flags)
@@ -80,15 +94,32 @@ readMemAtomic(XC *xc, Trace::InstRecord *traceData, Addr addr, MemT &mem,
     memset(&mem, 0, sizeof(mem));
     Fault fault = xc->readMem(addr, (uint8_t *)&mem, sizeof(MemT), flags);
     if (fault == NoFault) {
-        mem = TheISA::gtoh(mem);
+        mem = gtoh(mem, Order);
         if (traceData)
             traceData->setData(mem);
     }
     return fault;
 }
 
-/// Write to memory in timing mode.
 template <class XC, class MemT>
+Fault
+readMemAtomicLE(XC *xc, Trace::InstRecord *traceData, Addr addr, MemT &mem,
+                Request::Flags flags)
+{
+    return readMemAtomic<LittleEndianByteOrder>(
+            xc, traceData, addr, mem, flags);
+}
+
+template <class XC, class MemT>
+Fault
+readMemAtomicBE(XC *xc, Trace::InstRecord *traceData, Addr addr, MemT &mem,
+                Request::Flags flags)
+{
+    return readMemAtomic<BigEndianByteOrder>(xc, traceData, addr, mem, flags);
+}
+
+/// Write to memory in timing mode.
+template <ByteOrder Order, class XC, class MemT>
 Fault
 writeMemTiming(XC *xc, Trace::InstRecord *traceData, MemT mem, Addr addr,
                Request::Flags flags, uint64_t *res)
@@ -96,12 +127,30 @@ writeMemTiming(XC *xc, Trace::InstRecord *traceData, MemT mem, Addr addr,
     if (traceData) {
         traceData->setData(mem);
     }
-    mem = TheISA::htog(mem);
+    mem = htog(mem, Order);
     return xc->writeMem((uint8_t *)&mem, sizeof(MemT), addr, flags, res);
 }
 
-/// Write to memory in atomic mode.
 template <class XC, class MemT>
+Fault
+writeMemTimingLE(XC *xc, Trace::InstRecord *traceData, MemT mem, Addr addr,
+               Request::Flags flags, uint64_t *res)
+{
+    return writeMemTiming<LittleEndianByteOrder>(
+            xc, traceData, mem, addr, flags, res);
+}
+
+template <class XC, class MemT>
+Fault
+writeMemTimingBE(XC *xc, Trace::InstRecord *traceData, MemT mem, Addr addr,
+               Request::Flags flags, uint64_t *res)
+{
+    return writeMemTiming<BigEndianByteOrder>(
+            xc, traceData, mem, addr, flags, res);
+}
+
+/// Write to memory in atomic mode.
+template <ByteOrder Order, class XC, class MemT>
 Fault
 writeMemAtomic(XC *xc, Trace::InstRecord *traceData, const MemT &mem,
                Addr addr, Request::Flags flags, uint64_t *res)
@@ -109,48 +158,86 @@ writeMemAtomic(XC *xc, Trace::InstRecord *traceData, const MemT &mem,
     if (traceData) {
         traceData->setData(mem);
     }
-    MemT host_mem = TheISA::htog(mem);
+    MemT host_mem = htog(mem, Order);
     Fault fault =
           xc->writeMem((uint8_t *)&host_mem, sizeof(MemT), addr, flags, res);
     if (fault == NoFault && res != NULL) {
         if (flags & Request::MEM_SWAP || flags & Request::MEM_SWAP_COND)
-            *(MemT *)res = TheISA::gtoh(*(MemT *)res);
+            *(MemT *)res = gtoh(*(MemT *)res, Order);
         else
-            *res = TheISA::gtoh(*res);
+            *res = gtoh(*res, Order);
     }
     return fault;
 }
 
-/// Do atomic read-modify-write (AMO) in atomic mode
 template <class XC, class MemT>
 Fault
-amoMemAtomic(XC *xc, Trace::InstRecord *traceData, MemT &mem, Addr addr,
-             Request::Flags flags, AtomicOpFunctor *amo_op)
+writeMemAtomicLE(XC *xc, Trace::InstRecord *traceData, const MemT &mem,
+                 Addr addr, Request::Flags flags, uint64_t *res)
 {
-    assert(amo_op);
+    return writeMemAtomic<LittleEndianByteOrder>(
+            xc, traceData, mem, addr, flags, res);
+}
+
+template <class XC, class MemT>
+Fault
+writeMemAtomicBE(XC *xc, Trace::InstRecord *traceData, const MemT &mem,
+                 Addr addr, Request::Flags flags, uint64_t *res)
+{
+    return writeMemAtomic<BigEndianByteOrder>(
+            xc, traceData, mem, addr, flags, res);
+}
+
+/// Do atomic read-modify-write (AMO) in atomic mode
+template <ByteOrder Order, class XC, class MemT>
+Fault
+amoMemAtomic(XC *xc, Trace::InstRecord *traceData, MemT &mem, Addr addr,
+             Request::Flags flags, AtomicOpFunctor *_amo_op)
+{
+    assert(_amo_op);
 
     // mem will hold the previous value at addr after the AMO completes
     memset(&mem, 0, sizeof(mem));
 
+    AtomicOpFunctorPtr amo_op = AtomicOpFunctorPtr(_amo_op);
     Fault fault = xc->amoMem(addr, (uint8_t *)&mem, sizeof(MemT), flags,
-                             amo_op);
+                             std::move(amo_op));
 
     if (fault == NoFault) {
-        mem = TheISA::gtoh(mem);
+        mem = gtoh(mem, Order);
         if (traceData)
             traceData->setData(mem);
     }
     return fault;
 }
 
+template <class XC, class MemT>
+Fault
+amoMemAtomicLE(XC *xc, Trace::InstRecord *traceData, MemT &mem, Addr addr,
+               Request::Flags flags, AtomicOpFunctor *_amo_op)
+{
+    return amoMemAtomic<LittleEndianByteOrder>(
+            xc, traceData, mem, addr, flags, _amo_op);
+}
+
+template <class XC, class MemT>
+Fault
+amoMemAtomicBE(XC *xc, Trace::InstRecord *traceData, MemT &mem, Addr addr,
+               Request::Flags flags, AtomicOpFunctor *_amo_op)
+{
+    return amoMemAtomic<BigEndianByteOrder>(
+            xc, traceData, mem, addr, flags, _amo_op);
+}
+
 /// Do atomic read-modify-wrote (AMO) in timing mode
 template <class XC, class MemT>
 Fault
 initiateMemAMO(XC *xc, Trace::InstRecord *traceData, Addr addr, MemT& mem,
-               Request::Flags flags, AtomicOpFunctor *amo_op)
+               Request::Flags flags, AtomicOpFunctor *_amo_op)
 {
-    assert(amo_op);
-    return xc->initiateMemAMO(addr, sizeof(MemT), flags, amo_op);
+    assert(_amo_op);
+    AtomicOpFunctorPtr amo_op = AtomicOpFunctorPtr(_amo_op);
+    return xc->initiateMemAMO(addr, sizeof(MemT), flags, std::move(amo_op));
 }
 
 #endif

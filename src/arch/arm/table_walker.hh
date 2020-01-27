@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2016 ARM Limited
+ * Copyright (c) 2010-2016, 2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -43,11 +43,13 @@
 
 #include <list>
 
+#include "arch/arm/faults.hh"
 #include "arch/arm/miscregs.hh"
 #include "arch/arm/system.hh"
 #include "arch/arm/tlb.hh"
 #include "mem/request.hh"
 #include "params/ArmTableWalker.hh"
+#include "sim/clocked_object.hh"
 #include "sim/eventq.hh"
 
 class ThreadContext;
@@ -59,13 +61,15 @@ class Translation;
 class TLB;
 class Stage2MMU;
 
-class TableWalker : public MemObject
+class TableWalker : public ClockedObject
 {
   public:
     class WalkerState;
 
     class DescriptorBase {
       public:
+        DescriptorBase() : lookupLevel(L0) {}
+
         /** Current lookup level for this descriptor */
         LookupLevel lookupLevel;
 
@@ -380,6 +384,8 @@ class TableWalker : public MemObject
             Block,
             Page
         };
+
+        LongDescriptor() : data(0), _dirty(false) {}
 
         /** The raw bits of the entry */
         uint64_t data;
@@ -750,6 +756,9 @@ class TableWalker : public MemObject
         /** If the access comes from the secure state. */
         bool isSecure;
 
+        /** True if table walks are uncacheable (for table descriptors) */
+        bool isUncacheable;
+
         /** Helper variables used to implement hierarchical access permissions
          * when the long-desc. format is used (LPAE only) */
         bool secureLookup;
@@ -757,6 +766,9 @@ class TableWalker : public MemObject
         bool userTable;
         bool xnTable;
         bool pxnTable;
+
+        /** Hierarchical access permission disable */
+        bool hpd;
 
         /** Flag indicating if a second stage of lookup is required */
         bool stage2Req;
@@ -889,8 +901,8 @@ class TableWalker : public MemObject
     DrainState drain() override;
     void drainResume() override;
 
-    BaseMasterPort& getMasterPort(const std::string &if_name,
-                                  PortID idx = InvalidPortID) override;
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 
     void regStats() override;
 
@@ -939,6 +951,8 @@ class TableWalker : public MemObject
     bool fetchDescriptor(Addr descAddr, uint8_t *data, int numBytes,
         Request::Flags flags, int queueIndex, Event *event,
         void (TableWalker::*doDescriptor)());
+
+    Fault generateLongDescFault(ArmFault::FaultSource src);
 
     void insertTableEntry(DescriptorBase &descriptor, bool longDescriptor);
 

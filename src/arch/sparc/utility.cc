@@ -57,7 +57,7 @@ getArgument(ThreadContext *tc, int &number, uint16_t size, bool fp)
         return tc->readIntReg(8 + number);
     } else {
         Addr sp = tc->readIntReg(StackPointerReg);
-        FSTranslatingPortProxy &vp = tc->getVirtProxy();
+        PortProxy &vp = tc->getVirtProxy();
         uint64_t arg = vp.read<uint64_t>(sp + 92 +
                             (number-NumArgumentRegs) * sizeof(uint64_t));
         return arg;
@@ -232,7 +232,7 @@ copyRegs(ThreadContext *src, ThreadContext *dest)
 
     // Then loop through the floating point registers.
     for (int i = 0; i < SparcISA::NumFloatArchRegs; ++i) {
-        dest->setFloatRegBits(i, src->readFloatRegBits(i));
+        dest->setFloatReg(i, src->readFloatReg(i));
     }
 
     // Would need to add condition-code regs if implemented
@@ -248,7 +248,7 @@ copyRegs(ThreadContext *src, ThreadContext *dest)
 void
 skipFunction(ThreadContext *tc)
 {
-    TheISA::PCState newPC = tc->pcState();
+    PCState newPC = tc->pcState();
     newPC.set(tc->readIntReg(ReturnAddressReg));
     tc->pcState(newPC);
 }

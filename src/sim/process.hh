@@ -41,7 +41,7 @@
 #include <vector>
 
 #include "arch/registers.hh"
-#include "base/loader/object_file.hh"
+#include "base/loader/memory_image.hh"
 #include "base/statistics.hh"
 #include "base/types.hh"
 #include "config/the_isa.hh"
@@ -63,6 +63,9 @@ class ThreadContext;
 
 class Process : public SimObject
 {
+  protected:
+    void doSyscall(int64_t callnum, ThreadContext *tc, Fault *fault);
+
   public:
     Process(ProcessParams *params, EmulationPageTable *pTable,
             ObjectFile *obj_file);
@@ -70,13 +73,13 @@ class Process : public SimObject
     void serialize(CheckpointOut &cp) const override;
     void unserialize(CheckpointIn &cp) override;
 
+    void init() override;
     void initState() override;
     DrainState drain() override;
 
-    virtual void syscall(int64_t callnum, ThreadContext *tc, Fault *fault);
+    virtual void syscall(ThreadContext *tc, Fault *fault) = 0;
     virtual RegVal getSyscallArg(ThreadContext *tc, int &i) = 0;
     virtual RegVal getSyscallArg(ThreadContext *tc, int &i, int width);
-    virtual void setSyscallArg(ThreadContext *tc, int i, RegVal val) = 0;
     virtual void setSyscallReturn(ThreadContext *tc,
                                   SyscallReturn return_value) = 0;
     virtual SyscallDesc *getDesc(int callnum) = 0;
@@ -88,12 +91,10 @@ class Process : public SimObject
     inline uint64_t pid() { return _pid; }
     inline uint64_t ppid() { return _ppid; }
     inline uint64_t pgid() { return _pgid; }
+    inline void pgid(uint64_t pgid) { _pgid = pgid; }
     inline uint64_t tgid() { return _tgid; }
-    inline void setpgid(uint64_t pgid) { _pgid = pgid; }
 
     const char *progName() const { return executable.c_str(); }
-    std::string fullPath(const std::string &filename);
-    std::string getcwd() const { return cwd; }
 
     /**
      * Find an emulated device driver.
@@ -127,9 +128,6 @@ class Process : public SimObject
     {
         contextIds.push_back(context_id);
     }
-
-    // Find a free context to use
-    ThreadContext *findFreeContext();
 
     /**
      * After delegating a thread context to a child process
@@ -173,18 +171,96 @@ class Process : public SimObject
 
     Stats::Scalar numSyscalls;  // track how many system calls are executed
 
-    bool useArchPT; // flag for using architecture specific page table
-    bool kvmInSE;   // running KVM requires special initialization
+    // flag for using architecture specific page table
+    bool useArchPT;
+    // running KVM requires special initialization
+    bool kvmInSE;
+    // flag for using the process as a thread which shares page tables
+    bool useForClone;
 
     EmulationPageTable *pTable;
 
     SETranslatingPortProxy initVirtMem; // memory proxy for initial image load
 
+    /**
+     * Each instance of a Loader subclass will have a chance to try to load
+     * an object file when tryLoaders is called. If they can't because they
+     * aren't compatible with it (wrong arch, wrong OS, etc), then they
+     * silently fail by returning nullptr so other loaders can try.
+     */
+    class Loader
+    {
+      public:
+        Loader();
+
+        /* Loader instances are singletons. */
+        Loader(const Loader &) = delete;
+        void operator=(const Loader &) = delete;
+
+        virtual ~Loader() {}
+
+        /**
+         * Each subclass needs to implement this method. If the loader is
+         * compatible with the passed in object file, it should return the
+         * created Process object corresponding to it. If not, it should fail
+         * silently and return nullptr. If there's a non-compatibliity related
+         * error like file IO errors, etc., those should fail non-silently
+         * with a panic or fail as normal.
+         */
+        virtual Process *load(ProcessParams *params, ObjectFile *obj_file) = 0;
+    };
+
+    // Try all the Loader instance's "load" methods one by one until one is
+    // successful. If none are, complain and fail.
+    static Process *tryLoaders(ProcessParams *params, ObjectFile *obj_file);
+
     ObjectFile *objFile;
+    MemoryImage image;
+    MemoryImage interpImage;
     std::vector<std::string> argv;
     std::vector<std::string> envp;
-    std::string cwd;
     std::string executable;
+
+    /**
+     * Return an absolute path given a relative path paired with the current
+     * working directory of the process running under simulation.
+     *
+     * @param path The relative path (generally a filename) that needs the
+     * current working directory prepended.
+     * @param host_fs A flag which determines whether to return a
+     * path for the host filesystem or the filesystem of the process running
+     * under simulation. Only matters if filesysem redirection is used to
+     * replace files (or directories) that would normally appear via the
+     * host filesystem.
+     * @return String containing an absolute path.
+     */
+    std::string absolutePath(const std::string &path, bool host_fs);
+
+    /**
+     * Redirect file path if it matches any keys initialized by system object.
+     * @param filename An input parameter containing either a relative path
+     * or an absolute path. If given a relative path, the path will be
+     * prepended to the current working directory of the simulation with
+     * respect to the host filesystem.
+     * @return String containing an absolute path.
+     */
+    std::string checkPathRedirect(const std::string &filename);
+
+    /**
+     * The cwd members are used to track changes to the current working
+     * directory for the purpose of executing system calls which depend on
+     * relative paths (i.e. open, chdir).
+     *
+     * The tgt member and host member may differ if the path for the current
+     * working directory is redirected to point to a different location
+     * (i.e. `cd /proc` should point to '$(gem5_repo)/m5out/fs/proc'
+     * instead of '/proc').
+     */
+    std::string tgtCwd;
+    std::string hostCwd;
+
+    // Syscall emulation uname release.
+    std::string release;
 
     // Id of the owner of the process
     uint64_t _uid;

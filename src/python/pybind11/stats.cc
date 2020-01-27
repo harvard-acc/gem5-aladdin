@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 ARM Limited
+ * Copyright (c) 2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -41,14 +41,20 @@
  *          Andreas Sandberg
  */
 
+#include "config/use_hdf5.hh"
+
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
 #include "base/statistics.hh"
 #include "base/stats/text.hh"
 #include "base/stats/sql.hh"
+#if USE_HDF5
+#include "base/stats/hdf5.hh"
+#endif
 #include "sim/stat_control.hh"
 #include "sim/stat_register.hh"
+
 
 namespace py = pybind11;
 
@@ -79,6 +85,9 @@ pybind_init_stats(py::module &m_native)
         .def("initSimStats", &Stats::initSimStats)
         .def("initText", &Stats::initText, py::return_value_policy::reference)
         .def("initOutputSQL", &Stats::initOutputSQL, py::return_value_policy::reference)
+#if USE_HDF5
+        .def("initHDF5", &Stats::initHDF5)
+#endif
         .def("registerPythonStatsHandlers",
              &Stats::registerPythonStatsHandlers)
         .def("schedStatEvent", &Stats::schedStatEvent)
@@ -95,9 +104,12 @@ pybind_init_stats(py::module &m_native)
         .def("begin", &Stats::Output::begin)
         .def("end", &Stats::Output::end)
         .def("valid", &Stats::Output::valid)
+        .def("beginGroup", &Stats::Output::beginGroup)
+        .def("endGroup", &Stats::Output::endGroup)
         ;
 
-    py::class_<Stats::Info>(m, "Info")
+    py::class_<Stats::Info, std::unique_ptr<Stats::Info, py::nodelete>>(
+        m, "Info")
         .def_readwrite("name", &Stats::Info::name)
         .def_readonly("desc", &Stats::Info::desc)
         .def_readonly("id", &Stats::Info::id)
@@ -111,5 +123,15 @@ pybind_init_stats(py::module &m_native)
         .def("reset", &Stats::Info::reset)
         .def("zero", &Stats::Info::zero)
         .def("visit", &Stats::Info::visit)
+        ;
+
+    py::class_<Stats::Group, std::unique_ptr<Stats::Group, py::nodelete>>(
+        m, "Group")
+        .def("regStats", &Stats::Group::regStats)
+        .def("resetStats", &Stats::Group::resetStats)
+        .def("preDumpStats", &Stats::Group::preDumpStats)
+        .def("getStats", &Stats::Group::getStats)
+        .def("getStatGroups", &Stats::Group::getStatGroups)
+        .def("addStatGroup", &Stats::Group::addStatGroup)
         ;
 }

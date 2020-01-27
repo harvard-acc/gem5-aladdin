@@ -376,12 +376,10 @@ Fetch2::evaluate()
             } else {
                 uint8_t *line = line_in->line;
 
-                TheISA::MachInst inst_word;
                 /* The instruction is wholly in the line, can just
                  *  assign */
-                inst_word = TheISA::gtoh(
-                    *(reinterpret_cast<TheISA::MachInst *>
-                    (line + fetch_info.inputIndex)));
+                auto inst_word = *reinterpret_cast<TheISA::MachInst *>
+                                  (line + fetch_info.inputIndex);
 
                 if (!decoder->instReady()) {
                     decoder->moreBytes(fetch_info.pc,
@@ -420,6 +418,8 @@ Fetch2::evaluate()
                         loadInstructions++;
                     else if (decoded_inst->isStore())
                         storeInstructions++;
+                    else if (decoded_inst->isAtomic())
+                        amoInstructions++;
                     else if (decoded_inst->isVector())
                         vecInstructions++;
                     else if (decoded_inst->isFloating())
@@ -632,6 +632,11 @@ Fetch2::regStats()
     storeInstructions
         .name(name() + ".store_instructions")
         .desc("Number of memory store instructions successfully decoded")
+        .flags(total);
+
+    amoInstructions
+        .name(name() + ".amo_instructions")
+        .desc("Number of memory atomic instructions successfully decoded")
         .flags(total);
 }
 

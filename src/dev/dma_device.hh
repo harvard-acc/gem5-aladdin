@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2015, 2017 ARM Limited
+ * Copyright (c) 2012-2013, 2015, 2017, 2019 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -58,6 +58,8 @@
 //Modification of DMA for Aladdin simulation
 #define MAX_DMA_REQUEST 64
 
+class ClockedObject;
+
 class DmaPort : public MasterPort, public Drainable
 {
   private:
@@ -90,6 +92,8 @@ class DmaPort : public MasterPort, public Drainable
         uint8_t* data;
         Tick delay;
         Request::Flags flag;
+        uint32_t sid;
+        uint32_t ssid;
     };
 
     /**
@@ -146,7 +150,7 @@ class DmaPort : public MasterPort, public Drainable
 
   public:
     /** The device that owns this port. */
-    MemObject *device;
+    ClockedObject *const device;
 
     /** The system that device/port are in. This is used to select which mode
      * we are currently operating in. */
@@ -192,6 +196,13 @@ class DmaPort : public MasterPort, public Drainable
      * updates memory before issuing the write request.
      */
     bool invalidateOnWrite;
+
+    /** Default streamId */
+    const uint32_t defaultSid;
+
+    /** Default substreamId */
+    const uint32_t defaultSSid;
+
   protected:
 
     bool recvTimingResp(PacketPtr pkt) override;
@@ -206,16 +217,21 @@ class DmaPort : public MasterPort, public Drainable
     static Addr getPacketAddr(PacketPtr pkt);
     static Event* getPacketCompletionEvent(PacketPtr pkt);
 
-    DmaPort(MemObject *dev, System *s);
+    DmaPort(ClockedObject *dev, System *s, uint32_t sid = 0, uint32_t ssid = 0);
 
-    DmaPort(MemObject *dev, System *s, unsigned max_req);
-
-    DmaPort(MemObject *dev, System *s, unsigned max_req,
+    DmaPort(ClockedObject *dev, System *s, unsigned max_req,
             unsigned _chunkSize, unsigned _numChannels = 1,
-            bool _invalidateOnWrite = false);
+            bool _invalidateOnWrite = false, uint32_t sid = 0,
+            uint32_t ssid = 0);
 
-    RequestPtr dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
-                         uint8_t *data, Tick delay, Request::Flags flag = 0);
+    RequestPtr
+    dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+              uint8_t *data, Tick delay, Request::Flags flag = 0);
+
+    RequestPtr
+    dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+              uint8_t *data, uint32_t sid, uint32_t ssid, Tick delay,
+              Request::Flags flag = 0);
 
     bool dmaPending() const { return pendingCount > 0; }
 
@@ -233,9 +249,23 @@ class DmaDevice : public PioDevice
     virtual ~DmaDevice() { }
 
     void dmaWrite(Addr addr, int size, Event *event, uint8_t *data,
+                  uint32_t sid, uint32_t ssid, Tick delay = 0)
+    {
+        dmaPort.dmaAction(MemCmd::WriteReq, addr, size, event, data,
+                          sid, ssid, delay);
+    }
+
+    void dmaWrite(Addr addr, int size, Event *event, uint8_t *data,
                   Tick delay = 0)
     {
         dmaPort.dmaAction(MemCmd::WriteReq, addr, size, event, data, delay);
+    }
+
+    void dmaRead(Addr addr, int size, Event *event, uint8_t *data,
+                 uint32_t sid, uint32_t ssid, Tick delay = 0)
+    {
+        dmaPort.dmaAction(MemCmd::ReadReq, addr, size, event, data,
+                          sid, ssid, delay);
     }
 
     void dmaRead(Addr addr, int size, Event *event, uint8_t *data,
@@ -250,8 +280,8 @@ class DmaDevice : public PioDevice
 
     unsigned int cacheBlockSize() const { return sys->cacheLineSize(); }
 
-    BaseMasterPort &getMasterPort(const std::string &if_name,
-                                  PortID idx = InvalidPortID) override;
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 
 };
 

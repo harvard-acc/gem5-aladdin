@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 ARM Limited
+ * Copyright (c) 2014-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -60,7 +60,6 @@ class BaseSimpleCPU;
 
 class SimpleExecContext : public ExecContext {
   protected:
-    typedef TheISA::CCReg CCReg;
     using VecRegContainer = TheISA::VecRegContainer;
     using VecElem = TheISA::VecElem;
 
@@ -120,6 +119,10 @@ class SimpleExecContext : public ExecContext {
     // Number of vector register file accesses
     mutable Stats::Scalar numVecRegReads;
     Stats::Scalar numVecRegWrites;
+
+    // Number of predicate register file accesses
+    mutable Stats::Scalar numVecPredRegReads;
+    Stats::Scalar numVecPredRegWrites;
 
     // Number of condition code register file accesses
     Stats::Scalar numCCRegReads;
@@ -198,7 +201,7 @@ class SimpleExecContext : public ExecContext {
         numFpRegReads++;
         const RegId& reg = si->srcRegIdx(idx);
         assert(reg.isFloatReg());
-        return thread->readFloatRegBits(reg.index());
+        return thread->readFloatReg(reg.index());
     }
 
     /** Sets the bits of a floating point register of single width
@@ -209,7 +212,7 @@ class SimpleExecContext : public ExecContext {
         numFpRegWrites++;
         const RegId& reg = si->destRegIdx(idx);
         assert(reg.isFloatReg());
-        thread->setFloatRegBits(reg.index(), val);
+        thread->setFloatReg(reg.index(), val);
     }
 
     /** Reads a vector register. */
@@ -317,7 +320,7 @@ class SimpleExecContext : public ExecContext {
     readVecElemOperand(const StaticInst *si, int idx) const override
     {
         numVecRegReads++;
-        const RegId& reg = si->destRegIdx(idx);
+        const RegId& reg = si->srcRegIdx(idx);
         assert(reg.isVecElem());
         return thread->readVecElem(reg);
     }
@@ -333,7 +336,35 @@ class SimpleExecContext : public ExecContext {
         thread->setVecElem(reg, val);
     }
 
-    CCReg
+    const VecPredRegContainer&
+    readVecPredRegOperand(const StaticInst *si, int idx) const override
+    {
+        numVecPredRegReads++;
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isVecPredReg());
+        return thread->readVecPredReg(reg);
+    }
+
+    VecPredRegContainer&
+    getWritableVecPredRegOperand(const StaticInst *si, int idx) override
+    {
+        numVecPredRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecPredReg());
+        return thread->getWritableVecPredReg(reg);
+    }
+
+    void
+    setVecPredRegOperand(const StaticInst *si, int idx,
+                         const VecPredRegContainer& val) override
+    {
+        numVecPredRegWrites++;
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecPredReg());
+        thread->setVecPredReg(reg, val);
+    }
+
+    RegVal
     readCCRegOperand(const StaticInst *si, int idx) override
     {
         numCCRegReads++;
@@ -343,7 +374,7 @@ class SimpleExecContext : public ExecContext {
     }
 
     void
-    setCCRegOperand(const StaticInst *si, int idx, CCReg val) override
+    setCCRegOperand(const StaticInst *si, int idx, RegVal val) override
     {
         numCCRegWrites++;
         const RegId& reg = si->destRegIdx(idx);
@@ -403,26 +434,47 @@ class SimpleExecContext : public ExecContext {
         thread->pcState(val);
     }
 
-
     Fault
     readMem(Addr addr, uint8_t *data, unsigned int size,
-            Request::Flags flags) override
+            Request::Flags flags,
+            const std::vector<bool>& byte_enable = std::vector<bool>())
+        override
     {
-        return cpu->readMem(addr, data, size, flags);
+        assert(byte_enable.empty() || byte_enable.size() == size);
+        return cpu->readMem(addr, data, size, flags, byte_enable);
     }
 
     Fault
     initiateMemRead(Addr addr, unsigned int size,
-                    Request::Flags flags) override
+                    Request::Flags flags,
+                    const std::vector<bool>& byte_enable = std::vector<bool>())
+        override
     {
-        return cpu->initiateMemRead(addr, size, flags);
+        assert(byte_enable.empty() || byte_enable.size() == size);
+        return cpu->initiateMemRead(addr, size, flags, byte_enable);
     }
 
     Fault
     writeMem(uint8_t *data, unsigned int size, Addr addr,
-             Request::Flags flags, uint64_t *res) override
+             Request::Flags flags, uint64_t *res,
+             const std::vector<bool>& byte_enable = std::vector<bool>())
+        override
     {
-        return cpu->writeMem(data, size, addr, flags, res);
+        assert(byte_enable.empty() || byte_enable.size() == size);
+        return cpu->writeMem(data, size, addr, flags, res, byte_enable);
+    }
+
+    Fault amoMem(Addr addr, uint8_t *data, unsigned int size,
+                 Request::Flags flags, AtomicOpFunctorPtr amo_op) override
+    {
+        return cpu->amoMem(addr, data, size, flags, std::move(amo_op));
+    }
+
+    Fault initiateMemAMO(Addr addr, unsigned int size,
+                         Request::Flags flags,
+                         AtomicOpFunctorPtr amo_op) override
+    {
+        return cpu->initiateMemAMO(addr, size, flags, std::move(amo_op));
     }
 
     /**
@@ -447,32 +499,13 @@ class SimpleExecContext : public ExecContext {
      * Executes a syscall specified by the callnum.
      */
     void
-    syscall(int64_t callnum, Fault *fault) override
+    syscall(Fault *fault) override
     {
-        if (FullSystem)
-            panic("Syscall emulation isn't available in FS mode.");
-
-        thread->syscall(callnum, fault);
+        thread->syscall(fault);
     }
 
     /** Returns a pointer to the ThreadContext. */
     ThreadContext *tcBase() override { return thread->getTC(); }
-
-    /**
-     * Somewhat Alpha-specific function that handles returning from an
-     * error or interrupt.
-     */
-    Fault hwrei() override { return thread->hwrei(); }
-
-    /**
-     * Check for special simulator handling of specific PAL calls.  If
-     * return value is false, actual PAL call will be suppressed.
-     */
-    bool
-    simPalCheck(int palFunc) override
-    {
-        return thread->simPalCheck(palFunc);
-    }
 
     bool
     readPredicate() const override
@@ -488,6 +521,18 @@ class SimpleExecContext : public ExecContext {
         if (cpu->traceData) {
             cpu->traceData->setPredicate(val);
         }
+    }
+
+    bool
+    readMemAccPredicate() const override
+    {
+        return thread->readMemAccPredicate();
+    }
+
+    void
+    setMemAccPredicate(bool val) override
+    {
+        thread->setMemAccPredicate(val);
     }
 
     /**
@@ -522,25 +567,6 @@ class SimpleExecContext : public ExecContext {
     {
         return cpu->getCpuAddrMonitor(thread->threadId());
     }
-
-#if THE_ISA == MIPS_ISA
-    RegVal
-    readRegOtherThread(const RegId& reg, ThreadID tid=InvalidThreadID)
-        override
-    {
-        panic("Simple CPU models do not support multithreaded "
-              "register access.");
-    }
-
-    void
-    setRegOtherThread(const RegId& reg, RegVal val,
-                      ThreadID tid=InvalidThreadID) override
-    {
-        panic("Simple CPU models do not support multithreaded "
-              "register access.");
-    }
-#endif
-
 };
 
 #endif // __CPU_EXEC_CONTEXT_HH__

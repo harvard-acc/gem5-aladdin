@@ -54,8 +54,9 @@ class X86_64LinuxProcess : public X86_64Process
   public:
     /// Constructor.
     X86_64LinuxProcess(ProcessParams * params, ObjectFile *objFile);
+    void syscall(ThreadContext *tc, Fault *fault) override;
     void clone(ThreadContext *old_tc, ThreadContext *new_tc, Process *process,
-               TheISA::IntReg flags);
+               RegVal flags);
 };
 
 class I386LinuxProcess : public I386Process
@@ -63,8 +64,9 @@ class I386LinuxProcess : public I386Process
   public:
     /// Constructor.
     I386LinuxProcess(ProcessParams * params, ObjectFile *objFile);
+    void syscall(ThreadContext *tc, Fault *fault) override;
     void clone(ThreadContext *old_tc, ThreadContext *new_tc, Process *process,
-               TheISA::IntReg flags);
+               RegVal flags);
 };
 
 } // namespace X86ISA

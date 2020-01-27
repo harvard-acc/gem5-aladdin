@@ -1,6 +1,7 @@
 Authors: Jason Lowe-Power
          Andreas Sandberg
          Steve Reinhardt
+         Bobby R. Bruce
 
 If you've made changes to gem5 that might benefit others, we strongly encourage
 you to contribute those changes to the public gem5 repository. There are
@@ -179,6 +180,11 @@ Signed-off-by tag to the commit message. By adding this line, the contributor
 certifies the contribution is made under the terms of the Developer Certificate
 of Origin (DCO) [https://developercertificate.org/].
 
+If your change relates to a [Jira Issue](https://gem5.atlassian.net), it is
+advised that you provide a link to the issue in the commit message (or messages
+if the Jira Issue relates to multiple commits). Though optional, doing this
+can help reviewers understand the context of a change.
+
 It is imperative that you use your real name and your real email address in
 both tags and in the author field of the changeset.
 
@@ -302,6 +308,38 @@ gerrit (e.g., reviewers, labels). The gerrit documentation has more
 information.
 https://gerrit-review.googlesource.com/Documentation/user-upload.html
 
+Branches
+========
+
+By default, contributions to gem5 should be made on the master branch. Branches
+are generally discouraged due to their tendency to bloat git repositories with
+abandoned code. However, the creation of branches is permitted for development
+of a specific feature or improvement if one or more of the following criteria
+are met:
+
+1. The feature/improvement is likely to be of a large size, consisting of many
+commits, with little logic in these commits being contributed separately.
+2. The feature/improvement will be developed over a long period of time.
+3. There is sufficient reason that a feature/improvement should not be merged
+into the master branch yet (e.g., the feature/improvement is not intended for
+the next release but a future release).
+
+If a branch is required it can only be created by a project maintainer.
+Therefore, if a gem5 contributor desires a separate branch for their work, they
+should request one from the maintainer of the component the work relates to
+(see MAINTAINERS for the list of maintainers and the components they are
+responsible for). **The maintainer shall use their discretion to determine
+whether the creation of a branch is necessary**. If approved, the maintainer
+shall create the branch which the contributor may then use.
+
+Development on a branch within Gerrit functions in exactly the same way as
+contributing to the master branch. When contributors to a branch are satisfied,
+they should create a merge commit into the master branch. The maintainer should
+then be notified that the branch they created can now be deleted.
+
+**Abandonment of changes within branches may result in these branches being
+removed from the repository. All branches within a repo should be under active
+development.**
 
 Reviewing patches
 =================
@@ -347,11 +385,6 @@ review request.
  git push origin HEAD:refs/for/master
 ```
 
-Note: If you have posted a patch and don't receive any reviews, you may need to
-prod the reviewers. You can do this by adding a reply to your changeset review
-on gerrit. It is expected that at least the maintainer will supply a review for
-your patch.
-
 Committing changes
 ==================
 
@@ -364,3 +397,67 @@ Each patch must meet the following criteria to be merged:
 Once a patch meets the above criteria, the submitter of the patch will be able
 to merge the patch by pressing the "Submit" button on Gerrit. When the patch is
 submitted, it is merged into the public gem5 branch.
+
+Review moderation and guidelines
+--------------------------------
+
+Once a change is submitted, reviewers shall review the change. This may require
+several iterations before a merge. Comments from reviewers may include
+questions, and requests for alterations to the change prior to merging. The
+overarching philosophy in managing this process is that there should be
+politeness and clear communication between all parties at all times, and,
+whenever possible, permission should be asked before doing anything that may
+inconvenience another party. Included below are some guidelines we expect
+contributors and reviewers to follow.
+
+ * In all forms of communication, contributors and reviewers must be polite.
+   Comments seen as being needlessly hostile or dismissive will not be
+   tolerated.
+ * Change contributors should respond to, or act upon, each item of feedback
+   given by reviewers. If there is disagreement with a piece of
+   feedback, a sufficiently detailed reason for this disagreement should
+   be given. Polite discussion, and sharing of information and expertise
+   is strongly encouraged.
+ * Contributors are advised to assign reviewers when submitting a change.
+   Anyone who contributes to gem5 can be assigned as a reviewer. However,
+   all changes must be accepted by at least one maintainer prior to a
+   merge, ergo assigning of at least one maintainer as a reviewer is
+   strongly recommended. Please see MAINTAINERS for a breakdown of
+   gem5 maintainers and which components they claim responsibility for.
+   Maintainers should be chosen based on which components the change is
+   targeting. Assigning of reviewers is not strictly enforced, though not
+   assigning reviewers may slow the time in which a change is reviewed.
+ * If a contributor posts a change and does not receive any reviews after two
+   working days (excluding regional holidays), it is acceptable to "prod"
+   reviewers. This can be done by adding a reply to the changeset review
+   (e.g., "Would it be possible for someone to review my change?"). If the
+   contributor has yet to assign reviewers, they are strongly advised to do so.
+   Reviewers will get notified when assigned to referee a change.
+ * By default, the original contributor is assumed to own a change. I.e.,
+   they are assumed to be the sole party to submit patchsets. If someone
+   other than the original contributor wishes to submit patchsets to a
+   change on the original contributor's behalf, they should first ask
+   permission. If two working days pass without a response, a patchset may be
+   submitted without permission. Permission does not need to be asked to submit
+   a patchset consisting of minor, inoffensive, changes such a typo and format
+   fixes.
+ * Once a change is ready to merge, it enters a "Ready to Submit" state. The
+   original contributor should  merge their change at this point, assuming they
+   are content with the commit in its present form. After two working days, a
+   reviewer may message a contributor to remind them of the change being in a
+   "Ready to Submit" state and ask if they can merge the change on the
+   contributors behalf. If a further two working days elapse without a
+   response, the reviewer may merge without permission. A contributor may keep
+   a change open for whatever reason though this should be communicated to the
+   reviewer when asked.
+ * After a month of inactivity from a contributor on an active change, a
+   reviewer may post a message on the change reminding the submitter, and
+   anyone else watching the change, of its active status and ask if they are
+   still interested in eventually merging the change. After two weeks of no
+   response the reviewer reserves the right to abandon the change under the
+   assumption there is no longer interest.
+ * The final arbiter in any dispute between reviewers and/or contributors
+   is the PMC (PMC members are highlighted in MAINTAINERS). Disputes requiring
+   intervention by the PMC are undesirable. Attempts should be made to resolve
+   disagreements via respectful and polite discourse before being escalated to
+   this level.

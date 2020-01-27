@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2019 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright 2018 Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,6 +37,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Gabe Black
+ *          Giacomo Travaglini
  */
 
 #include <gtest/gtest.h>
@@ -35,48 +48,71 @@
 
 #include "base/fiber.hh"
 
-class TestFiber : public Fiber
+/** This test is checking if the "started" member has its expected
+ * value before and after the fiber runs. In the test an empty fiber
+ * is used since we are just interested on the _started member and
+ * nothing more.
+ */
+TEST(Fiber, Starting)
+{
+    class StartingFiber : public Fiber
+    {
+      public:
+        StartingFiber(Fiber *link) : Fiber(link) {}
+        void main() { /** Do nothing */ }
+    };
+
+    StartingFiber fiber(Fiber::primaryFiber());
+
+    ASSERT_FALSE(fiber.started());
+
+    fiber.run();
+
+    ASSERT_TRUE(fiber.started());
+}
+
+class SwitchingFiber : public Fiber
 {
   public:
     const char *name;
     std::vector<Fiber *> next;
 
-    TestFiber(const char *name, std::initializer_list<Fiber *> l);
+    SwitchingFiber(const char *name, std::initializer_list<Fiber *> l);
 
     void checkExpected();
     void main();
 };
 
-extern TestFiber a;
-extern TestFiber b;
-extern TestFiber c;
+extern SwitchingFiber a;
+extern SwitchingFiber b;
+extern SwitchingFiber c;
 
-TestFiber a("A", { &b, &a, Fiber::primaryFiber(), &b, &c });
-TestFiber b("B", { &a, &c });
-TestFiber c("C", { &a, Fiber::primaryFiber(), Fiber::primaryFiber() });
+SwitchingFiber a("A", { &b, &a, Fiber::primaryFiber(), &b, &c });
+SwitchingFiber b("B", { &a, &c });
+SwitchingFiber c("C", { &a, Fiber::primaryFiber(), Fiber::primaryFiber() });
 
-std::vector<TestFiber *>::iterator expectedIt;
-std::vector<TestFiber *> expected({
+std::vector<SwitchingFiber *>::iterator expectedIt;
+std::vector<SwitchingFiber *> expected({
     &a, &b, &a, &a, /* main Fiber, */
     &a, &b, &c, &a, &c,
     /* main Fiber, */ &c, &c
 });
 
-TestFiber::TestFiber(
+SwitchingFiber::SwitchingFiber(
         const char *name, std::initializer_list<Fiber *> l) :
     name(name), next(l)
 {}
 
 void
-TestFiber::checkExpected()
+SwitchingFiber::checkExpected()
 {
     ASSERT_NE(expectedIt, expected.end());
-    TestFiber *e = *expectedIt++;
+    SwitchingFiber *e = *expectedIt++;
     EXPECT_EQ(e, this) << "Expected " << e->name << ", got " << name;
 }
 
 void
-TestFiber::main()
+SwitchingFiber::main()
 {
     checkExpected();
     for (auto &n : next) {

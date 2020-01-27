@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 ARM Limited
+ * Copyright (c) 2017, 2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -45,6 +45,7 @@
  */
 
 #include "pybind11/pybind11.h"
+#include "pybind11/stl.h"
 
 #include "python/pybind11/core.hh"
 
@@ -52,6 +53,7 @@
 
 #include "base/addr_range.hh"
 #include "base/inet.hh"
+#include "base/loader/elf_object.hh"
 #include "base/logging.hh"
 #include "base/random.hh"
 #include "base/socket.hh"
@@ -148,13 +150,13 @@ init_range(py::module &m_native)
     py::class_<AddrRange>(m, "AddrRange")
         .def(py::init<>())
         .def(py::init<Addr &, Addr &>())
+        .def(py::init<Addr, Addr, const std::vector<Addr> &, uint8_t>())
         .def(py::init<const std::vector<AddrRange> &>())
         .def(py::init<Addr, Addr, uint8_t, uint8_t, uint8_t, uint8_t>())
 
         .def("__str__", &AddrRange::to_string)
 
         .def("interleaved", &AddrRange::interleaved)
-        .def("hashed", &AddrRange::hashed)
         .def("granularity", &AddrRange::granularity)
         .def("stripes", &AddrRange::stripes)
         .def("size", &AddrRange::size)
@@ -199,6 +201,14 @@ init_net(py::module &m_native)
         .def(py::init<>())
         .def(py::init<uint32_t, uint16_t>())
         ;
+}
+
+static void
+init_loader(py::module &m_native)
+{
+    py::module m = m_native.def_submodule("loader");
+
+    m.def("setInterpDir", &setInterpDir);
 }
 
 void
@@ -280,5 +290,6 @@ pybind_init_core(py::module &m_native)
     init_serialize(m_native);
     init_range(m_native);
     init_net(m_native);
+    init_loader(m_native);
 }
 

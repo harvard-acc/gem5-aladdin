@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2010-2014, 2017-2018 ARM Limited
+ * Copyright (c) 2010-2014, 2017-2019 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -124,16 +124,19 @@ LSQUnit<Impl>::completeDataAccess(PacketPtr pkt)
     assert(!cpu->switchedOut());
     if (!inst->isSquashed()) {
         if (state->needWB) {
-            // Only loads and store conditionals perform the writeback
+            // Only loads, store conditionals and atomics perform the writeback
             // after receving the response from the memory
-            assert(inst->isLoad() || inst->isStoreConditional());
+            assert(inst->isLoad() || inst->isStoreConditional() ||
+                   inst->isAtomic());
             writeback(inst, state->request()->mainPacket());
-            if (inst->isStore()) {
+            if (inst->isStore() || inst->isAtomic()) {
                 auto ss = dynamic_cast<SQSenderState*>(state);
                 ss->writebackDone();
                 completeStore(ss->idx);
             }
         } else if (inst->isStore()) {
+            // This is a regular store (i.e., not store conditionals and
+            // atomics), so it can complete without writing back
             completeStore(dynamic_cast<SQSenderState*>(state)->idx);
         }
     }
@@ -274,7 +277,7 @@ LSQUnit<Impl>::insert(const DynInstPtr &inst)
 {
     assert(inst->isMemRef());
 
-    assert(inst->isLoad() || inst->isStore());
+    assert(inst->isLoad() || inst->isStore() || inst->isAtomic());
 
     if (inst->isLoad()) {
         insertLoad(inst);
@@ -423,6 +426,7 @@ LSQUnit<Impl>::checkSnoop(PacketPtr pkt)
 
                 // Mark the load for re-execution
                 ld_inst->fault = std::make_shared<ReExec>();
+                req->setStateToFault();
             } else {
                 DPRINTF(LSQUnit, "HitExternal Snoop for addr %#x [sn:%lli]\n",
                         pkt->getAddr(), ld_inst->seqNum);
@@ -539,8 +543,27 @@ LSQUnit<Impl>::executeLoad(const DynInstPtr &inst)
 
     load_fault = inst->initiateAcc();
 
+    if (load_fault == NoFault && !inst->readMemAccPredicate()) {
+        assert(inst->readPredicate());
+        inst->setExecuted();
+        inst->completeAcc(nullptr);
+        iewStage->instToCommit(inst);
+        iewStage->activityThisCycle();
+        return NoFault;
+    }
+
     if (inst->isTranslationDelayed() && load_fault == NoFault)
         return load_fault;
+
+    if (load_fault != NoFault && inst->translationCompleted() &&
+        inst->savedReq->isPartialFault() && !inst->savedReq->isComplete()) {
+        assert(inst->savedReq->isSplit());
+        // If we have a partial fault where the mem access is not complete yet
+        // then the cache must have been blocked. This load will be re-executed
+        // when the cache gets unblocked. We will handle the fault when the
+        // mem access is complete.
+        return NoFault;
+    }
 
     // If the instruction faulted or predicated false, then we need to send it
     // along to commit without the instruction completing.
@@ -614,8 +637,8 @@ LSQUnit<Impl>::executeStore(const DynInstPtr &store_inst)
 
     assert(store_fault == NoFault);
 
-    if (store_inst->isStoreConditional()) {
-        // Store conditionals need to set themselves as able to
+    if (store_inst->isStoreConditional() || store_inst->isAtomic()) {
+        // Store conditionals and Atomics need to set themselves as able to
         // writeback if we haven't had a fault by here.
         storeQueue[store_idx].canWB() = true;
 
@@ -705,7 +728,7 @@ LSQUnit<Impl>::writebackStores()
            storeWBIt->valid() &&
            storeWBIt->canWB() &&
            ((!needsTSO) || (!storeInFlight)) &&
-           lsq->storePortAvailable()) {
+           lsq->cachePortAvailable(false)) {
 
         if (isStoreBlocked) {
             DPRINTF(LSQUnit, "Unable to write back any more stores, cache"
@@ -751,8 +774,8 @@ LSQUnit<Impl>::writebackStores()
             state->inst = inst;
 
             req->senderState(state);
-            if (inst->isStoreConditional()) {
-                /* Only store conditionals need a writeback. */
+            if (inst->isStoreConditional() || inst->isAtomic()) {
+                /* Only store conditionals and atomics need a writeback. */
                 state->needWB = true;
             }
         }
@@ -946,8 +969,10 @@ LSQUnit<Impl>::writeback(const DynInstPtr &inst, PacketPtr pkt)
             // the access as this discards the current fault.
 
             // If we have an outstanding fault, the fault should only be of
-            // type ReExec.
-            assert(dynamic_cast<ReExec*>(inst->fault.get()) != nullptr);
+            // type ReExec or - in case of a SplitRequest - a partial
+            // translation fault
+            assert(dynamic_cast<ReExec*>(inst->fault.get()) != nullptr ||
+                   inst->savedReq->isPartialFault());
 
             DPRINTF(LSQUnit, "Not completing instruction [sn:%lli] access "
                     "due to pending fault.\n", inst->seqNum);
@@ -996,8 +1021,8 @@ LSQUnit<Impl>::completeStore(typename StoreQueue::iterator store_idx)
 
 #if TRACING_ON
     if (DTRACE(O3PipeView)) {
-        store_idx->instruction()->storeTick =
-            curTick() - store_idx->instruction()->fetchTick;
+        store_inst->storeTick =
+            curTick() - store_inst->fetchTick;
     }
 #endif
 
@@ -1037,7 +1062,8 @@ LSQUnit<Impl>::trySendPacket(bool isLoad, PacketPtr data_pkt)
 
     auto state = dynamic_cast<LSQSenderState*>(data_pkt->senderState);
 
-    if (!lsq->cacheBlocked() && (isLoad || lsq->storePortAvailable())) {
+    if (!lsq->cacheBlocked() &&
+        lsq->cachePortAvailable(isLoad)) {
         if (!dcachePort->sendTimingReq(data_pkt)) {
             ret = false;
             cache_got_blocked = true;
@@ -1048,9 +1074,9 @@ LSQUnit<Impl>::trySendPacket(bool isLoad, PacketPtr data_pkt)
 
     if (ret) {
         if (!isLoad) {
-            lsq->storePortBusy();
             isStoreBlocked = false;
         }
+        lsq->cachePortBusy(isLoad);
         state->outstanding++;
         state->request()->packetSent();
     } else {
@@ -1064,7 +1090,6 @@ LSQUnit<Impl>::trySendPacket(bool isLoad, PacketPtr data_pkt)
         }
         state->request()->packetNotSent();
     }
-
     return ret;
 }
 
@@ -1088,7 +1113,7 @@ LSQUnit<Impl>::dumpInsts() const
 
     for (const auto& e: loadQueue) {
         const DynInstPtr &inst(e.instruction());
-        cprintf("%s.[sn:%i] ", inst->pcState(), inst->seqNum);
+        cprintf("%s.[sn:%llu] ", inst->pcState(), inst->seqNum);
     }
     cprintf("\n");
 
@@ -1097,7 +1122,7 @@ LSQUnit<Impl>::dumpInsts() const
 
     for (const auto& e: storeQueue) {
         const DynInstPtr &inst(e.instruction());
-        cprintf("%s.[sn:%i] ", inst->pcState(), inst->seqNum);
+        cprintf("%s.[sn:%llu] ", inst->pcState(), inst->seqNum);
     }
 
     cprintf("\n");

@@ -29,6 +29,7 @@
 import os
 import copy
 import subprocess
+import sys
 
 from testlib.test import TestFunction
 from testlib.suite import TestSuite
@@ -45,7 +46,8 @@ def gem5_verify_config(name,
                        fixtures=[],
                        valid_isas=constants.supported_isas,
                        valid_variants=constants.supported_variants,
-                       length=constants.supported_lengths[0]):
+                       length=constants.supported_lengths[0],
+                       protocol=None):
     '''
     Helper class to generate common gem5 tests using verifiers.
 
@@ -73,6 +75,16 @@ def gem5_verify_config(name,
     '''
     fixtures = list(fixtures)
     testsuites = []
+
+    # Obtain the set of tests to ignore. This is found in the
+    # ".testignore" file.
+    __location__ = os.path.realpath(
+        os.path.join(os.getcwd(), os.path.dirname(__file__)))
+    _test_ignore_file_loc = os.path.join(__location__,".testignore")
+    ignore = set()
+    if os.path.exists(_test_ignore_file_loc):
+        ignore.update(open(_test_ignore_file_loc).read().splitlines())
+
     for opt in valid_variants:
         for isa in valid_isas:
 
@@ -86,6 +98,13 @@ def gem5_verify_config(name,
                     given_name=name,
                     isa=isa,
                     opt=opt)
+            if protocol:
+                _name += '-'+protocol
+
+            # We check to see if this test suite is to be ignored. If so, we
+            # skip it.
+            if _name in ignore:
+                continue
 
             # Create the running of gem5 subtest.
             # NOTE: We specifically create this test before our verifiers so
@@ -107,7 +126,7 @@ def gem5_verify_config(name,
             # Create the gem5 target for the specific architecture and
             # variant.
             _fixtures = copy.copy(fixtures)
-            _fixtures.append(Gem5Fixture(isa, opt))
+            _fixtures.append(Gem5Fixture(isa, opt, protocol))
             _fixtures.append(tempdir)
             _fixtures.append(gem5_returncode)
 
@@ -158,6 +177,6 @@ def _create_test_run_gem5(config, config_args, gem5_args):
         command.append(config)
         # Config_args should set up the program args.
         command.extend(config_args)
-        returncode.value = log_call(params.log, command)
+        returncode.value = log_call(params.log, command, stderr=sys.stderr)
 
     return test_run_gem5

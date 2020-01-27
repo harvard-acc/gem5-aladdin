@@ -62,6 +62,7 @@ from common import Simulation
 from common import CacheConfig
 from common import CpuConfig
 from common import MemConfig
+from common.FileSystemConfig import config_filesystem
 
 from common.Caches import *
 from common.cpu2000 import *
@@ -76,7 +77,7 @@ def createAladdinDatapath(config, accel):
     memory_type = config.get(accel, 'memory_type').lower()
     # Accelerators need their own clock domain!
     cycleTime = config.getint(accel, "cycle_time")
-    clock = "%1.3fGHz" % (1/cycleTime)
+    clock = "%1.3fGHz" % (1.0/cycleTime)
     clk_domain = SrcClockDomain(
         clock = clock, voltage_domain = system.cpu_voltage_domain)
     # Set the globally required parameters.
@@ -245,7 +246,7 @@ def get_processes(options):
         idx += 1
 
     if options.smt:
-        assert(options.cpu_type == "detailed" or options.cpu_type == "inorder")
+        assert(options.cpu_type == "DerivO3CPU")
         return multiprocesses, idx
     else:
         return multiprocesses, 1
@@ -293,7 +294,6 @@ if np > 0:
 
 
 (CPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(options)
-#print "CPUClass:%s, test_mem_mode:%s, FutureClass:%s" % (CPUClass, test_mem_mode, FutureClass)
 CPUClass.numThreads = numThreads
 
 MemClass = Simulation.setMemClass(options)
@@ -302,13 +302,13 @@ MemClass = Simulation.setMemClass(options)
 if options.smt and options.num_cpus > 1:
     fatal("You cannot use SMT with multiple CPUs!")
 
-system = System(mem_mode = test_mem_mode,
+system = System(cpu = [CPUClass(cpu_id=i) for i in range(np)],
+                mem_mode = test_mem_mode,
                 mem_ranges = [AddrRange(options.mem_size)],
                 cache_line_size = options.cacheline_size)
 
-# The O3 model requires fetch buffer size at most the cache line size.
-if CPUClass.type == 'DerivO3CPU':
-  CPUClass.fetchBufferSize = min(CPUClass.fetchBufferSize, system.cache_line_size)
+if numThreads > 1:
+    system.multi_thread = True
 
 # Create a top-level voltage domain
 system.voltage_domain = VoltageDomain(voltage = options.sys_voltage)
@@ -325,12 +325,10 @@ system.cpu_clk_domain = SrcClockDomain(clock = options.cpu_clock,
                                        voltage_domain =
                                        system.cpu_voltage_domain)
 
-if np > 0:
-  system.cpu = [CPUClass(cpu_id=i) for i in xrange(np)]
-  # All cpus belong to a common cpu_clk_domain, therefore running at a common
-  # frequency.
-  for cpu in system.cpu:
-      cpu.clk_domain = system.cpu_clk_domain
+# If elastic tracing is enabled, then configure the cpu and attach the elastic
+# trace probe
+if options.elastic_trace_en:
+    CpuConfig.config_etrace(CPUClass, system.cpu, options)
 
 if options.accel_cfg_file:
     # First read all default values.
@@ -374,19 +372,23 @@ for i in xrange(np):
             system.cpu[i].workload = multiprocesses[i]
 
     if options.simpoint_profile:
-        system.cpu[i].simpoint_profile = True
-        system.cpu[i].simpoint_interval = options.simpoint_interval
+        system.cpu[i].addSimPointProbe(options.simpoint_interval)
 
     if options.checker:
         system.cpu[i].addCheckerCpu()
 
+    if options.bp_type:
+        bpClass = ObjectList.bp_list.get(options.bp_type)
+        system.cpu[i].branchPred = bpClass()
+
+    if options.indirect_bp_type:
+        indirectBPClass = \
+            ObjectList.indirect_bp_list.get(options.indirect_bp_type)
+        system.cpu[i].branchPred.indirectBranchPred = indirectBPClass()
+
     system.cpu[i].createThreads()
 
 if options.ruby:
-    if not (options.cpu_type == "TimingSimpleCPU" or options.cpu_type == "DerivO3CPU"):
-        print >> sys.stderr, "Ruby requires TimingSimpleCPU or DerivO3CPU!!"
-        sys.exit(1)
-
     Ruby.create_system(options, False, system)
     assert(options.num_cpus + 3*len(system.find_all(HybridDatapath)[0] + \
            system.find_all(SystolicArray)[0]) == len(system.ruby._cpu_ports))
@@ -426,6 +428,7 @@ else:
     system.system_port = system.membus.slave
     CacheConfig.config_cache(options, system)
     MemConfig.config_mem(options, system)
+    config_filesystem(system, options)
 
 root = Root(full_system = False, system = system)
 Simulation.run(options, root, system, FutureClass)

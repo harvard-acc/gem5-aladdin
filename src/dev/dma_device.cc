@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, 2017 ARM Limited
+ * Copyright (c) 2012, 2015, 2017, 2019 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -51,34 +51,32 @@
 #include "debug/DMA.hh"
 #include "debug/Drain.hh"
 #include "mem/port_proxy.hh"
+#include "sim/clocked_object.hh"
 #include "sim/system.hh"
 
-DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req,
+DmaPort::DmaPort(ClockedObject *dev, System *s, unsigned max_req,
                  unsigned _chunkSize, unsigned _numChannels,
-                 bool _invalidateOnWrite)
-    : MasterPort(dev->name() + ".dma", dev),
-      device(dev), sys(s), masterId(s->getMasterId(dev)),
-      sendEvent([this]{ sendDma(); }, dev->name()),
-      sendDataAfterInvalidateEvent([this]{ sendDataAfterInvalidate(); }, dev->name()),
-      pendingCount(0), inRetry(false),
-      maxRequests(max_req),
-      chunkSize(_chunkSize),
-      numChannels(_numChannels),
-      invalidateOnWrite(_invalidateOnWrite)
-{
-  numOutstandingRequests = 0;
-  currChannel = 0;
-  // Empty DMA channel.
-  for (unsigned i = 0; i < numChannels; i++)
-    transmitList.push_back(std::deque<PacketPtr>());
-  DPRINTF(DMA, "Setting up DMA with transaction chunk size %d\n", chunkSize);
+                 bool _invalidateOnWrite, uint32_t sid, uint32_t ssid)
+    : MasterPort(dev->name() + ".dma", dev), device(dev), sys(s),
+      masterId(s->getMasterId(dev)),
+      sendEvent([this] { sendDma(); }, dev->name()),
+      sendDataAfterInvalidateEvent(
+          [this] { sendDataAfterInvalidate(); }, dev->name()),
+      pendingCount(0), inRetry(false), maxRequests(max_req),
+      chunkSize(_chunkSize), numChannels(_numChannels),
+      invalidateOnWrite(_invalidateOnWrite), defaultSid(sid),
+      defaultSSid(ssid) {
+    numOutstandingRequests = 0;
+    currChannel = 0;
+    // Empty DMA channel.
+    for (unsigned i = 0; i < numChannels; i++)
+        transmitList.push_back(std::deque<PacketPtr>());
+    DPRINTF(DMA, "Setting up DMA with transaction chunk size %d\n", chunkSize);
 }
 
-DmaPort::DmaPort(MemObject *dev, System *s, unsigned max_req)
-    : DmaPort(dev, s, max_req, sys->cacheLineSize()) {}
-
-DmaPort::DmaPort(MemObject *dev, System *s)
-    : DmaPort(dev, s, MAX_DMA_REQUEST) {}
+DmaPort::DmaPort(ClockedObject *dev, System *s, uint32_t sid, uint32_t ssid)
+    : DmaPort(
+          dev, s, MAX_DMA_REQUEST, sys->cacheLineSize(), 1, false, sid, ssid) {}
 
 void
 DmaPort::handleResp(PacketPtr pkt, Tick delay)
@@ -140,8 +138,8 @@ DmaPort::recvTimingResp(PacketPtr pkt)
 }
 
 DmaDevice::DmaDevice(const Params *p)
-    : PioDevice(p), dmaPort(this, sys, MAX_DMA_REQUEST) //Modification for DMA w/ Aladdin
-{ }
+    : PioDevice(p), dmaPort(this, sys, MAX_DMA_REQUEST, sys->cacheLineSize(), 1,
+                            false, p->sid, p->ssid) {}
 
 void
 DmaDevice::init()
@@ -171,12 +169,14 @@ DmaPort::recvReqRetry()
 
 RequestPtr
 DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
-                   uint8_t *data, Tick delay, Request::Flags flag)
+                   uint8_t *data, uint32_t sid, uint32_t ssid, Tick delay,
+                   Request::Flags flag)
 {
     DPRINTF(DMA, "Starting DMA for addr: %#x size: %d sched: %d\n",
             addr, size, event ? event->scheduled() : -1);
 
-    DmaActionReq dmaActionReq = { cmd, addr, size, event, data, delay, flag };
+    DmaActionReq dmaActionReq = { cmd,   addr, size, event, data,
+                                  delay, flag, sid,  ssid };
 
     // (functionality added for Table Walker statistics)
     // We're only interested in this when there will only be one request.
@@ -194,8 +194,15 @@ DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
         // invalidation is complete. Make sure we don't send an uncacheable
         // request for a cache invalidation (that would make no sense).
         Request::Flags inv_flag = flag & ~Request::UNCACHEABLE;
-        DmaActionReq invalidateReq = {
-            MemCmd::InvalidateReq, addr, size, event, nullptr, delay, inv_flag };
+        DmaActionReq invalidateReq = { MemCmd::InvalidateReq,
+                                       addr,
+                                       size,
+                                       event,
+                                       nullptr,
+                                       delay,
+                                       inv_flag,
+                                       sid,
+                                       ssid };
         DmaReqState *reqState =
             new DmaReqState(&sendDataAfterInvalidateEvent, size, addr, delay);
         final_req = queueDmaAction(invalidateReq, reqState);
@@ -247,6 +254,14 @@ DmaPort::findNextNonEmptyChannel() {
     } else {
         return nextChannel;
     }
+}
+
+RequestPtr
+DmaPort::dmaAction(Packet::Command cmd, Addr addr, int size, Event *event,
+                   uint8_t *data, Tick delay, Request::Flags flag)
+{
+    return dmaAction(cmd, addr, size, event, data,
+                     defaultSid, defaultSSid, delay, flag);
 }
 
 void
@@ -327,6 +342,10 @@ RequestPtr DmaPort::queueDmaAction(DmaActionReq &dmaReq,
          !gen.done(); gen.next()) {
         req = std::make_shared<Request>(
             gen.addr(), gen.size(), dmaReq.flag, masterId);
+
+        req->setStreamId(dmaReq.sid);
+        req->setSubStreamId(dmaReq.ssid);
+
         req->taskId(ContextSwitchTaskId::DMA);
         PacketPtr pkt = new Packet(req, dmaReq.cmd);
 
@@ -399,18 +418,14 @@ DmaPort::getPacketCompletionEvent(PacketPtr pkt) {
     return state->completionEvent;
 }
 
-BaseMasterPort &
-DmaDevice::getMasterPort(const std::string &if_name, PortID idx)
+Port &
+DmaDevice::getPort(const std::string &if_name, PortID idx)
 {
     if (if_name == "dma") {
         return dmaPort;
     }
-    return PioDevice::getMasterPort(if_name, idx);
+    return PioDevice::getPort(if_name, idx);
 }
-
-
-
-
 
 DmaReadFifo::DmaReadFifo(DmaPort &_port, size_t size,
                          unsigned max_req_size,

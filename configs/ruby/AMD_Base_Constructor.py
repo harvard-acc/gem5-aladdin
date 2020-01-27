@@ -52,7 +52,7 @@ class L1Cache(RubyCache):
     def create(self, size, assoc, options):
         self.size = MemorySize(size)
         self.assoc = assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 #
 # Note: the L2 Cache latency is not currently used
@@ -63,7 +63,7 @@ class L2Cache(RubyCache):
     def create(self, size, assoc, options):
         self.size = MemorySize(size)
         self.assoc = assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 class CPCntrl(AMD_Base_Controller, CntrlBase):
 
     def create(self, options, ruby_system, system):
@@ -115,7 +115,7 @@ def construct(options, system, ruby_system):
     cpu_sequencers = []
     cpuCluster = None
     cpuCluster = Cluster(name="CPU Cluster", extBW = 8, intBW=8) # 16 GB/s
-    for i in xrange((options.num_cpus + 1) / 2):
+    for i in range((options.num_cpus + 1) // 2):
 
         cp_cntrl = CPCntrl()
         cp_cntrl.create(options, ruby_system, system)

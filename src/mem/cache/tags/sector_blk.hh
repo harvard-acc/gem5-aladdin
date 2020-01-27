@@ -49,7 +49,7 @@ class SectorBlk;
  */
 class SectorSubBlk : public CacheBlk
 {
-  private:
+  protected:
     /**
      * Sector block associated to this block.
      */
@@ -146,15 +146,16 @@ class SectorBlk : public ReplaceableEntry
 {
   private:
     /**
-     * Sector tag value. A sector's tag is the tag of all its sub-blocks.
-     */
-    Addr _tag;
-
-    /**
      * Counter of the number of valid sub-blocks. The sector is valid if any
      * of its sub-blocks is valid.
      */
     uint8_t _validCounter;
+
+  protected:
+    /**
+     * Sector tag value. A sector's tag is the tag of all its sub-blocks.
+     */
+    Addr _tag;
 
     /**
      * Whether sector blk is in secure-space or not.
@@ -176,6 +177,13 @@ class SectorBlk : public ReplaceableEntry
      * @return True if any of the blocks in the sector is valid.
      */
     bool isValid() const;
+
+    /**
+     * Get the number of sub-blocks that have been validated.
+     *
+     * @return The number of valid sub-blocks.
+     */
+    uint8_t getNumValid() const;
 
     /**
      * Checks that a sector block is secure. A single secure block suffices
@@ -214,6 +222,14 @@ class SectorBlk : public ReplaceableEntry
      * Set secure bit.
      */
     void setSecure();
+
+    /**
+     * Sets the position of the sub-entries, besides its own.
+     *
+     * @param set The set of this entry and sub-entries.
+     * @param way The way of this entry and sub-entries.
+     */
+    void setPosition(const uint32_t set, const uint32_t way) override;
 };
 
 #endif //__MEM_CACHE_TAGS_SECTOR_BLK_HH__

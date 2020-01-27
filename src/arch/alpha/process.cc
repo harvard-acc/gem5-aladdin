@@ -54,13 +54,10 @@ AlphaProcess::AlphaProcess(ProcessParams *params, ObjectFile *objFile)
       objFile)
 {
     fatal_if(params->useArchPT, "Arch page tables not implemented.");
-    Addr brk_point = objFile->dataBase() + objFile->dataSize() +
-                     objFile->bssSize();
-    brk_point = roundUp(brk_point, PageBytes);
+    Addr brk_point = roundUp(image.maxAddr(), PageBytes);
 
-    // Set up stack.  On Alpha, stack goes below text section.  This
-    // code should get moved to some architecture-specific spot.
-    Addr stack_base = objFile->textBase() - (409600+4096);
+    // Set up stack.  On Alpha, stack goes below the image.
+    Addr stack_base = image.minAddr() - (409600 + 4096);
 
     // Set up region for mmaps.
     Addr mmap_end = 0x10000;
@@ -77,13 +74,7 @@ AlphaProcess::AlphaProcess(ProcessParams *params, ObjectFile *objFile)
 void
 AlphaProcess::argsInit(int intSize, int pageSize)
 {
-    // Patch the ld_bias for dynamic executables.
-    updateBias();
-
-    objFile->loadSections(initVirtMem);
-
-    typedef AuxVector<uint64_t> auxv_t;
-    std::vector<auxv_t>  auxv;
+    std::vector<AuxVector<uint64_t>>  auxv;
 
     ElfObject * elfObject = dynamic_cast<ElfObject *>(objFile);
     if (elfObject)
@@ -96,20 +87,21 @@ AlphaProcess::argsInit(int intSize, int pageSize)
         // seem to be a problem.
         // check out _dl_aux_init() in glibc/elf/dl-support.c for details
         // --Lisa
-        auxv.push_back(auxv_t(M5_AT_PAGESZ, AlphaISA::PageBytes));
-        auxv.push_back(auxv_t(M5_AT_CLKTCK, 100));
-        auxv.push_back(auxv_t(M5_AT_PHDR, elfObject->programHeaderTable()));
-        DPRINTF(Loader, "auxv at PHDR %08p\n", elfObject->programHeaderTable());
-        auxv.push_back(auxv_t(M5_AT_PHNUM, elfObject->programHeaderCount()));
+        auxv.emplace_back(M5_AT_PAGESZ, AlphaISA::PageBytes);
+        auxv.emplace_back(M5_AT_CLKTCK, 100);
+        auxv.emplace_back(M5_AT_PHDR, elfObject->programHeaderTable());
+        DPRINTF(Loader, "auxv at PHDR %08p\n",
+                elfObject->programHeaderTable());
+        auxv.emplace_back(M5_AT_PHNUM, elfObject->programHeaderCount());
         // This is the base address of the ELF interpreter; it should be
         // zero for static executables or contain the base address for
         // dynamic executables.
-        auxv.push_back(auxv_t(M5_AT_BASE, getBias()));
-        auxv.push_back(auxv_t(M5_AT_ENTRY, objFile->entryPoint()));
-        auxv.push_back(auxv_t(M5_AT_UID, uid()));
-        auxv.push_back(auxv_t(M5_AT_EUID, euid()));
-        auxv.push_back(auxv_t(M5_AT_GID, gid()));
-        auxv.push_back(auxv_t(M5_AT_EGID, egid()));
+        auxv.emplace_back(M5_AT_BASE, getBias());
+        auxv.emplace_back(M5_AT_ENTRY, objFile->entryPoint());
+        auxv.emplace_back(M5_AT_UID, uid());
+        auxv.emplace_back(M5_AT_EUID, euid());
+        auxv.emplace_back(M5_AT_GID, gid());
+        auxv.emplace_back(M5_AT_EGID, egid());
 
     }
 
@@ -156,29 +148,30 @@ AlphaProcess::argsInit(int intSize, int pageSize)
     // write contents to stack
     uint64_t argc = argv.size();
     if (intSize == 8)
-        argc = htog((uint64_t)argc);
+        argc = htole((uint64_t)argc);
     else if (intSize == 4)
-        argc = htog((uint32_t)argc);
+        argc = htole((uint32_t)argc);
     else
         panic("Unknown int size");
 
-    initVirtMem.writeBlob(memState->getStackMin(), (uint8_t*)&argc, intSize);
+    initVirtMem.writeBlob(memState->getStackMin(), &argc, intSize);
 
-    copyStringArray(argv, argv_array_base, arg_data_base, initVirtMem);
-    copyStringArray(envp, envp_array_base, env_data_base, initVirtMem);
+    copyStringArray(argv, argv_array_base, arg_data_base,
+                    LittleEndianByteOrder, initVirtMem);
+    copyStringArray(envp, envp_array_base, env_data_base,
+                    LittleEndianByteOrder, initVirtMem);
 
     //Copy the aux stuff
-    for (vector<auxv_t>::size_type x = 0; x < auxv.size(); x++) {
-        initVirtMem.writeBlob(auxv_array_base + x * 2 * intSize,
-                (uint8_t*)&(auxv[x].getAuxType()), intSize);
-        initVirtMem.writeBlob(auxv_array_base + (x * 2 + 1) * intSize,
-                (uint8_t*)&(auxv[x].getAuxVal()), intSize);
+    Addr auxv_array_end = auxv_array_base;
+    for (const auto &aux: auxv) {
+        initVirtMem.write(auxv_array_end, aux, GuestByteOrder);
+        auxv_array_end += sizeof(aux);
     }
 
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
 
-    setSyscallArg(tc, 0, argc);
-    setSyscallArg(tc, 1, argv_array_base);
+    tc->setIntReg(FirstArgumentReg, argc);
+    tc->setIntReg(FirstArgumentReg + 1, argv_array_base);
     tc->setIntReg(StackPointerReg, memState->getStackMin());
 
     tc->pcState(getStartPC());
@@ -214,7 +207,7 @@ AlphaProcess::initState()
     argsInit(MachineBytes, PageBytes);
 
     ThreadContext *tc = system->getThreadContext(contextIds[0]);
-    tc->setIntReg(GlobalPointerReg, objFile->globalPointer());
+    tc->setIntReg(GlobalPointerReg, 0);
     //Operate in user mode
     tc->setMiscRegNoEffect(IPR_ICM, mode_user << 3);
     tc->setMiscRegNoEffect(IPR_DTB_CM, mode_user << 3);
@@ -222,18 +215,11 @@ AlphaProcess::initState()
     tc->setMiscRegNoEffect(IPR_MCSR, 0);
 }
 
-AlphaISA::IntReg
+RegVal
 AlphaProcess::getSyscallArg(ThreadContext *tc, int &i)
 {
     assert(i < 6);
     return tc->readIntReg(FirstArgumentReg + i++);
-}
-
-void
-AlphaProcess::setSyscallArg(ThreadContext *tc, int i, AlphaISA::IntReg val)
-{
-    assert(i < 6);
-    tc->setIntReg(FirstArgumentReg + i, val);
 }
 
 void
@@ -248,7 +234,7 @@ AlphaProcess::setSyscallReturn(ThreadContext *tc, SyscallReturn sysret)
         tc->setIntReg(ReturnValueReg, sysret.returnValue());
     } else {
         // got an error, return details
-        tc->setIntReg(SyscallSuccessReg, (IntReg)-1);
+        tc->setIntReg(SyscallSuccessReg, (RegVal)-1);
         tc->setIntReg(ReturnValueReg, sysret.errnoValue());
     }
 }

@@ -46,7 +46,7 @@
 #include "arch/arm/linux/atag.hh"
 #include "arch/arm/utility.hh"
 #include "arch/generic/linux/threadinfo.hh"
-#include "base/loader/dtb_object.hh"
+#include "base/loader/dtb_file.hh"
 #include "base/loader/object_file.hh"
 #include "base/loader/symtab.hh"
 #include "cpu/base.hh"
@@ -133,26 +133,16 @@ LinuxArmSystem::initState()
         inform("Loading DTB file: %s at address %#x\n", params()->dtb_filename,
                 params()->atags_addr + loadAddrOffset);
 
-        ObjectFile *dtb_file = createObjectFile(params()->dtb_filename, true);
-        if (!dtb_file) {
-            fatal("couldn't load DTB file: %s\n", params()->dtb_filename);
+        DtbFile *dtb_file = new DtbFile(params()->dtb_filename);
+
+        if (!dtb_file->addBootCmdLine(params()->boot_osflags.c_str(),
+                                      params()->boot_osflags.size())) {
+            warn("couldn't append bootargs to DTB file: %s\n",
+                 params()->dtb_filename);
         }
 
-        DtbObject *_dtb_file = dynamic_cast<DtbObject*>(dtb_file);
-
-        if (_dtb_file) {
-            if (!_dtb_file->addBootCmdLine(params()->boot_osflags.c_str(),
-                                           params()->boot_osflags.size())) {
-                warn("couldn't append bootargs to DTB file: %s\n",
-                     params()->dtb_filename);
-            }
-        } else {
-            warn("dtb_file cast failed; couldn't append bootargs "
-                 "to DTB file: %s\n", params()->dtb_filename);
-        }
-
-        dtb_file->setTextBase(params()->atags_addr + loadAddrOffset);
-        dtb_file->loadSections(physProxy);
+        dtb_file->buildImage().
+            offset(params()->atags_addr + loadAddrOffset).write(physProxy);
         delete dtb_file;
     } else {
         // Using ATAGS

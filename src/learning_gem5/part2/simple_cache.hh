@@ -33,8 +33,10 @@
 
 #include <unordered_map>
 
-#include "mem/mem_object.hh"
+#include "base/statistics.hh"
+#include "mem/port.hh"
 #include "params/SimpleCache.hh"
+#include "sim/clocked_object.hh"
 
 /**
  * A very simple cache object. Has a fully-associative data store with random
@@ -43,7 +45,7 @@
  * be outstanding at a time.
  * This cache is a writeback cache.
  */
-class SimpleCache : public MemObject
+class SimpleCache : public ClockedObject
 {
   private:
 
@@ -304,30 +306,17 @@ class SimpleCache : public MemObject
     SimpleCache(SimpleCacheParams *params);
 
     /**
-     * Get a master port with a given name and index. This is used at
+     * Get a port with a given name and index. This is used at
      * binding time and returns a reference to a protocol-agnostic
-     * base master port.
+     * port.
      *
      * @param if_name Port name
      * @param idx Index in the case of a VectorPort
      *
      * @return A reference to the given port
      */
-    virtual BaseMasterPort& getMasterPort(const std::string& if_name,
-                                          PortID idx = InvalidPortID) override;
-
-    /**
-     * Get a slave port with a given name and index. This is used at
-     * binding time and returns a reference to a protocol-agnostic
-     * base master port.
-     *
-     * @param if_name Port name
-     * @param idx Index in the case of a VectorPort
-     *
-     * @return A reference to the given port
-     */
-    virtual BaseSlavePort& getSlavePort(const std::string& if_name,
-                                        PortID idx = InvalidPortID) override;
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 
     /**
      * Register the stats

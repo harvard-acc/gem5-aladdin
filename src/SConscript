@@ -45,10 +45,8 @@ import array
 import bisect
 import functools
 import imp
-import marshal
 import os
 import re
-import subprocess
 import sys
 import zlib
 
@@ -56,7 +54,7 @@ from os.path import basename, dirname, exists, isdir, isfile, join as joinpath
 
 import SCons
 
-from gem5_scons import Transform
+from gem5_scons import Transform, warning, error
 
 # This file defines how to build a particular configuration of gem5
 # based on variable settings in the 'env' build environment.
@@ -255,7 +253,8 @@ def blobToCpp(data, symbol, cpp_code, hpp_code=None, namespace=None):
             hpp_code('}')
     if namespace is not None:
         cpp_code('namespace {} {{'.format(namespace))
-    cpp_code(symbol_len_declaration + ' = {};'.format(len(data)))
+    if hpp_code is not None:
+        cpp_code(symbol_len_declaration + ' = {};'.format(len(data)))
     cpp_code(symbol_declaration + ' = {')
     cpp_code.indent()
     step = 16
@@ -448,6 +447,10 @@ class Executable(object):
         if objs is None:
             objs = self.srcs_to_objs(env, self.sources)
 
+        env = env.Clone()
+        env['BIN_RPATH_PREFIX'] = os.path.relpath(
+                env['BUILDDIR'], self.path(env).dir.abspath)
+
         if env['STRIP_EXES']:
             stripped = self.path(env)
             unstripped = env.File(str(stripped) + '.unstripped')
@@ -471,7 +474,7 @@ class UnitTest(Executable):
     def declare(self, env):
         sources = list(self.sources)
         for f in self.filters:
-            sources = Source.all.apply_filter(f)
+            sources += Source.all.apply_filter(f)
         objs = self.srcs_to_objs(env, sources) + env['STATIC_OBJS']
         if self.main:
             objs += env['MAIN_OBJS']
@@ -603,6 +606,7 @@ for extra_dir in extras_dir_list:
 
         if 'SConscript' in files:
             build_dir = joinpath(env['BUILDDIR'], root[prefix_len:])
+            Source.set_group(build_dir)
             SConscript(joinpath(root, 'SConscript'), variant_dir=build_dir)
 
 for opt in export_vars:
@@ -821,7 +825,7 @@ buildEnv = m5.util.SmartDict($build_env)
 
 compileDate = _m5.core.compileDate
 _globals = globals()
-for key,val in _m5.core.__dict__.iteritems():
+for key,val in _m5.core.__dict__.items():
     if key.startswith('flag_'):
         flag = key[5:]
         _globals[flag] = val
@@ -1003,22 +1007,21 @@ if env['USE_PYTHON']:
         Source(cc_file)
 
 # Build all protocol buffers if we have got protoc and protobuf available
-if env['HAVE_PROTOBUF']:
+if env['HAVE_PROTOC'] and env['HAVE_PROTOBUF']:
     for proto in ProtoBuf.all:
         # Use both the source and header as the target, and the .proto
         # file as the source. When executing the protoc compiler, also
         # specify the proto_path to avoid having the generated files
         # include the path.
         env.Command([proto.cc_file, proto.hh_file], proto.tnode,
-                    MakeAction('$PROTOC --cpp_out ${TARGET.dir} '
+                    MakeAction('${PROTOC} --cpp_out ${TARGET.dir} '
                                '--proto_path ${SOURCE.dir} $SOURCE',
                                Transform("PROTOC")))
 
         # Add the C++ source file
         Source(proto.cc_file, tags=proto.tags)
 elif ProtoBuf.all:
-    print('Got protobuf to build, but lacks support!')
-    Exit(1)
+    error('Got protobuf to build, but lacks support!')
 
 #
 # Handle debug flags
@@ -1125,6 +1128,11 @@ env.Command('sim/tags.cc', None,
                        Transform("VER TAGS")))
 env.AlwaysBuild(tags)
 
+# Build a small helper that marshals the Python code using the same
+# version of Python as gem5. This is in an unorthodox location to
+# avoid building it for every variant.
+py_marshal = env.Program('marshal', 'python/marshal.cc')[0]
+
 # Embed python files.  All .py files that have been indicated by a
 # PySource() call in a SConscript need to be embedded into the M5
 # library.  To do that, we compile the file to byte code, marshal the
@@ -1136,17 +1144,22 @@ def embedPyFile(target, source, env):
             return "0"
         return '"%s"' % string
 
-    '''Action function to compile a .py into a code object, marshal
-    it, compress it, and stick it into an asm file so the code appears
-    as just bytes with a label in the data section'''
+    '''Action function to compile a .py into a code object, marshal it,
+    compress it, and stick it into an asm file so the code appears as
+    just bytes with a label in the data section. The action takes two
+    sources:
 
-    src = file(str(source[0]), 'r').read()
+    source[0]: Binary used to marshal Python sources
+    source[1]: Python script to marshal
+    '''
 
-    pysource = PySource.tnodes[source[0]]
-    compiled = compile(src, pysource.abspath, 'exec')
-    marshalled = marshal.dumps(compiled)
+    import subprocess
+
+    marshalled = subprocess.check_output([source[0].abspath, str(source[1])])
+
     compressed = zlib.compress(marshalled)
     data = compressed
+    pysource = PySource.tnodes[source[1]]
     sym = pysource.symname
 
     code = code_formatter()
@@ -1173,7 +1186,7 @@ EmbeddedPython embedded_${sym}(
     code.write(str(target[0]))
 
 for source in PySource.all:
-    env.Command(source.cpp, source.tnode,
+    env.Command(source.cpp, [ py_marshal, source.tnode ],
                 MakeAction(embedPyFile, Transform("EMBED PY")))
     Source(source.cpp, tags=source.tags, add_tags='python')
 
@@ -1321,8 +1334,7 @@ elif env['CLANG']:
     for target in ['opt', 'fast', 'prof', 'perf']:
         ccflags[target] += ['-O3']
 else:
-    print('Unknown compiler, please fix compiler options')
-    Exit(1)
+    error('Unknown compiler, please fix compiler options')
 
 
 # To speed things up, we only instantiate the build environments we
@@ -1337,7 +1349,7 @@ def identifyTarget(t):
     ext = t.split('.')[-1]
     if ext in target_types:
         return ext
-    if obj2target.has_key(ext):
+    if ext in obj2target:
         return obj2target[ext]
     match = re.search(r'/tests/([^/]+)/', t)
     if match and match.group(1) in target_types:
@@ -1375,9 +1387,9 @@ if 'opt' in needed_envs:
 
 # "Fast" binary
 if 'fast' in needed_envs:
-    disable_partial = disable_partial and \
-            env.get('BROKEN_INCREMENTAL_LTO', False) and \
-            GetOption('force_lto')
+    disable_partial = disable_partial or \
+            (env.get('BROKEN_INCREMENTAL_LTO', False) and \
+            GetOption('force_lto'))
     makeEnv(env, 'fast', '.fo', strip = True,
             CCFLAGS = Split(ccflags['fast']),
             CPPDEFINES = ['NDEBUG', 'TRACING_ON=0'],

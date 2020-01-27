@@ -1,3 +1,15 @@
+# Copyright (c) 2020 ARM Limited
+# All rights reserved
+#
+# The license below extends only to copyright in the software and shall
+# not be construed as granting a license to any other intellectual
+# property including but not limited to intellectual property relating
+# to a hardware implementation of the functionality of the software
+# licensed hereunder.  You may use the software subject to the license
+# terms below provided that you ensure that this notice is replicated
+# unmodified and in its entirety in all distributions of the software,
+# modified or unmodified, in source code or in binary form.
+#
 # Copyright (c) 2017 Mark D. Hill and David A. Wood
 # All rights reserved.
 #
@@ -34,13 +46,25 @@ from testlib import *
 test_progs = {
     'x86': ('hello64-static', 'hello64-dynamic', 'hello32-static'),
     'arm': ('hello64-static', 'hello32-static'),
+    'alpha': ('hello',),
+    'mips': ('hello',),
+    'riscv': ('hello',),
+    'sparc': ('hello',)
 }
 
+if config.bin_path:
+    base_path = config.bin_path
+else:
+    base_path = joinpath(absdirpath(__file__), '..', 'test-progs', 'hello',
+        'bin')
+
+urlbase = 'http://dist.gem5.org/dist/current/test-progs/hello/bin/'
 for isa in test_progs:
     for binary in test_progs[isa]:
         import os
-        path = os.path.join('hello', 'bin', isa, 'linux')
-        hello_program = DownloadedProgram(path, binary)
+        url = urlbase + isa + '/linux/' + binary
+        path = joinpath(base_path, isa, 'linux')
+        hello_program = DownloadedProgram(url, path, binary)
 
         ref_path = joinpath(getcwd(), 'ref')
 
@@ -49,10 +73,10 @@ for isa in test_progs:
         )
 
         gem5_verify_config(
-                name='test'+binary,
+                name='test-'+binary,
                 fixtures=(hello_program,),
                 verifiers=verifiers,
                 config=joinpath(config.base_dir, 'configs', 'example','se.py'),
-                config_args=['--cmd', hello_program.path],
+                config_args=['--cmd', joinpath(path, binary)],
                 valid_isas=(isa.upper(),),
         )

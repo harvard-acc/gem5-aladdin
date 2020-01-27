@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016 ARM Limited
+ * Copyright (c) 2014, 2016-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -74,9 +74,9 @@ class ExecContext {
   public:
     typedef TheISA::PCState PCState;
 
-    typedef TheISA::CCReg CCReg;
     using VecRegContainer = TheISA::VecRegContainer;
     using VecElem = TheISA::VecElem;
+    using VecPredRegContainer = TheISA::VecPredRegContainer;
 
   public:
     /**
@@ -168,12 +168,29 @@ class ExecContext {
                                    const VecElem val) = 0;
     /** @} */
 
+    /** Predicate registers interface. */
+    /** @{ */
+    /** Reads source predicate register operand. */
+    virtual const VecPredRegContainer&
+    readVecPredRegOperand(const StaticInst *si, int idx) const = 0;
+
+    /** Gets destination predicate register operand for modification. */
+    virtual VecPredRegContainer&
+    getWritableVecPredRegOperand(const StaticInst *si, int idx) = 0;
+
+    /** Sets a destination predicate register operand to a value. */
+    virtual void
+    setVecPredRegOperand(const StaticInst *si, int idx,
+                         const VecPredRegContainer& val) = 0;
+    /** @} */
+
     /**
      * @{
      * @name Condition Code Registers
      */
-    virtual CCReg readCCRegOperand(const StaticInst *si, int idx) = 0;
-    virtual void setCCRegOperand(const StaticInst *si, int idx, CCReg val) = 0;
+    virtual RegVal readCCRegOperand(const StaticInst *si, int idx) = 0;
+    virtual void setCCRegOperand(
+            const StaticInst *si, int idx, RegVal val) = 0;
     /** @} */
 
     /**
@@ -218,7 +235,8 @@ class ExecContext {
      * should never be called).
      */
     virtual Fault readMem(Addr addr, uint8_t *data, unsigned int size,
-                          Request::Flags flags)
+            Request::Flags flags,
+            const std::vector<bool>& byte_enable = std::vector<bool>())
     {
         panic("ExecContext::readMem() should be overridden\n");
     }
@@ -231,7 +249,8 @@ class ExecContext {
      * should never be called).
      */
     virtual Fault initiateMemRead(Addr addr, unsigned int size,
-                                  Request::Flags flags)
+            Request::Flags flags,
+            const std::vector<bool>& byte_enable = std::vector<bool>())
     {
         panic("ExecContext::initiateMemRead() should be overridden\n");
     }
@@ -241,7 +260,31 @@ class ExecContext {
      * For timing-mode contexts, initiate a timing memory write operation.
      */
     virtual Fault writeMem(uint8_t *data, unsigned int size, Addr addr,
-                           Request::Flags flags, uint64_t *res) = 0;
+                           Request::Flags flags, uint64_t *res,
+                           const std::vector<bool>& byte_enable =
+                               std::vector<bool>()) = 0;
+
+    /**
+     * For atomic-mode contexts, perform an atomic AMO (a.k.a., Atomic
+     * Read-Modify-Write Memory Operation)
+     */
+    virtual Fault amoMem(Addr addr, uint8_t *data, unsigned int size,
+                         Request::Flags flags,
+                         AtomicOpFunctorPtr amo_op)
+    {
+        panic("ExecContext::amoMem() should be overridden\n");
+    }
+
+    /**
+     * For timing-mode contexts, initiate an atomic AMO (atomic
+     * read-modify-write memory operation)
+     */
+    virtual Fault initiateMemAMO(Addr addr, unsigned int size,
+                                 Request::Flags flags,
+                                 AtomicOpFunctorPtr amo_op)
+    {
+        panic("ExecContext::initiateMemAMO() should be overridden\n");
+    }
 
     /**
      * Sets the number of consecutive store conditional failures.
@@ -261,9 +304,9 @@ class ExecContext {
      */
 
     /**
-     * Executes a syscall specified by the callnum.
+     * Executes a syscall.
      */
-    virtual void syscall(int64_t callnum, Fault *fault) = 0;
+    virtual void syscall(Fault *fault) = 0;
 
     /** @} */
 
@@ -272,30 +315,13 @@ class ExecContext {
 
     /**
      * @{
-     * @name Alpha-Specific Interfaces
-     */
-
-    /**
-     * Somewhat Alpha-specific function that handles returning from an
-     * error or interrupt.
-     */
-    virtual Fault hwrei() = 0;
-
-    /**
-     * Check for special simulator handling of specific PAL calls.  If
-     * return value is false, actual PAL call will be suppressed.
-     */
-    virtual bool simPalCheck(int palFunc) = 0;
-
-    /** @} */
-
-    /**
-     * @{
      * @name ARM-Specific Interfaces
      */
 
     virtual bool readPredicate() const = 0;
     virtual void setPredicate(bool val) = 0;
+    virtual bool readMemAccPredicate() const = 0;
+    virtual void setMemAccPredicate(bool val) = 0;
 
     /** @} */
 
@@ -312,20 +338,6 @@ class ExecContext {
     virtual bool mwait(PacketPtr pkt) = 0;
     virtual void mwaitAtomic(ThreadContext *tc) = 0;
     virtual AddressMonitor *getAddrMonitor() = 0;
-
-    /** @} */
-
-    /**
-     * @{
-     * @name MIPS-Specific Interfaces
-     */
-
-#if THE_ISA == MIPS_ISA
-    virtual RegVal readRegOtherThread(const RegId &reg,
-                                       ThreadID tid=InvalidThreadID) = 0;
-    virtual void setRegOtherThread(const RegId& reg, RegVal val,
-                                   ThreadID tid=InvalidThreadID) = 0;
-#endif
 
     /** @} */
 };

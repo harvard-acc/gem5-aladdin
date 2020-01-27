@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013,2015 ARM Limited
+ * Copyright (c) 2012-2013,2015,2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -264,10 +264,10 @@ class TimingSimpleCPU : public BaseSimpleCPU
   protected:
 
      /** Return a reference to the data port. */
-    MasterPort &getDataPort() override { return dcachePort; }
+    Port &getDataPort() override { return dcachePort; }
 
     /** Return a reference to the instruction port. */
-    MasterPort &getInstPort() override { return icachePort; }
+    Port &getInstPort() override { return icachePort; }
 
   public:
 
@@ -282,14 +282,18 @@ class TimingSimpleCPU : public BaseSimpleCPU
     void activateContext(ThreadID thread_num) override;
     void suspendContext(ThreadID thread_num) override;
 
-    Fault readMem(Addr addr, uint8_t *data, unsigned size,
-                  Request::Flags flags) override;
-
     Fault initiateMemRead(Addr addr, unsigned size,
-                          Request::Flags flags) override;
+            Request::Flags flags,
+            const std::vector<bool>& byte_enable =std::vector<bool>())
+        override;
 
     Fault writeMem(uint8_t *data, unsigned size,
-                   Addr addr, Request::Flags flags, uint64_t *res) override;
+                   Addr addr, Request::Flags flags, uint64_t *res,
+                   const std::vector<bool>& byte_enable = std::vector<bool>())
+        override;
+
+    Fault initiateMemAMO(Addr addr, unsigned size, Request::Flags flags,
+                         AtomicOpFunctorPtr amo_op) override;
 
     void fetch();
     void sendFetch(const Fault &fault,
@@ -346,7 +350,7 @@ class TimingSimpleCPU : public BaseSimpleCPU
      *     activated it can happen.
      * </ul>
      */
-    bool isDrained() {
+    bool isCpuDrained() const {
         SimpleExecContext& t_info = *threadInfo[curThread];
         SimpleThread* thread = t_info.thread;
 

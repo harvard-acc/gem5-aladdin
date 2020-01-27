@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2019 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2018 Metempsy Technology Consulting
  * All rights reserved.
  *
@@ -34,27 +46,34 @@
 #include "debug/GIC.hh"
 #include "dev/arm/gic_v3_cpu_interface.hh"
 #include "dev/arm/gic_v3_distributor.hh"
+#include "mem/fs_translating_port_proxy.hh"
 
 const AddrRange Gicv3Redistributor::GICR_IPRIORITYR(SGI_base + 0x0400,
-        SGI_base + 0x041f);
+                                                    SGI_base + 0x0420);
 
 Gicv3Redistributor::Gicv3Redistributor(Gicv3 * gic, uint32_t cpu_id)
     : gic(gic),
       distributor(nullptr),
       cpuInterface(nullptr),
       cpuId(cpu_id),
-      irqGroup(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqEnabled(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqPending(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqActive(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqPriority(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqConfig(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqGrpmod(Gicv3::SGI_MAX + Gicv3::PPI_MAX),
-      irqNsacr(Gicv3::SGI_MAX + Gicv3::PPI_MAX)
-{
-}
-
-Gicv3Redistributor::~Gicv3Redistributor()
+      memProxy(nullptr),
+      peInLowPowerState(true),
+      irqGroup(Gicv3::SGI_MAX + Gicv3::PPI_MAX, 0),
+      irqEnabled(Gicv3::SGI_MAX + Gicv3::PPI_MAX, false),
+      irqPending(Gicv3::SGI_MAX + Gicv3::PPI_MAX, false),
+      irqActive(Gicv3::SGI_MAX + Gicv3::PPI_MAX, false),
+      irqPriority(Gicv3::SGI_MAX + Gicv3::PPI_MAX, 0),
+      irqConfig(Gicv3::SGI_MAX + Gicv3::PPI_MAX, Gicv3::INT_EDGE_TRIGGERED),
+      irqGrpmod(Gicv3::SGI_MAX + Gicv3::PPI_MAX, 0),
+      irqNsacr(Gicv3::SGI_MAX + Gicv3::PPI_MAX, 0),
+      DPG1S(false),
+      DPG1NS(false),
+      DPG0(false),
+      EnableLPIs(false),
+      lpiConfigurationTablePtr(0),
+      lpiIDBits(0),
+      lpiPendingTablePtr(0),
+      addrRangeSize(gic->params()->gicv4 ? 0x40000 : 0x20000)
 {
 }
 
@@ -63,34 +82,8 @@ Gicv3Redistributor::init()
 {
     distributor = gic->getDistributor();
     cpuInterface = gic->getCPUInterface(cpuId);
-}
 
-void
-Gicv3Redistributor::initState()
-{
-    reset();
-}
-
-void
-Gicv3Redistributor::reset()
-{
-    peInLowPowerState = true;
-    std::fill(irqGroup.begin(), irqGroup.end(), 0);
-    std::fill(irqEnabled.begin(), irqEnabled.end(), false);
-    std::fill(irqPending.begin(), irqPending.end(), false);
-    std::fill(irqActive.begin(), irqActive.end(), false);
-    std::fill(irqPriority.begin(), irqPriority.end(), 0);
-
-    // SGIs have edge-triggered behavior
-    for (uint32_t int_id = 0; int_id < Gicv3::SGI_MAX; int_id++) {
-        irqConfig[int_id] = Gicv3::INT_EDGE_TRIGGERED;
-    }
-
-    std::fill(irqGrpmod.begin(), irqGrpmod.end(), 0);
-    std::fill(irqNsacr.begin(), irqNsacr.end(), 0);
-    DPG1S = false;
-    DPG1NS = false;
-    DPG0 = false;
+    memProxy = &gic->getSystem()->physProxy;
 }
 
 uint64_t
@@ -135,6 +128,10 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
               value |= GICR_CTLR_DPG0;
           }
 
+          if (EnableLPIs) {
+              value |= GICR_CTLR_ENABLE_LPIS;
+          }
+
           return value;
       }
 
@@ -156,17 +153,17 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
            * Last             [4]     == X
            * (This Redistributor is the highest-numbered Redistributor in
            * a series of contiguous Redistributor pages)
-           * DirectLPI        [3]     == 0
-           * (direct injection of LPIs not supported)
+           * DirectLPI        [3]     == 1
+           * (direct injection of LPIs supported)
            * VLPIS            [1]     == 0
            * (virtual LPIs not supported)
-           * PLPIS            [0]     == 0
-           * (physical LPIs not supported)
+           * PLPIS            [0]     == 1
+           * (physical LPIs supported)
            */
           uint64_t affinity = getAffinity();
           int last = cpuId == (gic->getSystem()->numContexts() - 1);
           return (affinity << 32) | (1 << 24) | (cpuId << 8) |
-              (1 << 5) | (last << 4);
+              (1 << 5) | (last << 4) | (1 << 3) | (1 << 0);
       }
 
       case GICR_WAKER: // Wake Register
@@ -182,8 +179,7 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
         }
 
       case GICR_PIDR0: { // Peripheral ID0 Register
-          uint8_t part_0 = 0x92; // Part number, bits[7:0]
-          return part_0;
+          return 0x92; // Part number, bits[7:0]
       }
 
       case GICR_PIDR1: { // Peripheral ID1 Register
@@ -290,7 +286,7 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
           uint32_t first_int_id = addr == GICR_ICFGR0 ? 0 : Gicv3::SGI_MAX;
 
           for (int i = 0, int_id = first_int_id; i < 32;
-                  i = i + 2, int_id++) {
+               i = i + 2, int_id++) {
               if (!distributor->DS && !is_secure_access) {
                   // RAZ/WI for non-secure accesses for secure interrupts
                   if (getIntGroup(int_id) != Gicv3::G1NS) {
@@ -337,7 +333,7 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
                   value = 0;
               } else {
                   for (int i = 0, int_id = 0; i < 8 * size;
-                          i = i + 2, int_id++) {
+                       i = i + 2, int_id++) {
                       value |= irqNsacr[int_id] << i;
                   }
               }
@@ -345,6 +341,39 @@ Gicv3Redistributor::read(Addr addr, size_t size, bool is_secure_access)
 
           return value;
       }
+
+      case GICR_PROPBASER: // Redistributor Properties Base Address Register
+        // OuterCache, bits [58:56]
+        //   000 Memory type defined in InnerCache field
+        // Physical_Address, bits [51:12]
+        //   Bits [51:12] of the physical address containing the LPI
+        //   Configuration table
+        // Shareability, bits [11:10]
+        //   00 Non-shareable
+        // InnerCache, bits [9:7]
+        //   000 Device-nGnRnE
+        // IDbits, bits [4:0]
+        //   limited by GICD_TYPER.IDbits
+        return lpiConfigurationTablePtr | lpiIDBits;
+
+      // Redistributor LPI Pending Table Base Address Register
+      case GICR_PENDBASER:
+        // PTZ, bit [62]
+        //   Pending Table Zero
+        // OuterCache, bits [58:56]
+        //   000 Memory type defined in InnerCache field
+        // Physical_Address, bits [51:16]
+        //   Bits [51:16] of the physical address containing the LPI Pending
+        //   table
+        // Shareability, bits [11:10]
+        //   00 Non-shareable
+        // InnerCache, bits [9:7]
+        //   000 Device-nGnRnE
+        return lpiPendingTablePtr;
+
+      // Redistributor Synchronize Register
+      case GICR_SYNCR:
+        return 0;
 
       default:
         panic("Gicv3Redistributor::read(): invalid offset %#x\n", addr);
@@ -382,7 +411,8 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
 
     switch (addr) {
       case GICR_CTLR: {
-          // GICR_TYPER.LPIS is 0 so Enable_LPIs is RES0
+          // GICR_TYPER.LPIS is 0 so EnableLPIs is RES0
+          EnableLPIs = data & GICR_CTLR_ENABLE_LPIS;
           DPG1S = data & GICR_CTLR_DPG1S;
           DPG1NS = data & GICR_CTLR_DPG1NS;
           DPG0 = data & GICR_CTLR_DPG0;
@@ -396,11 +426,11 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
         }
 
         if (not peInLowPowerState and
-                (data & GICR_WAKER_ProcessorSleep)) {
+            (data & GICR_WAKER_ProcessorSleep)) {
             DPRINTF(GIC, "Gicv3Redistributor::write(): "
                     "PE entering in low power state\n");
         } else if (peInLowPowerState and
-                not(data & GICR_WAKER_ProcessorSleep)) {
+                   not(data & GICR_WAKER_ProcessorSleep)) {
             DPRINTF(GIC, "Gicv3Redistributor::write(): powering up PE\n");
         }
 
@@ -482,7 +512,7 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
             }
         }
 
-        updateAndInformCPUInterface();
+        updateDistributor();
         break;
 
       case GICR_ICPENDR0:// Interrupt Clear-Pending Register 0
@@ -549,11 +579,14 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
 
         break;
 
+      case GICR_ICFGR0: // SGI Configuration Register
+        // WI
+        return;
       case GICR_ICFGR1: { // PPI Configuration Register
           int first_intid = Gicv3::SGI_MAX;
 
           for (int i = 0, int_id = first_intid; i < 8 * size;
-                  i = i + 2, int_id++) {
+               i = i + 2, int_id++) {
               if (!distributor->DS && !is_secure_access) {
                   // RAZ/WI for non-secure accesses for secure interrupts
                   if (getIntGroup(int_id) != Gicv3::G1NS) {
@@ -561,9 +594,9 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
                   }
               }
 
-              irqConfig[int_id] = data & (0x2 << i)
-                  ? Gicv3::INT_EDGE_TRIGGERED :
-                  Gicv3::INT_LEVEL_SENSITIVE;
+              irqConfig[int_id] = data & (0x2 << i) ?
+                                  Gicv3::INT_EDGE_TRIGGERED :
+                                  Gicv3::INT_LEVEL_SENSITIVE;
               DPRINTF(GIC, "Gicv3Redistributor::write(): "
                       "int_id %d (PPI) config %d\n",
                       int_id, irqConfig[int_id]);
@@ -597,12 +630,71 @@ Gicv3Redistributor::write(Addr addr, uint64_t data, size_t size,
                   // RAZ/WI
               } else {
                   for (int i = 0, int_id = 0; i < 8 * size;
-                          i = i + 2, int_id++) {
+                       i = i + 2, int_id++) {
                       irqNsacr[int_id] = (data >> i) & 0x3;
                   }
               }
           }
 
+          break;
+      }
+
+      case GICR_SETLPIR: // Set LPI Pending Register
+        setClrLPI(data, true);
+        break;
+
+      case GICR_CLRLPIR: // Clear LPI Pending Register
+        setClrLPI(data, false);
+        break;
+
+      case GICR_PROPBASER: { // Redistributor Properties Base Address Register
+          // OuterCache, bits [58:56]
+          //   000 Memory type defined in InnerCache field
+          // Physical_Address, bits [51:12]
+          //   Bits [51:12] of the physical address containing the LPI
+          //   Configuration table
+          // Shareability, bits [11:10]
+          //   00 Non-shareable
+          // InnerCache, bits [9:7]
+          //   000 Device-nGnRnE
+          // IDbits, bits [4:0]
+          //   limited by GICD_TYPER.IDbits (= 0xf)
+          lpiConfigurationTablePtr = data & 0xFFFFFFFFFF000;
+          lpiIDBits = data & 0x1f;
+
+          // 0xf here matches the value of GICD_TYPER.IDbits.
+          // TODO - make GICD_TYPER.IDbits a parameter instead of a hardcoded
+          // value
+          if (lpiIDBits > 0xf) {
+              lpiIDBits = 0xf;
+          }
+
+          break;
+      }
+
+      // Redistributor LPI Pending Table Base Address Register
+      case GICR_PENDBASER:
+        // PTZ, bit [62]
+        //   Pending Table Zero
+        // OuterCache, bits [58:56]
+        //   000 Memory type defined in InnerCache field
+        // Physical_Address, bits [51:16]
+        //   Bits [51:16] of the physical address containing the LPI Pending
+        //   table
+        // Shareability, bits [11:10]
+        //   00 Non-shareable
+        // InnerCache, bits [9:7]
+        //   000 Device-nGnRnE
+        lpiPendingTablePtr = data & 0xFFFFFFFFF0000;
+        break;
+
+      case GICR_INVLPIR: { // Redistributor Invalidate LPI Register
+          // Do nothing: no caching supported
+          break;
+      }
+
+      case GICR_INVALLR: { // Redistributor Invalidate All Register
+          // Do nothing: no caching supported
           break;
       }
 
@@ -620,7 +712,7 @@ Gicv3Redistributor::sendPPInt(uint32_t int_id)
     irqPending[int_id] = true;
     DPRINTF(GIC, "Gicv3Redistributor::sendPPInt(): "
             "int_id %d (PPI) pending bit set\n", int_id);
-    updateAndInformCPUInterface();
+    updateDistributor();
 }
 
 void
@@ -629,34 +721,39 @@ Gicv3Redistributor::sendSGI(uint32_t int_id, Gicv3::GroupId group, bool ns)
     assert(int_id < Gicv3::SGI_MAX);
     Gicv3::GroupId int_group = getIntGroup(int_id);
 
-    // asked for secure group 1
-    // configured as group 0
-    // send group 0
-    if (int_group == Gicv3::G0S && group == Gicv3::G1S) {
-        group = Gicv3::G0S;
-    }
+    bool forward = false;
 
-    if (group == Gicv3::G0S and int_group != Gicv3::G0S) {
-        return;
-    }
-
-    if (ns && distributor->DS == 0) {
+    if (ns) {
+        // Non-Secure EL1 and EL2 access
         int nsaccess = irqNsacr[int_id];
+        if (int_group == Gicv3::G0S) {
 
-        if ((int_group == Gicv3::G0S && nsaccess < 1) ||
-                (int_group == Gicv3::G1S && nsaccess < 2)) {
-            return;
+            forward = distributor->DS || (nsaccess >= 1);
+
+        } else if (int_group == Gicv3::G1S) {
+            forward = ((group == Gicv3::G1S || group == Gicv3::G1NS ) &&
+                      nsaccess == 2);
+        } else {
+            // G1NS
+            forward = group == Gicv3::G1NS;
         }
+    } else {
+        // Secure EL1 and EL3 access
+        forward = (group == int_group) ||
+            (group == Gicv3::G1S && int_group == Gicv3::G0S &&
+            distributor->DS);
     }
+
+    if (!forward) return;
 
     irqPending[int_id] = true;
     DPRINTF(GIC, "Gicv3ReDistributor::sendSGI(): "
             "int_id %d (SGI) pending bit set\n", int_id);
-    updateAndInformCPUInterface();
+    updateDistributor();
 }
 
 Gicv3::IntStatus
-Gicv3Redistributor::intStatus(uint32_t int_id)
+Gicv3Redistributor::intStatus(uint32_t int_id) const
 {
     assert(int_id < Gicv3::SGI_MAX + Gicv3::PPI_MAX);
 
@@ -673,6 +770,12 @@ Gicv3Redistributor::intStatus(uint32_t int_id)
     }
 }
 
+void
+Gicv3Redistributor::updateDistributor()
+{
+    distributor->update();
+}
+
 /*
  * Recalculate the highest priority pending interrupt after a
  * change to redistributor state.
@@ -680,8 +783,6 @@ Gicv3Redistributor::intStatus(uint32_t int_id)
 void
 Gicv3Redistributor::update()
 {
-    bool new_hppi = false;
-
     for (int int_id = 0; int_id < Gicv3::SGI_MAX + Gicv3::PPI_MAX; int_id++) {
         Gicv3::GroupId int_group = getIntGroup(int_id);
         bool group_enabled = distributor->groupEnabled(int_group);
@@ -689,36 +790,159 @@ Gicv3Redistributor::update()
         if (irqPending[int_id] && irqEnabled[int_id] &&
                 !irqActive[int_id] && group_enabled) {
             if ((irqPriority[int_id] < cpuInterface->hppi.prio) ||
-                    /*
-                     * Multiple pending ints with same priority.
-                     * Implementation choice which one to signal.
-                     * Our implementation selects the one with the lower id.
-                     */
-                    (irqPriority[int_id] == cpuInterface->hppi.prio &&
-                     int_id < cpuInterface->hppi.intid)) {
+                /*
+                 * Multiple pending ints with same priority.
+                 * Implementation choice which one to signal.
+                 * Our implementation selects the one with the lower id.
+                 */
+                (irqPriority[int_id] == cpuInterface->hppi.prio &&
+                 int_id < cpuInterface->hppi.intid)) {
                 cpuInterface->hppi.intid = int_id;
                 cpuInterface->hppi.prio = irqPriority[int_id];
                 cpuInterface->hppi.group = int_group;
-                new_hppi = true;
             }
         }
     }
 
-    if (!new_hppi && cpuInterface->hppi.prio != 0xff &&
-            cpuInterface->hppi.intid < Gicv3::SGI_MAX + Gicv3::PPI_MAX) {
-        distributor->fullUpdate();
-    }
-}
+    // Check LPIs
+    if (EnableLPIs) {
 
-void
-Gicv3Redistributor::updateAndInformCPUInterface()
-{
-    update();
+        const uint32_t largest_lpi_id = 1 << (lpiIDBits + 1);
+        const uint32_t number_lpis = largest_lpi_id - SMALLEST_LPI_ID + 1;
+
+        uint8_t lpi_pending_table[largest_lpi_id / 8];
+        uint8_t lpi_config_table[number_lpis];
+
+        memProxy->readBlob(lpiPendingTablePtr,
+                           lpi_pending_table,
+                           sizeof(lpi_pending_table));
+
+        memProxy->readBlob(lpiConfigurationTablePtr,
+                           lpi_config_table,
+                           sizeof(lpi_config_table));
+
+        for (int lpi_id = SMALLEST_LPI_ID; lpi_id < largest_lpi_id;
+             lpi_id++) {
+            uint32_t lpi_pending_entry_byte = lpi_id / 8;
+            uint8_t lpi_pending_entry_bit_position = lpi_id % 8;
+            bool lpi_is_pending = lpi_pending_table[lpi_pending_entry_byte] &
+                                  1 << lpi_pending_entry_bit_position;
+            uint32_t lpi_configuration_entry_index = lpi_id - SMALLEST_LPI_ID;
+
+            LPIConfigurationTableEntry config_entry =
+                lpi_config_table[lpi_configuration_entry_index];
+
+            bool lpi_is_enable = config_entry.enable;
+
+            // LPIs are always Non-secure Group 1 interrupts,
+            // in a system where two Security states are enabled.
+            Gicv3::GroupId lpi_group = Gicv3::G1NS;
+            bool group_enabled = distributor->groupEnabled(lpi_group);
+
+            if (lpi_is_pending && lpi_is_enable && group_enabled) {
+                uint8_t lpi_priority = config_entry.priority << 2;
+
+                if ((lpi_priority < cpuInterface->hppi.prio) ||
+                    (lpi_priority == cpuInterface->hppi.prio &&
+                     lpi_id < cpuInterface->hppi.intid)) {
+                    cpuInterface->hppi.intid = lpi_id;
+                    cpuInterface->hppi.prio = lpi_priority;
+                    cpuInterface->hppi.group = lpi_group;
+                }
+            }
+        }
+    }
+
     cpuInterface->update();
 }
 
+uint8_t
+Gicv3Redistributor::readEntryLPI(uint32_t lpi_id)
+{
+    Addr lpi_pending_entry_ptr = lpiPendingTablePtr + (lpi_id / 8);
+
+    uint8_t lpi_pending_entry;
+    memProxy->readBlob(lpi_pending_entry_ptr,
+                       &lpi_pending_entry,
+                       sizeof(lpi_pending_entry));
+
+    return lpi_pending_entry;
+}
+
+void
+Gicv3Redistributor::writeEntryLPI(uint32_t lpi_id, uint8_t lpi_pending_entry)
+{
+    Addr lpi_pending_entry_ptr = lpiPendingTablePtr + (lpi_id / 8);
+
+    memProxy->writeBlob(lpi_pending_entry_ptr,
+                        &lpi_pending_entry,
+                        sizeof(lpi_pending_entry));
+}
+
+bool
+Gicv3Redistributor::isPendingLPI(uint32_t lpi_id)
+{
+    // Fetch the LPI pending entry from memory
+    uint8_t lpi_pending_entry = readEntryLPI(lpi_id);
+
+    uint8_t lpi_pending_entry_bit_position = lpi_id % 8;
+    bool is_set = lpi_pending_entry & (1 << lpi_pending_entry_bit_position);
+
+    return is_set;
+}
+
+void
+Gicv3Redistributor::setClrLPI(uint64_t data, bool set)
+{
+    if (!EnableLPIs) {
+        // Writes to GICR_SETLPIR or GICR_CLRLPIR have not effect if
+        // GICR_CTLR.EnableLPIs == 0.
+        return;
+    }
+
+    uint32_t lpi_id = data & 0xffffffff;
+    uint32_t largest_lpi_id = 1 << (lpiIDBits + 1);
+
+    if (lpi_id > largest_lpi_id) {
+        // Writes to GICR_SETLPIR or GICR_CLRLPIR have not effect if
+        // pINTID value specifies an unimplemented LPI.
+        return;
+    }
+
+    // Fetch the LPI pending entry from memory
+    uint8_t lpi_pending_entry = readEntryLPI(lpi_id);
+
+    uint8_t lpi_pending_entry_bit_position = lpi_id % 8;
+    bool is_set = lpi_pending_entry & (1 << lpi_pending_entry_bit_position);
+
+    if (set) {
+        if (is_set) {
+            // Writes to GICR_SETLPIR have not effect if the pINTID field
+            // corresponds to an LPI that is already pending.
+            return;
+        }
+
+        lpi_pending_entry |= 1 << (lpi_pending_entry_bit_position);
+    } else {
+        if (!is_set) {
+            // Writes to GICR_SETLPIR have not effect if the pINTID field
+            // corresponds to an LPI that is not pending.
+            return;
+        }
+
+        lpi_pending_entry &= ~(1 << (lpi_pending_entry_bit_position));
+
+        // Remove the pending state from the cpu interface
+        cpuInterface->resetHppi(lpi_id);
+    }
+
+    writeEntryLPI(lpi_id, lpi_pending_entry);
+
+    updateDistributor();
+}
+
 Gicv3::GroupId
-Gicv3Redistributor::getIntGroup(int int_id)
+Gicv3Redistributor::getIntGroup(int int_id) const
 {
     assert(int_id < (Gicv3::SGI_MAX + Gicv3::PPI_MAX));
 
@@ -757,7 +981,7 @@ Gicv3Redistributor::deactivateIRQ(uint32_t int_id)
 }
 
 uint32_t
-Gicv3Redistributor::getAffinity()
+Gicv3Redistributor::getAffinity() const
 {
     ThreadContext * tc = gic->getSystem()->getThreadContext(cpuId);
     uint64_t mpidr = getMPIDR(gic->getSystem(), tc);
@@ -774,7 +998,7 @@ Gicv3Redistributor::getAffinity()
 }
 
 bool
-Gicv3Redistributor::canBeSelectedFor1toNInterrupt(Gicv3::GroupId group)
+Gicv3Redistributor::canBeSelectedFor1toNInterrupt(Gicv3::GroupId group) const
 {
     if (peInLowPowerState) {
         return false;
@@ -814,6 +1038,10 @@ Gicv3Redistributor::serialize(CheckpointOut & cp) const
     SERIALIZE_SCALAR(DPG1S);
     SERIALIZE_SCALAR(DPG1NS);
     SERIALIZE_SCALAR(DPG0);
+    SERIALIZE_SCALAR(EnableLPIs);
+    SERIALIZE_SCALAR(lpiConfigurationTablePtr);
+    SERIALIZE_SCALAR(lpiIDBits);
+    SERIALIZE_SCALAR(lpiPendingTablePtr);
 }
 
 void
@@ -831,4 +1059,8 @@ Gicv3Redistributor::unserialize(CheckpointIn & cp)
     UNSERIALIZE_SCALAR(DPG1S);
     UNSERIALIZE_SCALAR(DPG1NS);
     UNSERIALIZE_SCALAR(DPG0);
+    UNSERIALIZE_SCALAR(EnableLPIs);
+    UNSERIALIZE_SCALAR(lpiConfigurationTablePtr);
+    UNSERIALIZE_SCALAR(lpiIDBits);
+    UNSERIALIZE_SCALAR(lpiPendingTablePtr);
 }

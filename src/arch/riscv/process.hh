@@ -47,22 +47,31 @@ class RiscvProcess : public Process
 {
   protected:
     RiscvProcess(ProcessParams * params, ObjectFile *objFile);
-
-    void initState() override;
-
     template<class IntType>
     void argsInit(int pageSize);
 
   public:
-    RiscvISA::IntReg getSyscallArg(ThreadContext *tc, int &i) override;
+    RegVal getSyscallArg(ThreadContext *tc, int &i) override;
     /// Explicitly import the otherwise hidden getSyscallArg
     using Process::getSyscallArg;
-    void setSyscallArg(ThreadContext *tc, int i,
-                       RiscvISA::IntReg val) override;
     void setSyscallReturn(ThreadContext *tc,
                           SyscallReturn return_value) override;
 
     virtual bool mmapGrowsDown() const override { return false; }
+};
+
+class RiscvProcess64 : public RiscvProcess
+{
+  protected:
+    RiscvProcess64(ProcessParams * params, ObjectFile *objFile);
+    void initState() override;
+};
+
+class RiscvProcess32 : public RiscvProcess
+{
+  protected:
+    RiscvProcess32(ProcessParams * params, ObjectFile *objFile);
+    void initState() override;
 };
 
 #endif // __RISCV_PROCESS_HH__

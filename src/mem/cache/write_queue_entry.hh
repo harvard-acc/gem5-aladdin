@@ -76,21 +76,6 @@ class WriteQueueEntry : public QueueEntry, public Printable
     friend class WriteQueue;
 
   public:
-
-    class Target {
-      public:
-
-        const Tick recvTime;  //!< Time when request was received (for stats)
-        const Tick readyTime; //!< Time when request is ready to be serviced
-        const Counter order;  //!< Global order (for memory consistency mgmt)
-        const PacketPtr pkt;  //!< Pending request packet.
-
-        Target(PacketPtr _pkt, Tick _readyTime, Counter _order)
-            : recvTime(curTick()), readyTime(_readyTime), order(_order),
-              pkt(_pkt)
-        {}
-    };
-
     class TargetList : public std::list<Target> {
 
       public:
@@ -107,7 +92,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
     /** WriteQueueEntry list iterator. */
     typedef List::iterator Iterator;
 
-    bool sendPacket(BaseCache &cache);
+    bool sendPacket(BaseCache &cache) override;
 
   private:
 
@@ -165,7 +150,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
      * Returns a reference to the first target.
      * @return A pointer to the first target.
      */
-    Target *getTarget()
+    Target *getTarget() override
     {
         assert(hasTargets());
         return &targets.front();
@@ -186,7 +171,7 @@ class WriteQueueEntry : public QueueEntry, public Printable
      */
     void print(std::ostream &os,
                int verbosity = 0,
-               const std::string &prefix = "") const;
+               const std::string &prefix = "") const override;
     /**
      * A no-args wrapper of print(std::ostream...)  meant to be
      * invoked from DPRINTFs avoiding string overheads in fast mode
@@ -194,6 +179,10 @@ class WriteQueueEntry : public QueueEntry, public Printable
      * @return string with mshr fields
      */
     std::string print() const;
+
+    bool matchBlockAddr(const Addr addr, const bool is_secure) const override;
+    bool matchBlockAddr(const PacketPtr pkt) const override;
+    bool conflictAddr(const QueueEntry* entry) const override;
 };
 
 #endif // __MEM_CACHE_WRITE_QUEUE_ENTRY_HH__

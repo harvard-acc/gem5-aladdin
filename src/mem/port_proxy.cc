@@ -43,7 +43,7 @@
 
 void
 PortProxy::readBlobPhys(Addr addr, Request::Flags flags,
-                        uint8_t *p, int size) const
+                        void *p, int size) const
 {
     for (ChunkGenerator gen(addr, size, _cacheLineSize); !gen.done();
          gen.next()) {
@@ -52,15 +52,15 @@ PortProxy::readBlobPhys(Addr addr, Request::Flags flags,
             gen.addr(), gen.size(), flags, Request::funcMasterId);
 
         Packet pkt(req, MemCmd::ReadReq);
-        pkt.dataStatic(p);
-        _port.sendFunctional(&pkt);
-        p += gen.size();
+        pkt.dataStatic(static_cast<uint8_t *>(p));
+        sendFunctional(&pkt);
+        p = static_cast<uint8_t *>(p) + gen.size();
     }
 }
 
 void
 PortProxy::writeBlobPhys(Addr addr, Request::Flags flags,
-                         const uint8_t *p, int size) const
+                         const void *p, int size) const
 {
     for (ChunkGenerator gen(addr, size, _cacheLineSize); !gen.done();
          gen.next()) {
@@ -69,9 +69,9 @@ PortProxy::writeBlobPhys(Addr addr, Request::Flags flags,
             gen.addr(), gen.size(), flags, Request::funcMasterId);
 
         Packet pkt(req, MemCmd::WriteReq);
-        pkt.dataStaticConst(p);
-        _port.sendFunctional(&pkt);
-        p += gen.size();
+        pkt.dataStaticConst(static_cast<const uint8_t *>(p));
+        sendFunctional(&pkt);
+        p = static_cast<const uint8_t *>(p) + gen.size();
     }
 }
 
@@ -88,21 +88,40 @@ PortProxy::memsetBlobPhys(Addr addr, Request::Flags flags,
     delete [] buf;
 }
 
-
-void
-SecurePortProxy::readBlob(Addr addr, uint8_t *p, int size) const
+bool
+PortProxy::tryWriteString(Addr addr, const char *str) const
 {
-    readBlobPhys(addr, Request::SECURE, p, size);
+    do {
+        if (!tryWriteBlob(addr++, str, 1))
+            return false;
+    } while (*str++);
+    return true;
 }
 
-void
-SecurePortProxy::writeBlob(Addr addr, const uint8_t *p, int size) const
+bool
+PortProxy::tryReadString(std::string &str, Addr addr) const
 {
-    writeBlobPhys(addr, Request::SECURE, p, size);
+    while (true) {
+        uint8_t c;
+        if (!tryReadBlob(addr++, &c, 1))
+            return false;
+        if (!c)
+            return true;
+        str += c;
+    }
 }
 
-void
-SecurePortProxy::memsetBlob(Addr addr, uint8_t v, int size) const
+bool
+PortProxy::tryReadString(char *str, Addr addr, size_t maxlen) const
 {
-    memsetBlobPhys(addr, Request::SECURE, v, size);
+    assert(maxlen);
+    while (maxlen--) {
+        if (!tryReadBlob(addr++, str, 1))
+            return false;
+        if (!*str++)
+            return true;
+    }
+    // We ran out of room, so back up and add a terminator.
+    *--str = '\0';
+    return true;
 }

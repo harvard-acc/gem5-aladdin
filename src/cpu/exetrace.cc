@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2017, 2019 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2001-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -34,6 +46,7 @@
 #include "cpu/exetrace.hh"
 
 #include <iomanip>
+#include <sstream>
 
 #include "arch/isa_traits.hh"
 #include "arch/utility.hh"
@@ -43,6 +56,7 @@
 #include "cpu/static_inst.hh"
 #include "cpu/thread_context.hh"
 #include "debug/ExecAll.hh"
+#include "debug/FmtTicksOff.hh"
 #include "enums/OpClass.hh"
 
 using namespace std;
@@ -51,26 +65,15 @@ using namespace TheISA;
 namespace Trace {
 
 void
-ExeTracerRecord::dumpTicks(ostream &outs)
-{
-    ccprintf(outs, "%7d: ", when);
-}
-
-void
 Trace::ExeTracerRecord::traceInst(const StaticInstPtr &inst, bool ran)
 {
-    ostream &outs = Trace::output();
+    std::stringstream outs;
 
     if (!Debug::ExecUser || !Debug::ExecKernel) {
         bool in_user_mode = TheISA::inUserMode(thread);
         if (in_user_mode && !Debug::ExecUser) return;
         if (!in_user_mode && !Debug::ExecKernel) return;
     }
-
-    if (Debug::ExecTicks)
-        dumpTicks(outs);
-
-    outs << thread->getCpuPtr()->name() << " ";
 
     if (Debug::ExecAsid)
         outs << "A" << dec << TheISA::getExecutingAsid(thread) << " ";
@@ -118,7 +121,38 @@ Trace::ExeTracerRecord::traceInst(const StaticInstPtr &inst, bool ran)
         }
 
         if (Debug::ExecResult && data_status != DataInvalid) {
-            ccprintf(outs, " D=%#018x", data.as_int);
+            switch (data_status) {
+              case DataVec:
+                {
+                    ccprintf(outs, " D=0x[");
+                    auto dv = data.as_vec->as<uint32_t>();
+                    for (int i = TheISA::VecRegSizeBytes / 4 - 1; i >= 0;
+                         i--) {
+                        ccprintf(outs, "%08x", dv[i]);
+                        if (i != 0) {
+                            ccprintf(outs, "_");
+                        }
+                    }
+                    ccprintf(outs, "]");
+                }
+                break;
+              case DataVecPred:
+                {
+                    ccprintf(outs, " D=0b[");
+                    auto pv = data.as_pred->as<uint8_t>();
+                    for (int i = TheISA::VecPredRegSizeBits - 1; i >= 0; i--) {
+                        ccprintf(outs, pv[i] ? "1" : "0");
+                        if (i != 0 && i % 4 == 0) {
+                            ccprintf(outs, "_");
+                        }
+                    }
+                    ccprintf(outs, "]");
+                }
+                break;
+              default:
+                ccprintf(outs, " D=%#018x", data.as_int);
+                break;
+            }
         }
 
         if (Debug::ExecEffAddr && getMemValid())
@@ -141,6 +175,10 @@ Trace::ExeTracerRecord::traceInst(const StaticInstPtr &inst, bool ran)
     //  End of line...
     //
     outs << endl;
+
+    Trace::getDebugLogger()->dprintf_flag(
+        when, thread->getCpuPtr()->name(), "ExecEnable", "%s",
+        outs.str().c_str());
 }
 
 void

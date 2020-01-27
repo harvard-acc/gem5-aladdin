@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016, 2018 ARM Limited
+ * Copyright (c) 2015-2018 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -154,6 +154,8 @@
 #include "base/cprintf.hh"
 #include "base/logging.hh"
 
+constexpr unsigned MaxVecRegLenInBytes = 4096;
+
 template <size_t Sz>
 class VecRegContainer;
 
@@ -271,6 +273,8 @@ class VecRegContainer
 {
   static_assert(Sz > 0,
           "Cannot create Vector Register Container of zero size");
+  static_assert(Sz <= MaxVecRegLenInBytes,
+          "Vector Register size limit exceeded");
   public:
     static constexpr size_t SIZE = Sz;
     using Container = std::array<uint8_t,Sz>;
@@ -519,6 +523,8 @@ class VecLaneT
     friend class VecRegContainer<32>;
     friend class VecRegContainer<64>;
     friend class VecRegContainer<128>;
+    friend class VecRegContainer<256>;
+    friend class VecRegContainer<MaxVecRegLenInBytes>;
 
     /** My type alias. */
     using MyClass = VecLaneT<VecElem, Const>;
@@ -646,6 +652,20 @@ to_number(const std::string& value, VecRegContainer<Sz>& v)
     }
     return true;
 }
+/** @} */
+
+/**
+ * Dummy type aliases and constants for architectures that do not implement
+ * vector registers.
+ */
+/** @{ */
+using DummyVecElem = uint32_t;
+constexpr unsigned DummyNumVecElemPerVecReg = 2;
+using DummyVecReg = VecRegT<DummyVecElem, DummyNumVecElemPerVecReg, false>;
+using DummyConstVecReg = VecRegT<DummyVecElem, DummyNumVecElemPerVecReg, true>;
+using DummyVecRegContainer = DummyVecReg::Container;
+constexpr size_t DummyVecRegSizeBytes = DummyNumVecElemPerVecReg *
+    sizeof(DummyVecElem);
 /** @} */
 
 #endif /* __ARCH_GENERIC_VEC_REG_HH__ */

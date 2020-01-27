@@ -13,7 +13,6 @@
 #include "base/statistics.hh"
 #include "base/trace.hh"
 #include "base/types.hh"
-#include "mem/mem_object.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 #include "sim/system.hh"
@@ -93,8 +92,8 @@ class SystolicArray : public Gem5Datapath {
     system->deregisterAccelerator(accelerator_id);
   }
 
-  BaseMasterPort& getMasterPort(const std::string& if_name,
-                                PortID idx = InvalidPortID) override {
+  Port& getPort(const std::string& if_name,
+                PortID idx = InvalidPortID) override {
     if (if_name == "input_spad_port")
       return dataflow->inputFetchUnits[idx]->getLocalSpadPort();
     else if (if_name == "weight_spad_port")
@@ -102,7 +101,7 @@ class SystolicArray : public Gem5Datapath {
     else if (if_name == "output_spad_port")
       return dataflow->commitUnits[idx]->getLocalSpadPort();
     else
-      return Gem5Datapath::getMasterPort(if_name, idx);
+      return Gem5Datapath::getPort(if_name, idx);
   }
 
   void regStats() override {

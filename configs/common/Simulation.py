@@ -40,14 +40,14 @@
 # Authors: Lisa Hsu
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import sys
 from os import getcwd
 from os.path import join as joinpath
 
 from common import CpuConfig
-from common import BPConfig
-from common import MemConfig
+from . import ObjectList
 
 import m5
 from m5.defines import buildEnv
@@ -58,7 +58,7 @@ addToPath('../common')
 
 def getCPUClass(cpu_type):
     """Returns the required cpu class and the mode of operation."""
-    cls = CpuConfig.get(cpu_type)
+    cls = ObjectList.cpu_list.get(cpu_type)
     return cls, cls.memory_mode()
 
 def setCPUClass(options):
@@ -101,7 +101,7 @@ def setCPUClass(options):
 def setMemClass(options):
     """Returns a memory controller class."""
 
-    return MemConfig.get(options.mem_type)
+    return ObjectList.mem_list.get(options.mem_type)
 
 def setWorkCountOptions(system, options):
     if options.work_item_id != None:
@@ -476,18 +476,18 @@ def run(options, root, testsys, cpu_class):
     switch_cpus = None
 
     if options.prog_interval:
-        for i in xrange(np):
+        for i in range(np):
             testsys.cpu[i].progress_interval = options.prog_interval
 
     if options.maxinsts:
-        for i in xrange(np):
+        for i in range(np):
             testsys.cpu[i].max_insts_any_thread = options.maxinsts
 
     if cpu_class:
         switch_cpus = [cpu_class(switched_out=True, cpu_id=(i))
-                       for i in xrange(np)]
+                       for i in range(np)]
 
-        for i in xrange(np):
+        for i in range(np):
             if options.fast_forward:
                 testsys.cpu[i].max_insts_any_thread = int(options.fast_forward)
             switch_cpus[i].system = testsys
@@ -503,8 +503,13 @@ def run(options, root, testsys, cpu_class):
             if options.checker:
                 switch_cpus[i].addCheckerCpu()
             if options.bp_type:
-                bpClass = BPConfig.get(options.bp_type)
+                bpClass = ObjectList.bp_list.get(options.bp_type)
                 switch_cpus[i].branchPred = bpClass()
+            if options.indirect_bp_type:
+                IndirectBPClass = ObjectList.indirect_bp_list.get(
+                    options.indirect_bp_type)
+                switch_cpus[i].branchPred.indirectBranchPred = \
+                    IndirectBPClass()
 
         # If elastic tracing is enabled attach the elastic trace probe
         # to the switch CPUs
@@ -512,7 +517,7 @@ def run(options, root, testsys, cpu_class):
             CpuConfig.config_etrace(cpu_class, switch_cpus, options)
 
         testsys.switch_cpus = switch_cpus
-        switch_cpu_list = [(testsys.cpu[i], switch_cpus[i]) for i in xrange(np)]
+        switch_cpu_list = [(testsys.cpu[i], switch_cpus[i]) for i in range(np)]
 
     if options.repeat_switch:
         switch_class = getCPUClass(options.cpu_type)[0]
@@ -525,9 +530,9 @@ def run(options, root, testsys, cpu_class):
             sys.exit(1)
 
         repeat_switch_cpus = [switch_class(switched_out=True, \
-                                               cpu_id=(i)) for i in xrange(np)]
+                                               cpu_id=(i)) for i in range(np)]
 
-        for i in xrange(np):
+        for i in range(np):
             repeat_switch_cpus[i].system = testsys
             repeat_switch_cpus[i].workload = testsys.cpu[i].workload
             repeat_switch_cpus[i].clk_domain = testsys.cpu[i].clk_domain
@@ -543,18 +548,18 @@ def run(options, root, testsys, cpu_class):
 
         if cpu_class:
             repeat_switch_cpu_list = [(switch_cpus[i], repeat_switch_cpus[i])
-                                      for i in xrange(np)]
+                                      for i in range(np)]
         else:
             repeat_switch_cpu_list = [(testsys.cpu[i], repeat_switch_cpus[i])
-                                      for i in xrange(np)]
+                                      for i in range(np)]
 
     if options.standard_switch:
         switch_cpus = [TimingSimpleCPU(switched_out=True, cpu_id=(i))
-                       for i in xrange(np)]
+                       for i in range(np)]
         switch_cpus_1 = [DerivO3CPU(switched_out=True, cpu_id=(i))
-                        for i in xrange(np)]
+                        for i in range(np)]
 
-        for i in xrange(np):
+        for i in range(np):
             switch_cpus[i].system =  testsys
             switch_cpus_1[i].system =  testsys
             switch_cpus[i].workload = testsys.cpu[i].workload
@@ -595,8 +600,12 @@ def run(options, root, testsys, cpu_class):
 
         testsys.switch_cpus = switch_cpus
         testsys.switch_cpus_1 = switch_cpus_1
-        switch_cpu_list = [(testsys.cpu[i], switch_cpus[i]) for i in xrange(np)]
-        switch_cpu_list1 = [(switch_cpus[i], switch_cpus_1[i]) for i in xrange(np)]
+        switch_cpu_list = [
+            (testsys.cpu[i], switch_cpus[i]) for i in range(np)
+        ]
+        switch_cpu_list1 = [
+            (switch_cpus[i], switch_cpus_1[i]) for i in range(np)
+        ]
 
     # set the checkpoint in the cpu before m5.instantiate is called
     if options.take_checkpoints != None and \
@@ -604,7 +613,7 @@ def run(options, root, testsys, cpu_class):
         offset = int(options.take_checkpoints)
         # Set an instruction break point
         if options.simpoint:
-            for i in xrange(np):
+            for i in range(np):
                 if testsys.cpu[i].workload[0].simpoint == 0:
                     fatal('no simpoint for testsys.cpu[%d].workload[0]', i)
                 checkpoint_inst = int(testsys.cpu[i].workload[0].simpoint) + offset
@@ -615,7 +624,7 @@ def run(options, root, testsys, cpu_class):
             options.take_checkpoints = offset
             # Set all test cpus with the right number of instructions
             # for the upcoming simulation
-            for i in xrange(np):
+            for i in range(np):
                 testsys.cpu[i].max_insts_any_thread = offset
 
     if options.take_simpoint_checkpoints != None:

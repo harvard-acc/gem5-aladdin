@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2013, 2017-2018 ARM Limited
+# Copyright (c) 2012-2013, 2017-2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -40,13 +40,16 @@ from m5.proxy import *
 from m5.util.fdthelper import *
 from m5.SimObject import SimObject
 
-from Device import PioDevice
-from Platform import Platform
+from m5.objects.Device import PioDevice, BasicPioDevice
+from m5.objects.Platform import Platform
 
 class BaseGic(PioDevice):
     type = 'BaseGic'
     abstract = True
     cxx_header = "dev/arm/base_gic.hh"
+
+    # Used for DTB autogeneration
+    _state = FdtState(addr_cells=0, interrupt_cells=3)
 
     platform = Param.Platform(Parent.any, "Platform this device is part of.")
 
@@ -58,6 +61,16 @@ class BaseGic(PioDevice):
         "CPU Interface Identification Register")
     gicv_iidr = Param.UInt32(0,
         "VM CPU Interface Identification Register")
+
+    def interruptCells(self, int_type, int_num, int_flag):
+        """
+        Interupt cells generation helper:
+        Following specifications described in
+
+        Documentation/devicetree/bindings/interrupt-controller/arm,gic.txt
+        """
+        assert self._state.interrupt_cells == 3
+        return [ int_type, int_num, int_flag ]
 
 class ArmInterruptPin(SimObject):
     type = 'ArmInterruptPin'
@@ -128,7 +141,7 @@ class VGic(PioDevice):
     hv_addr = Param.Addr(0, "Address for hv control")
     pio_delay = Param.Latency('10ns', "Delay for PIO r/w")
    # The number of list registers is not currently configurable at runtime.
-    ppint = Param.UInt32("HV maintenance interrupt number")
+    maint_int = Param.UInt32("HV maintenance interrupt number")
 
     # gicv_iidr same as gicc_idr
     gicv_iidr = Param.UInt32(Self.gic.gicc_iidr,
@@ -140,8 +153,8 @@ class VGic(PioDevice):
         node = FdtNode("interrupt-controller")
         node.appendCompatible(["gem5,gic", "arm,cortex-a15-gic",
                                "arm,cortex-a9-gic"])
-        node.append(FdtPropertyWords("#interrupt-cells", [3]))
-        node.append(FdtPropertyWords("#address-cells", [0]))
+        node.append(gic._state.interruptCellsProperty())
+        node.append(gic._state.addrCellsProperty())
         node.append(FdtProperty("interrupt-controller"))
 
         regs = (
@@ -156,20 +169,102 @@ class VGic(PioDevice):
 
         node.append(FdtPropertyWords("reg", regs))
         node.append(FdtPropertyWords("interrupts",
-                                     [1, int(self.ppint)-16, 0xf04]))
+                                     [1, int(self.maint_int)-16, 0xf04]))
 
         node.appendPhandle(gic)
 
         yield node
 
+class Gicv3Its(BasicPioDevice):
+    type = 'Gicv3Its'
+    cxx_header = "dev/arm/gic_v3_its.hh"
+
+    dma = MasterPort("DMA port")
+    pio_size = Param.Unsigned(0x20000, "Gicv3Its pio size")
+
+    # CIL [36] = 0: ITS supports 16-bit CollectionID
+    # Devbits [17:13] = 0b100011: ITS supports 23 DeviceID bits
+    # ID_bits [12:8] = 0b11111: ITS supports 31 EventID bits
+    gits_typer = Param.UInt64(0x30023F01, "GITS_TYPER RO value")
+
+    def generateDeviceTree(self, state):
+        node = self.generateBasicPioDeviceNode(state, "gic-its", self.pio_addr,
+                                               self.pio_size)
+        node.appendCompatible(["arm,gic-v3-its"])
+        node.append(FdtProperty("msi-controller"))
+        node.append(FdtPropertyWords("#msi-cells", [1]))
+
+        return node
+
 class Gicv3(BaseGic):
     type = 'Gicv3'
     cxx_header = "dev/arm/gic_v3.hh"
 
-    dist_addr = Param.Addr(0x2c000000, "Address for distributor")
+    # Used for DTB autogeneration
+    _state = FdtState(addr_cells=2, size_cells=2, interrupt_cells=3)
+
+    its = Param.Gicv3Its(NULL, "GICv3 Interrupt Translation Service")
+
+    dist_addr = Param.Addr("Address for distributor")
     dist_pio_delay = Param.Latency('10ns', "Delay for PIO r/w to distributor")
-    redist_addr = Param.Addr(0x2c010000, "Address for redistributors")
+    redist_addr = Param.Addr("Address for redistributors")
     redist_pio_delay = Param.Latency('10ns',
             "Delay for PIO r/w to redistributors")
     it_lines = Param.UInt32(1020,
             "Number of interrupt lines supported (max = 1020)")
+
+    maint_int = Param.ArmInterruptPin(
+        "HV maintenance interrupt."
+        "ARM strongly recommends that maintenance interrupts "
+        "are configured to use INTID 25 (PPI Interrupt).")
+
+    cpu_max = Param.Unsigned(256,
+        "Maximum number of PE. This is affecting the maximum number of "
+        "redistributors")
+
+    gicv4 = Param.Bool(True, "GICv4 extension available")
+
+    def interruptCells(self, int_type, int_num, int_flag):
+        """
+        Interupt cells generation helper:
+        Following specifications described in
+
+        Documentation/devicetree/bindings/interrupt-controller/arm,gic-v3.txt
+        """
+        prop = self._state.interruptCells(0)
+        assert len(prop) >= 3
+        prop[0] = int_type
+        prop[1] = int_num
+        prop[2] = int_flag
+        return prop
+
+    def generateDeviceTree(self, state):
+        node = FdtNode("interrupt-controller")
+        node.appendCompatible(["arm,gic-v3"])
+        node.append(self._state.interruptCellsProperty())
+        node.append(self._state.addrCellsProperty())
+        node.append(self._state.sizeCellsProperty())
+        node.append(FdtProperty("ranges"))
+        node.append(FdtProperty("interrupt-controller"))
+
+        redist_stride = 0x40000 if self.gicv4 else 0x20000
+        node.append(FdtPropertyWords("redistributor-stride",
+            state.sizeCells(redist_stride)))
+
+        regs = (
+            state.addrCells(self.dist_addr) +
+            state.sizeCells(0x10000) +
+            state.addrCells(self.redist_addr) +
+            state.sizeCells(0x2000000) )
+
+        node.append(FdtPropertyWords("reg", regs))
+        node.append(FdtPropertyWords("interrupts",
+            self.interruptCells(1, int(self.maint_int.num)-16, 0xf04)))
+
+        node.appendPhandle(self)
+
+        # Generate the ITS device tree if instantiated
+        if self.its != NULL:
+            node.append(self.its.generateDeviceTree(self._state))
+
+        yield node

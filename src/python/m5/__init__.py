@@ -26,6 +26,9 @@
 #
 # Authors: Nathan Binkert
 
+from __future__ import print_function
+from __future__ import absolute_import
+
 # Import useful subpackages of M5, but *only* when run as an m5
 # script.  This is mostly to keep backward compatibility with existing
 # scripts while allowing new SCons code to operate properly.
@@ -42,14 +45,18 @@ except ImportError:
     in_gem5 = False
 
 if in_gem5:
-    import SimObject
-    import core
-    import objects
-    import params
-    import stats
-    import util
+    from . import SimObject
+    from . import core
+    from . import defines
+    from . import objects
+    from . import params
+    from . import stats
+    if defines.buildEnv['USE_SYSTEMC']:
+        from . import systemc
+        from . import tlm
+    from . import util
 
-    from event import *
-    from main import main
-    from simulate import *
+    from .event import *
+    from .main import main
+    from .simulate import *
 

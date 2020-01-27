@@ -1,4 +1,16 @@
 /*
+ * Copyright (c) 2019 ARM Limited
+ * All rights reserved
+ *
+ * The license below extends only to copyright in the software and shall
+ * not be construed as granting a license to any other intellectual
+ * property including but not limited to intellectual property relating
+ * to a hardware implementation of the functionality of the software
+ * licensed hereunder.  You may use the software subject to the license
+ * terms below provided that you ensure that this notice is replicated
+ * unmodified and in its entirety in all distributions of the software,
+ * modified or unmodified, in source code or in binary form.
+ *
  * Copyright (c) 2018 Metempsy Technology Consulting
  * All rights reserved.
  *
@@ -35,6 +47,7 @@
 #include "debug/Interrupt.hh"
 #include "dev/arm/gic_v3_cpu_interface.hh"
 #include "dev/arm/gic_v3_distributor.hh"
+#include "dev/arm/gic_v3_its.hh"
 #include "dev/arm/gic_v3_redistributor.hh"
 #include "dev/platform.hh"
 #include "mem/packet.hh"
@@ -45,27 +58,31 @@ Gicv3::Gicv3(const Params * p)
 {
 }
 
-Gicv3::~Gicv3()
-{
-}
-
 void
 Gicv3::init()
 {
-    distRange = RangeSize(params()->dist_addr,
-                          Gicv3Distributor::ADDR_RANGE_SIZE - 1);
-    redistRange = RangeSize(params()->redist_addr,
-        Gicv3Redistributor::ADDR_RANGE_SIZE * sys->numContexts() - 1);
-    addrRanges = {distRange, redistRange};
-    BaseGic::init();
     distributor = new Gicv3Distributor(this, params()->it_lines);
     redistributors.resize(sys->numContexts(), nullptr);
     cpuInterfaces.resize(sys->numContexts(), nullptr);
+
+    panic_if(sys->numContexts() > params()->cpu_max,
+        "Exceeding maximum number of PEs supported by GICv3: "
+        "using %u while maximum is %u\n", sys->numContexts(),
+        params()->cpu_max);
 
     for (int i = 0; i < sys->numContexts(); i++) {
         redistributors[i] = new Gicv3Redistributor(this, i);
         cpuInterfaces[i] = new Gicv3CPUInterface(this, i);
     }
+
+    distRange = RangeSize(params()->dist_addr,
+        Gicv3Distributor::ADDR_RANGE_SIZE - 1);
+
+    redistSize = redistributors[0]->addrRangeSize;
+    redistRange = RangeSize(params()->redist_addr,
+         redistSize * sys->numContexts() - 1);
+
+    addrRanges = {distRange, redistRange};
 
     distributor->init();
 
@@ -73,17 +90,12 @@ Gicv3::init()
         redistributors[i]->init();
         cpuInterfaces[i]->init();
     }
-}
 
-void
-Gicv3::initState()
-{
-    distributor->initState();
+    Gicv3Its *its = params()->its;
+    if (its)
+        its->setGIC(this);
 
-    for (int i = 0; i < sys->numContexts(); i++) {
-        redistributors[i]->initState();
-        cpuInterfaces[i]->initState();
-    }
+    BaseGic::init();
 }
 
 Tick
@@ -91,7 +103,6 @@ Gicv3::read(PacketPtr pkt)
 {
     const Addr addr = pkt->getAddr();
     const size_t size = pkt->getSize();
-    const ContextID context_id = pkt->req->contextId();
     bool is_secure_access = pkt->isSecure();
     uint64_t resp = 0;
     Tick delay = 0;
@@ -103,22 +114,18 @@ Gicv3::read(PacketPtr pkt)
         delay = params()->dist_pio_delay;
         DPRINTF(GIC, "Gicv3::read(): (distributor) context_id %d register %#x "
                 "size %d is_secure_access %d (value %#x)\n",
-                context_id, daddr, size, is_secure_access, resp);
+                pkt->req->contextId(), daddr, size, is_secure_access, resp);
     } else if (redistRange.contains(addr)) {
-        Addr daddr = addr - redistRange.start();
-        uint32_t redistributor_id =
-            daddr / Gicv3Redistributor::ADDR_RANGE_SIZE;
-        daddr = daddr % Gicv3Redistributor::ADDR_RANGE_SIZE;
-        panic_if(redistributor_id >= redistributors.size(),
-                 "Invalid redistributor_id!");
-        panic_if(!redistributors[redistributor_id], "Redistributor is null!");
-        resp = redistributors[redistributor_id]->read(daddr, size,
-                is_secure_access);
+        Addr daddr = (addr - redistRange.start()) % redistSize;
+
+        Gicv3Redistributor *redist = getRedistributorByAddr(addr);
+        resp = redist->read(daddr, size, is_secure_access);
+
         delay = params()->redist_pio_delay;
         DPRINTF(GIC, "Gicv3::read(): (redistributor %d) context_id %d "
                 "register %#x size %d is_secure_access %d (value %#x)\n",
-                redistributor_id, context_id, daddr, size, is_secure_access,
-                resp);
+                redist->processorNumber(), pkt->req->contextId(), daddr, size,
+                is_secure_access, resp);
     } else {
         panic("Gicv3::read(): unknown address %#x\n", addr);
     }
@@ -134,7 +141,6 @@ Gicv3::write(PacketPtr pkt)
     const size_t size = pkt->getSize();
     uint64_t data = pkt->getUintX(LittleEndianByteOrder);
     const Addr addr = pkt->getAddr();
-    const ContextID context_id = pkt->req->contextId();
     bool is_secure_access = pkt->isSecure();
     Tick delay = 0;
 
@@ -143,23 +149,20 @@ Gicv3::write(PacketPtr pkt)
         panic_if(!distributor, "Distributor is null!");
         DPRINTF(GIC, "Gicv3::write(): (distributor) context_id %d "
                 "register %#x size %d is_secure_access %d value %#x\n",
-                context_id, daddr, size, is_secure_access, data);
+                pkt->req->contextId(), daddr, size, is_secure_access, data);
         distributor->write(daddr, data, size, is_secure_access);
         delay = params()->dist_pio_delay;
     } else if (redistRange.contains(addr)) {
-        Addr daddr = addr - redistRange.start();
-        uint32_t redistributor_id =
-            daddr / Gicv3Redistributor::ADDR_RANGE_SIZE;
-        daddr = daddr % Gicv3Redistributor::ADDR_RANGE_SIZE;
-        panic_if(redistributor_id >= redistributors.size(),
-                 "Invalid redistributor_id!");
-        panic_if(!redistributors[redistributor_id], "Redistributor is null!");
+        Addr daddr = (addr - redistRange.start()) % redistSize;
+
+        Gicv3Redistributor *redist = getRedistributorByAddr(addr);
         DPRINTF(GIC, "Gicv3::write(): (redistributor %d) context_id %d "
                 "register %#x size %d is_secure_access %d value %#x\n",
-                redistributor_id, context_id, daddr, size, is_secure_access,
-                data);
-        redistributors[redistributor_id]->write(daddr, data, size,
-                                                is_secure_access);
+                redist->processorNumber(), pkt->req->contextId(), daddr, size,
+                is_secure_access, data);
+
+        redist->write(daddr, data, size, is_secure_access);
+
         delay = params()->redist_pio_delay;
     } else {
         panic("Gicv3::write(): unknown address %#x\n", addr);
@@ -181,7 +184,7 @@ Gicv3::sendInt(uint32_t int_id)
 void
 Gicv3::clearInt(uint32_t number)
 {
-    distributor->intDeasserted(number);
+    distributor->deassertSPI(number);
 }
 
 void
@@ -203,7 +206,14 @@ Gicv3::clearPPInt(uint32_t num, uint32_t cpu)
 void
 Gicv3::postInt(uint32_t cpu, ArmISA::InterruptTypes int_type)
 {
-    postDelayedInt(cpu, int_type);
+    platform->intrctrl->post(cpu, int_type, 0);
+}
+
+bool
+Gicv3::supportsVersion(GicVersion version)
+{
+    return (version == GicVersion::GIC_V3) ||
+           (version == GicVersion::GIC_V4 && params()->gicv4);
 }
 
 void
@@ -212,14 +222,8 @@ Gicv3::deassertInt(uint32_t cpu, ArmISA::InterruptTypes int_type)
     platform->intrctrl->clear(cpu, int_type, 0);
 }
 
-void
-Gicv3::postDelayedInt(uint32_t cpu, ArmISA::InterruptTypes int_type)
-{
-    platform->intrctrl->post(cpu, int_type, 0);
-}
-
 Gicv3Redistributor *
-Gicv3::getRedistributorByAffinity(uint32_t affinity)
+Gicv3::getRedistributorByAffinity(uint32_t affinity) const
 {
     for (auto & redistributor : redistributors) {
         if (redistributor->getAffinity() == affinity) {
@@ -230,20 +234,34 @@ Gicv3::getRedistributorByAffinity(uint32_t affinity)
     return nullptr;
 }
 
+Gicv3Redistributor *
+Gicv3::getRedistributorByAddr(Addr addr) const
+{
+    panic_if(!redistRange.contains(addr),
+        "Address not pointing to a valid redistributor\n");
+
+    const Addr daddr = addr - redistRange.start();
+    const uint32_t redistributor_id = daddr / redistSize;
+
+    panic_if(redistributor_id >= redistributors.size(),
+             "Invalid redistributor_id!");
+    panic_if(!redistributors[redistributor_id], "Redistributor is null!");
+
+    return redistributors[redistributor_id];
+}
+
 void
 Gicv3::serialize(CheckpointOut & cp) const
 {
     distributor->serializeSection(cp, "distributor");
 
     for (uint32_t redistributor_id = 0;
-         redistributor_id < redistributors.size();
-         redistributor_id++)
+         redistributor_id < redistributors.size(); redistributor_id++)
         redistributors[redistributor_id]->serializeSection(cp,
             csprintf("redistributors.%i", redistributor_id));
 
     for (uint32_t cpu_interface_id = 0;
-         cpu_interface_id < cpuInterfaces.size();
-         cpu_interface_id++)
+         cpu_interface_id < cpuInterfaces.size(); cpu_interface_id++)
         cpuInterfaces[cpu_interface_id]->serializeSection(cp,
             csprintf("cpuInterface.%i", cpu_interface_id));
 }
@@ -256,14 +274,12 @@ Gicv3::unserialize(CheckpointIn & cp)
     distributor->unserializeSection(cp, "distributor");
 
     for (uint32_t redistributor_id = 0;
-         redistributor_id < redistributors.size();
-         redistributor_id++)
+         redistributor_id < redistributors.size(); redistributor_id++)
         redistributors[redistributor_id]->unserializeSection(cp,
             csprintf("redistributors.%i", redistributor_id));
 
     for (uint32_t cpu_interface_id = 0;
-         cpu_interface_id < cpuInterfaces.size();
-         cpu_interface_id++)
+         cpu_interface_id < cpuInterfaces.size(); cpu_interface_id++)
         cpuInterfaces[cpu_interface_id]->unserializeSection(cp,
             csprintf("cpuInterface.%i", cpu_interface_id));
 }

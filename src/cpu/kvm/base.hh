@@ -52,6 +52,7 @@
 #include "cpu/kvm/vm.hh"
 #include "cpu/base.hh"
 #include "cpu/simple_thread.hh"
+#include "sim/faults.hh"
 
 /** Signal to use to trigger exits from KVM */
 #define KVM_KICK_SIGNAL SIGRTMIN
@@ -97,8 +98,8 @@ class BaseKvmCPU : public BaseCPU
 
     void verifyMemoryMode() const override;
 
-    MasterPort &getDataPort() override { return dataPort; }
-    MasterPort &getInstPort() override { return instPort; }
+    Port &getDataPort() override { return dataPort; }
+    Port &getInstPort() override { return instPort; }
 
     void wakeup(ThreadID tid = 0) override;
     void activateContext(ThreadID thread_num) override;

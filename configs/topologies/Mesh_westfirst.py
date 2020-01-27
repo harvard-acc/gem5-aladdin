@@ -27,11 +27,13 @@
 #
 # Authors: Brad Beckmann
 #          Tushar Krishna
+from __future__ import print_function
+from __future__ import absolute_import
 
 from m5.params import *
 from m5.objects import *
 
-from BaseTopology import SimpleTopology
+from .BaseTopology import SimpleTopology
 
 # Creates a generic Mesh assuming an equal number of cache
 # and directory controllers.
@@ -82,7 +84,7 @@ class Mesh_westfirst(SimpleTopology):
         # distributed across the network.
         network_nodes = []
         remainder_nodes = []
-        for node_index in xrange(len(nodes)):
+        for node_index in range(len(nodes)):
             if node_index < (len(nodes) - remainder):
                 network_nodes.append(nodes[node_index])
             else:
@@ -114,8 +116,8 @@ class Mesh_westfirst(SimpleTopology):
         int_links = []
 
         # East output to West input links (weight = 2)
-        for row in xrange(num_rows):
-            for col in xrange(num_columns):
+        for row in range(num_rows):
+            for col in range(num_columns):
                 if (col + 1 < num_columns):
                     east_out = col + (row * num_columns)
                     west_in = (col + 1) + (row * num_columns)
@@ -127,8 +129,8 @@ class Mesh_westfirst(SimpleTopology):
                     link_count += 1
 
         # West output to East input links (weight = 1)
-        for row in xrange(num_rows):
-            for col in xrange(num_columns):
+        for row in range(num_rows):
+            for col in range(num_columns):
                 if (col + 1 < num_columns):
                     east_in = col + (row * num_columns)
                     west_out = (col + 1) + (row * num_columns)
@@ -141,8 +143,8 @@ class Mesh_westfirst(SimpleTopology):
 
 
         # North output to South input links (weight = 2)
-        for col in xrange(num_columns):
-            for row in xrange(num_rows):
+        for col in range(num_columns):
+            for row in range(num_rows):
                 if (row + 1 < num_rows):
                     north_out = col + (row * num_columns)
                     south_in = col + ((row + 1) * num_columns)
@@ -154,8 +156,8 @@ class Mesh_westfirst(SimpleTopology):
                     link_count += 1
 
         # South output to North input links (weight = 2)
-        for col in xrange(num_columns):
-            for row in xrange(num_rows):
+        for col in range(num_columns):
+            for row in range(num_rows):
                 if (row + 1 < num_rows):
                     north_in = col + (row * num_columns)
                     south_out = col + ((row + 1) * num_columns)

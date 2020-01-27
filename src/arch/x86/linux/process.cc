@@ -44,6 +44,7 @@
 #include "arch/x86/isa_traits.hh"
 #include "arch/x86/linux/linux.hh"
 #include "arch/x86/registers.hh"
+#include "base/loader/object_file.hh"
 #include "base/trace.hh"
 #include "cpu/thread_context.hh"
 #include "kern/linux/linux.hh"
@@ -54,28 +55,61 @@
 using namespace std;
 using namespace X86ISA;
 
+namespace
+{
+
+class X86LinuxObjectFileLoader : public Process::Loader
+{
+  public:
+    Process *
+    load(ProcessParams *params, ObjectFile *obj_file) override
+    {
+        auto arch = obj_file->getArch();
+        auto opsys = obj_file->getOpSys();
+
+        if (arch != ObjectFile::X86_64 && arch != ObjectFile::I386)
+            return nullptr;
+
+        if (opsys == ObjectFile::UnknownOpSys) {
+            warn("Unknown operating system; assuming Linux.");
+            opsys = ObjectFile::Linux;
+        }
+
+        if (opsys != ObjectFile::Linux)
+            return nullptr;
+
+        if (arch == ObjectFile::X86_64)
+            return new X86_64LinuxProcess(params, obj_file);
+        else
+            return new I386LinuxProcess(params, obj_file);
+    }
+};
+
+X86LinuxObjectFileLoader loader;
+
+} // anonymous namespace
+
 /// Target uname() handler.
 static SyscallReturn
-unameFunc(SyscallDesc *desc, int callnum, Process *process,
-          ThreadContext *tc)
+unameFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
+    auto process = tc->getProcessPtr();
     TypedBufferArg<Linux::utsname> name(process->getSyscallArg(tc, index));
 
     strcpy(name->sysname, "Linux");
     strcpy(name->nodename, "sim.gem5.org");
-    strcpy(name->release, "3.2.0");
+    strcpy(name->release, process->release.c_str());
     strcpy(name->version, "#1 Mon Aug 18 11:32:15 EDT 2003");
     strcpy(name->machine, "x86_64");
 
-    name.copyOut(tc->getMemProxy());
+    name.copyOut(tc->getVirtProxy());
 
     return 0;
 }
 
 static SyscallReturn
-archPrctlFunc(SyscallDesc *desc, int callnum, Process *process,
-              ThreadContext *tc)
+archPrctlFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     enum ArchPrctlCodes
     {
@@ -87,10 +121,11 @@ archPrctlFunc(SyscallDesc *desc, int callnum, Process *process,
 
     // First argument is the code, second is the address
     int index = 0;
+    auto process = tc->getProcessPtr();
     int code = process->getSyscallArg(tc, index);
     uint64_t addr = process->getSyscallArg(tc, index);
     uint64_t fsBase, gsBase;
-    SETranslatingPortProxy &p = tc->getMemProxy();
+    PortProxy &p = tc->getVirtProxy();
     switch(code)
     {
       // Each of these valid options should actually check addr.
@@ -140,12 +175,13 @@ struct UserDesc64 {
 };
 
 static SyscallReturn
-setThreadArea32Func(SyscallDesc *desc, int callnum,
-                    Process *process, ThreadContext *tc)
+setThreadArea32Func(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     const int minTLSEntry = 6;
     const int numTLSEntries = 3;
     const int maxTLSEntry = minTLSEntry + numTLSEntries - 1;
+
+    auto process = tc->getProcessPtr();
 
     X86Process *x86p = dynamic_cast<X86Process *>(process);
     assert(x86p);
@@ -158,10 +194,10 @@ setThreadArea32Func(SyscallDesc *desc, int callnum,
         gdt(x86p->gdtStart() + minTLSEntry * sizeof(uint64_t),
             numTLSEntries * sizeof(uint64_t));
 
-    if (!userDesc.copyIn(tc->getMemProxy()))
+    if (!userDesc.copyIn(tc->getVirtProxy()))
         return -EFAULT;
 
-    if (!gdt.copyIn(tc->getMemProxy()))
+    if (!gdt.copyIn(tc->getVirtProxy()))
         panic("Failed to copy in GDT for %s.\n", desc->name());
 
     if (userDesc->entry_number == (uint32_t)(-1)) {
@@ -213,9 +249,9 @@ setThreadArea32Func(SyscallDesc *desc, int callnum,
 
     gdt[index] = (uint64_t)segDesc;
 
-    if (!userDesc.copyOut(tc->getMemProxy()))
+    if (!userDesc.copyOut(tc->getVirtProxy()))
         return -EFAULT;
-    if (!gdt.copyOut(tc->getMemProxy()))
+    if (!gdt.copyOut(tc->getVirtProxy()))
         panic("Failed to copy out GDT for %s.\n", desc->name());
 
     return 0;
@@ -235,8 +271,8 @@ static SyscallDesc syscallDescs64[] = {
     /*  10 */ SyscallDesc("mprotect", ignoreFunc),
     /*  11 */ SyscallDesc("munmap", munmapFunc<X86Linux64>),
     /*  12 */ SyscallDesc("brk", brkFunc),
-    /*  13 */ SyscallDesc("rt_sigaction", ignoreFunc, SyscallDesc::WarnOnce),
-    /*  14 */ SyscallDesc("rt_sigprocmask", ignoreFunc, SyscallDesc::WarnOnce),
+    /*  13 */ SyscallDesc("rt_sigaction", ignoreWarnOnceFunc),
+    /*  14 */ SyscallDesc("rt_sigprocmask", ignoreWarnOnceFunc),
     /*  15 */ SyscallDesc("rt_sigreturn", unimplementedFunc),
     /*  16 */ SyscallDesc("ioctl", ioctlFunc<X86Linux64>),
     /*  17 */ SyscallDesc("pread64", unimplementedFunc),
@@ -257,7 +293,7 @@ static SyscallDesc syscallDescs64[] = {
     /*  32 */ SyscallDesc("dup", dupFunc),
     /*  33 */ SyscallDesc("dup2", dup2Func),
     /*  34 */ SyscallDesc("pause", unimplementedFunc),
-    /*  35 */ SyscallDesc("nanosleep", ignoreFunc, SyscallDesc::WarnOnce),
+    /*  35 */ SyscallDesc("nanosleep", ignoreWarnOnceFunc),
     /*  36 */ SyscallDesc("getitimer", unimplementedFunc),
     /*  37 */ SyscallDesc("alarm", unimplementedFunc),
     /*  38 */ SyscallDesc("setitimer", unimplementedFunc),
@@ -337,7 +373,7 @@ static SyscallDesc syscallDescs64[] = {
     /* 108 */ SyscallDesc("getegid", getegidFunc),
     /* 109 */ SyscallDesc("setpgid", setpgidFunc),
     /* 110 */ SyscallDesc("getppid", getppidFunc),
-    /* 111 */ SyscallDesc("getpgrp", unimplementedFunc),
+    /* 111 */ SyscallDesc("getpgrp", getpgrpFunc),
     /* 112 */ SyscallDesc("setsid", unimplementedFunc),
     /* 113 */ SyscallDesc("setreuid", unimplementedFunc),
     /* 114 */ SyscallDesc("setregid", unimplementedFunc),
@@ -447,7 +483,7 @@ static SyscallDesc syscallDescs64[] = {
     /* 218 */ SyscallDesc("set_tid_address", setTidAddressFunc),
     /* 219 */ SyscallDesc("restart_syscall", unimplementedFunc),
     /* 220 */ SyscallDesc("semtimedop", unimplementedFunc),
-    /* 221 */ SyscallDesc("fadvise64", unimplementedFunc),
+    /* 221 */ SyscallDesc("fadvise64", ignoreFunc),
     /* 222 */ SyscallDesc("timer_create", unimplementedFunc),
     /* 223 */ SyscallDesc("timer_settime", unimplementedFunc),
     /* 224 */ SyscallDesc("timer_gettime", unimplementedFunc),
@@ -510,16 +546,16 @@ static SyscallDesc syscallDescs64[] = {
     /* 281 */ SyscallDesc("epoll_pwait", unimplementedFunc),
     /* 282 */ SyscallDesc("signalfd", unimplementedFunc),
     /* 283 */ SyscallDesc("timerfd_create", unimplementedFunc),
-    /* 284 */ SyscallDesc("eventfd", unimplementedFunc),
+    /* 284 */ SyscallDesc("eventfd", eventfdFunc<X86Linux64>),
     /* 285 */ SyscallDesc("fallocate", fallocateFunc),
     /* 286 */ SyscallDesc("timerfd_settime", unimplementedFunc),
     /* 287 */ SyscallDesc("timerfd_gettime", unimplementedFunc),
     /* 288 */ SyscallDesc("accept4", unimplementedFunc),
     /* 289 */ SyscallDesc("signalfd4", unimplementedFunc),
-    /* 290 */ SyscallDesc("eventfd2", unimplementedFunc),
+    /* 290 */ SyscallDesc("eventfd2", eventfdFunc<X86Linux64>),
     /* 291 */ SyscallDesc("epoll_create1", unimplementedFunc),
     /* 292 */ SyscallDesc("dup3", unimplementedFunc),
-    /* 293 */ SyscallDesc("pipe2", unimplementedFunc),
+    /* 293 */ SyscallDesc("pipe2", pipe2Func),
     /* 294 */ SyscallDesc("inotify_init1", unimplementedFunc),
     /* 295 */ SyscallDesc("preadv", unimplementedFunc),
     /* 296 */ SyscallDesc("pwritev", unimplementedFunc),
@@ -548,8 +584,15 @@ X86_64LinuxProcess::X86_64LinuxProcess(ProcessParams * params,
                     sizeof(syscallDescs64) / sizeof(SyscallDesc))
 {}
 
-void X86_64LinuxProcess::clone(ThreadContext *old_tc, ThreadContext *new_tc,
-                               Process *process, TheISA::IntReg flags)
+void
+X86_64LinuxProcess::syscall(ThreadContext *tc, Fault *fault)
+{
+    doSyscall(tc->readIntReg(INTREG_RAX), tc, fault);
+}
+
+void
+X86_64LinuxProcess::clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                          Process *process, RegVal flags)
 {
     X86_64Process::clone(old_tc, new_tc, (X86_64Process*)process, flags);
 }
@@ -882,15 +925,30 @@ static SyscallDesc syscallDescs32[] = {
     /* 320 */ SyscallDesc("utimensat", unimplementedFunc),
     /* 321 */ SyscallDesc("signalfd", unimplementedFunc),
     /* 322 */ SyscallDesc("timerfd", unimplementedFunc),
-    /* 323 */ SyscallDesc("eventfd", unimplementedFunc)};
+    /* 323 */ SyscallDesc("eventfd", eventfdFunc<X86Linux32>)
+};
 
 I386LinuxProcess::I386LinuxProcess(ProcessParams * params, ObjectFile *objFile)
     : I386Process(params, objFile, syscallDescs32,
                   sizeof(syscallDescs32) / sizeof(SyscallDesc))
 {}
 
-void I386LinuxProcess::clone(ThreadContext *old_tc, ThreadContext *new_tc,
-                             Process *process, TheISA::IntReg flags)
+void
+I386LinuxProcess::syscall(ThreadContext *tc, Fault *fault)
+{
+    PCState pc = tc->pcState();
+    Addr eip = pc.pc();
+    if (eip >= vsyscallPage.base &&
+            eip < vsyscallPage.base + vsyscallPage.size) {
+        pc.npc(vsyscallPage.base + vsyscallPage.vsysexitOffset);
+        tc->pcState(pc);
+    }
+    doSyscall(tc->readIntReg(INTREG_RAX), tc, fault);
+}
+
+void
+I386LinuxProcess::clone(ThreadContext *old_tc, ThreadContext *new_tc,
+                        Process *process, RegVal flags)
 {
     I386Process::clone(old_tc, new_tc, (I386Process*)process, flags);
 }

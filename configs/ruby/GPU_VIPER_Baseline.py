@@ -74,7 +74,7 @@ class L1Cache(RubyCache):
     def create(self, size, assoc, options):
         self.size = MemorySize(size)
         self.assoc = assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L2Cache(RubyCache):
     resourceStalls = False
@@ -84,7 +84,7 @@ class L2Cache(RubyCache):
     def create(self, size, assoc, options):
         self.size = MemorySize(size)
         self.assoc = assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class CPCntrl(CorePair_Controller, CntrlBase):
 
@@ -138,7 +138,7 @@ class TCPCache(RubyCache):
         self.dataAccessLatency = 4
         self.tagAccessLatency = 1
         self.resourceStalls = options.no_tcc_resource_stalls
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class TCPCntrl(TCP_Controller, CntrlBase):
 
@@ -178,7 +178,7 @@ class SQCCache(RubyCache):
     def create(self, options):
         self.size = MemorySize(options.sqc_size)
         self.assoc = options.sqc_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class SQCCntrl(SQC_Controller, CntrlBase):
 
@@ -222,7 +222,7 @@ class TCC(RubyCache):
             self.size.value = long(128 * self.assoc)
         self.start_index_bit = math.log(options.cacheline_size, 2) + \
                                math.log(options.num_tccs, 2)
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class TCCCntrl(TCC_Controller, CntrlBase):
     def create(self, options, ruby_system, system):
@@ -250,7 +250,7 @@ class L3Cache(RubyCache):
         self.dataAccessLatency = options.l3_data_latency
         self.tagAccessLatency = options.l3_tag_latency
         self.resourceStalls = False
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class ProbeFilter(RubyCache):
     size = "4MB"
@@ -268,7 +268,7 @@ class ProbeFilter(RubyCache):
         self.dataAccessLatency = 1
         self.resourceStalls = options.no_resource_stalls
         self.start_index_bit = 6 + int(math.log(options.blocks_per_region, 2))
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L3Cntrl(L3Cache_Controller, CntrlBase):
     def create(self, options, ruby_system, system):
@@ -407,7 +407,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
     # Clusters
     crossbar_bw = 16 * options.num_compute_units #Assuming a 2GHz clock
     mainCluster = Cluster(intBW = crossbar_bw)
-    for i in xrange(options.num_dirs):
+    for i in range(options.num_dirs):
 
         dir_cntrl = DirCntrl(noTCCdir=True,TCC_select_num_bits = TCC_bits)
         dir_cntrl.create(options, ruby_system, system)
@@ -440,7 +440,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         mainCluster.add(dir_cntrl)
 
     cpuCluster = Cluster(extBW = crossbar_bw, intBW=crossbar_bw)
-    for i in xrange((options.num_cpus + 1) / 2):
+    for i in range((options.num_cpus + 1) // 2):
 
         cp_cntrl = CPCntrl()
         cp_cntrl.create(options, ruby_system, system)
@@ -473,7 +473,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         cpuCluster.add(cp_cntrl)
 
     gpuCluster = Cluster(extBW = crossbar_bw, intBW = crossbar_bw)
-    for i in xrange(options.num_compute_units):
+    for i in range(options.num_compute_units):
 
         tcp_cntrl = TCPCntrl(TCC_select_num_bits = TCC_bits,
                              issue_latency = 1,
@@ -510,7 +510,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
 
         gpuCluster.add(tcp_cntrl)
 
-    for i in xrange(options.num_sqc):
+    for i in range(options.num_sqc):
 
         sqc_cntrl = SQCCntrl(TCC_select_num_bits = TCC_bits)
         sqc_cntrl.create(options, ruby_system, system)
@@ -539,7 +539,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
     # Because of wire buffers, num_tccs must equal num_tccdirs
     numa_bit = 6
 
-    for i in xrange(options.num_tccs):
+    for i in range(options.num_tccs):
 
         tcc_cntrl = TCCCntrl()
         tcc_cntrl.create(options, ruby_system, system)

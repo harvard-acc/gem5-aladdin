@@ -36,7 +36,7 @@
 
 decode QUADRANT default Unknown::unknown() {
     0x0: decode COPCODE {
-        0x0: CIOp::c_addi4spn({{
+        0x0: CIAddi4spnOp::c_addi4spn({{
             imm = CIMM8<1:1> << 2 |
                   CIMM8<0:0> << 3 |
                   CIMM8<7:6> << 4 |
@@ -197,7 +197,7 @@ decode QUADRANT default Unknown::unknown() {
                     Rp1 = Rp1 & imm;
                 }}, uint64_t);
             }
-            format ROp {
+            format CompressedROp {
                 0x3: decode CFUNCT1 {
                     0x0: decode CFUNCT2LOW {
                         0x0: c_sub({{
@@ -224,18 +224,9 @@ decode QUADRANT default Unknown::unknown() {
                 }
             }
         }
-        0x5: JOp::c_j({{
-            int64_t offset = CJUMPIMM<3:1> << 1 |
-                             CJUMPIMM<9:9> << 4 |
-                             CJUMPIMM<0:0> << 5 |
-                             CJUMPIMM<5:5> << 6 |
-                             CJUMPIMM<4:4> << 7 |
-                             CJUMPIMM<8:7> << 8 |
-                             CJUMPIMM<6:6> << 10;
-            if (CJUMPIMM<10:10> > 0)
-                offset |= ~((int64_t)0x7FF);
-            NPC = PC + offset;
-        }}, IsIndirectControl, IsUncondControl, IsCall);
+        0x5: CJOp::c_j({{
+            NPC = PC + imm;
+        }}, IsDirectControl, IsUncondControl);
         format CBOp {
             0x6: c_beqz({{
                 if (Rp1 == 0)
@@ -337,7 +328,7 @@ decode QUADRANT default Unknown::unknown() {
                         ra = NPC;
                         NPC = Rc1;
                     }}, IsIndirectControl, IsUncondControl, IsCall);
-                    default: ROp::c_add({{
+                    default: CompressedROp::c_add({{
                         Rc1_sd = Rc1_sd + Rc2_sd;
                     }});
                 }
@@ -409,9 +400,9 @@ decode QUADRANT default Unknown::unknown() {
         }
 
         0x03: decode FUNCT3 {
-            format IOp {
+            format FenceOp {
                 0x0: fence({{
-                }}, uint64_t, IsNonSpeculative, IsMemBarrier, No_OpClass);
+                }}, uint64_t, IsMemBarrier, No_OpClass);
                 0x1: fence_i({{
                 }}, uint64_t, IsNonSpeculative, IsSerializeAfter, No_OpClass);
             }
@@ -423,8 +414,8 @@ decode QUADRANT default Unknown::unknown() {
                     Rd_sd = Rs1_sd + imm;
                 }});
                 0x1: slli({{
-                    Rd = Rs1 << SHAMT6;
-                }});
+                    Rd = Rs1 << imm;
+                }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT6; }});
                 0x2: slti({{
                     Rd = (Rs1_sd < imm) ? 1 : 0;
                 }});
@@ -436,11 +427,11 @@ decode QUADRANT default Unknown::unknown() {
                 }}, uint64_t);
                 0x5: decode SRTYPE {
                     0x0: srli({{
-                        Rd = Rs1 >> SHAMT6;
-                    }});
+                        Rd = Rs1 >> imm;
+                    }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT6; }});
                     0x1: srai({{
-                        Rd_sd = Rs1_sd >> SHAMT6;
-                    }});
+                        Rd_sd = Rs1_sd >> imm;
+                    }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT6; }});
                 }
                 0x6: ori({{
                     Rd = Rs1 | imm;
@@ -452,7 +443,7 @@ decode QUADRANT default Unknown::unknown() {
         }
 
         0x05: UOp::auipc({{
-            Rd = PC + imm;
+            Rd = PC + (sext<20>(imm) << 12);
         }});
 
         0x06: decode FUNCT3 {
@@ -461,15 +452,15 @@ decode QUADRANT default Unknown::unknown() {
                     Rd_sd = Rs1_sw + imm;
                 }}, int32_t);
                 0x1: slliw({{
-                    Rd_sd = Rs1_sw << SHAMT5;
-                }});
+                    Rd_sd = Rs1_sw << imm;
+                }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT5; }});
                 0x5: decode SRTYPE {
                     0x0: srliw({{
-                        Rd_sd = (int32_t)(Rs1_uw >> SHAMT5);
-                    }});
+                        Rd_sd = (int32_t)(Rs1_uw >> imm);
+                    }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT5; }});
                     0x1: sraiw({{
-                        Rd_sd = Rs1_sw >> SHAMT5;
-                    }});
+                        Rd_sd = Rs1_sw >> imm;
+                    }}, imm_type = uint64_t, imm_code = {{ imm = SHAMT5; }});
                 }
             }
         }
@@ -512,44 +503,69 @@ decode QUADRANT default Unknown::unknown() {
                 }}, {{
                     Rd = result;
                 }}, inst_flags=IsStoreConditional, mem_flags=LLSC);
-                format AtomicMemOp {
-                    0x0: amoadd_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = Rs2_sw + Rt_sd;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x1: amoswap_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = Rs2_uw;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x4: amoxor_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = Rs2_uw^Rt_sd;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x8: amoor_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = Rs2_uw | Rt_sd;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0xc: amoand_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = Rs2_uw&Rt_sd;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x10: amomin_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = min<int32_t>(Rs2_sw, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x14: amomax_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = max<int32_t>(Rs2_sw, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x18: amominu_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = min<uint32_t>(Rs2_uw, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x1c: amomaxu_w({{Rt_sd = Mem_sw;}}, {{
-                        Mem_sw = max<uint32_t>(Rs2_uw, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                }
+                0x0: AtomicMemOp::amoadd_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<int32_t> *amo_op =
+                          new AtomicGenericOp<int32_t>(Rs2_sw,
+                                  [](int32_t* b, int32_t a){ *b += a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x1: AtomicMemOp::amoswap_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                          new AtomicGenericOp<uint32_t>(Rs2_uw,
+                                  [](uint32_t* b, uint32_t a){ *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x4: AtomicMemOp::amoxor_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                          new AtomicGenericOp<uint32_t>(Rs2_uw,
+                                  [](uint32_t* b, uint32_t a){ *b ^= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x8: AtomicMemOp::amoor_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                          new AtomicGenericOp<uint32_t>(Rs2_uw,
+                                  [](uint32_t* b, uint32_t a){ *b |= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0xc: AtomicMemOp::amoand_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                          new AtomicGenericOp<uint32_t>(Rs2_uw,
+                                  [](uint32_t* b, uint32_t a){ *b &= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x10: AtomicMemOp::amomin_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<int32_t> *amo_op =
+                      new AtomicGenericOp<int32_t>(Rs2_sw,
+                        [](int32_t* b, int32_t a){ if (a < *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x14: AtomicMemOp::amomax_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<int32_t> *amo_op =
+                      new AtomicGenericOp<int32_t>(Rs2_sw,
+                        [](int32_t* b, int32_t a){ if (a > *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x18: AtomicMemOp::amominu_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                      new AtomicGenericOp<uint32_t>(Rs2_uw,
+                        [](uint32_t* b, uint32_t a){ if (a < *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x1c: AtomicMemOp::amomaxu_w({{
+                    Rd_sd = Mem_sw;
+                }}, {{
+                    TypedAtomicOpFunctor<uint32_t> *amo_op =
+                      new AtomicGenericOp<uint32_t>(Rs2_uw,
+                        [](uint32_t* b, uint32_t a){ if (a > *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
             }
             0x3: decode AMOFUNCT {
                 0x2: LoadReserved::lr_d({{
@@ -560,44 +576,69 @@ decode QUADRANT default Unknown::unknown() {
                 }}, {{
                     Rd = result;
                 }}, mem_flags=LLSC, inst_flags=IsStoreConditional);
-                format AtomicMemOp {
-                    0x0: amoadd_d({{Rt_sd = Mem_sd;}}, {{
-                        Mem_sd = Rs2_sd + Rt_sd;
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x1: amoswap_d({{Rt = Mem;}}, {{
-                        Mem = Rs2;
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                    0x4: amoxor_d({{Rt = Mem;}}, {{
-                        Mem = Rs2^Rt;
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                    0x8: amoor_d({{Rt = Mem;}}, {{
-                        Mem = Rs2 | Rt;
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                    0xc: amoand_d({{Rt = Mem;}}, {{
-                        Mem = Rs2&Rt;
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                    0x10: amomin_d({{Rt_sd = Mem_sd;}}, {{
-                        Mem_sd = min(Rs2_sd, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x14: amomax_d({{Rt_sd = Mem_sd;}}, {{
-                        Mem_sd = max(Rs2_sd, Rt_sd);
-                        Rd_sd = Rt_sd;
-                    }}, {{EA = Rs1;}});
-                    0x18: amominu_d({{Rt = Mem;}}, {{
-                        Mem = min(Rs2, Rt);
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                    0x1c: amomaxu_d({{Rt = Mem;}}, {{
-                        Mem = max(Rs2, Rt);
-                        Rd = Rt;
-                    }}, {{EA = Rs1;}});
-                }
+                0x0: AtomicMemOp::amoadd_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<int64_t> *amo_op =
+                          new AtomicGenericOp<int64_t>(Rs2_sd,
+                                  [](int64_t* b, int64_t a){ *b += a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x1: AtomicMemOp::amoswap_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                          new AtomicGenericOp<uint64_t>(Rs2_ud,
+                                  [](uint64_t* b, uint64_t a){ *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x4: AtomicMemOp::amoxor_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                          new AtomicGenericOp<uint64_t>(Rs2_ud,
+                                 [](uint64_t* b, uint64_t a){ *b ^= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x8: AtomicMemOp::amoor_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                          new AtomicGenericOp<uint64_t>(Rs2_ud,
+                                 [](uint64_t* b, uint64_t a){ *b |= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0xc: AtomicMemOp::amoand_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                          new AtomicGenericOp<uint64_t>(Rs2_ud,
+                                 [](uint64_t* b, uint64_t a){ *b &= a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x10: AtomicMemOp::amomin_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<int64_t> *amo_op =
+                      new AtomicGenericOp<int64_t>(Rs2_sd,
+                        [](int64_t* b, int64_t a){ if (a < *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x14: AtomicMemOp::amomax_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<int64_t> *amo_op =
+                      new AtomicGenericOp<int64_t>(Rs2_sd,
+                        [](int64_t* b, int64_t a){ if (a > *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x18: AtomicMemOp::amominu_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                      new AtomicGenericOp<uint64_t>(Rs2_ud,
+                        [](uint64_t* b, uint64_t a){ if (a < *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
+                0x1c: AtomicMemOp::amomaxu_d({{
+                    Rd_sd = Mem_sd;
+                }}, {{
+                    TypedAtomicOpFunctor<uint64_t> *amo_op =
+                      new AtomicGenericOp<uint64_t>(Rs2_ud,
+                        [](uint64_t* b, uint64_t a){ if (a > *b) *b = a; });
+                }}, mem_flags=ATOMIC_RETURN_OP);
             }
         }
         0x0c: decode FUNCT3 {
@@ -746,7 +787,7 @@ decode QUADRANT default Unknown::unknown() {
         }
 
         0x0d: UOp::lui({{
-            Rd = (uint64_t)imm;
+            Rd = (uint64_t)(sext<20>(imm) << 12);
         }});
 
         0x0e: decode FUNCT3 {
@@ -781,7 +822,7 @@ decode QUADRANT default Unknown::unknown() {
                     }});
                     0x1: divuw({{
                         if (Rs2_uw == 0) {
-                            Rd_sd = numeric_limits<IntReg>::max();
+                            Rd_sd = numeric_limits<uint64_t>::max();
                         } else {
                             Rd_sd = (int32_t)(Rs1_uw/Rs2_uw);
                         }

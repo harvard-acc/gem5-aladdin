@@ -53,8 +53,8 @@
 #include "gpu-compute/qstruct.hh"
 #include "gpu-compute/schedule_stage.hh"
 #include "gpu-compute/scoreboard_check_stage.hh"
-#include "mem/mem_object.hh"
 #include "mem/port.hh"
+#include "sim/clocked_object.hh"
 
 static const int MAX_REGS_FOR_NON_VEC_MEM_INST = 1;
 static const int MAX_WIDTH_FOR_MEM_INST = 32;
@@ -91,7 +91,7 @@ enum TLB_CACHE
     TLB_HIT_CACHE_HIT
 };
 
-class ComputeUnit : public MemObject
+class ComputeUnit : public ClockedObject
 {
   public:
     FetchStage fetchStage;
@@ -280,7 +280,7 @@ class ComputeUnit : public MemObject
     bool cedeSIMD(int simdId, int wfSlotId);
 
     template<typename c0, typename c1> void doSmReturn(GPUDynInstPtr gpuDynInst);
-    virtual void init();
+    virtual void init() override;
     void sendRequest(GPUDynInstPtr gpuDynInst, int index, PacketPtr pkt);
     void sendSyncRequest(GPUDynInstPtr gpuDynInst, int index, PacketPtr pkt);
     void injectGlobalMemFence(GPUDynInstPtr gpuDynInst,
@@ -380,7 +380,7 @@ class ComputeUnit : public MemObject
     int glbMemInstAvail;
 
     void
-    regStats();
+    regStats() override;
 
     LdsState &
     getLds() const
@@ -691,8 +691,8 @@ class ComputeUnit : public MemObject
     // port to the SQC TLB (there's a separate TLB for each I-cache)
     ITLBPort *sqcTLBPort;
 
-    virtual BaseMasterPort&
-    getMasterPort(const std::string &if_name, PortID idx)
+    Port &
+    getPort(const std::string &if_name, PortID idx) override
     {
         if (if_name == "memory_port") {
             memPort[idx] = new DataPort(csprintf("%s-port%d", name(), idx),

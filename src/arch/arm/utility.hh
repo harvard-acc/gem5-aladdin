@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2012-2013, 2016-2018 ARM Limited
+ * Copyright (c) 2010, 2012-2013, 2016-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -95,13 +95,6 @@ testPredicate(uint32_t nz, uint32_t c, uint32_t v, ConditionCode code)
     }
 }
 
-/**
- * Function to insure ISA semantics about 0 registers.
- * @param tc The thread context.
- */
-template <class TC>
-void zeroRegisters(TC *tc);
-
 inline void startupCPU(ThreadContext *tc, int cpuId)
 {
     tc->activate();
@@ -116,6 +109,10 @@ copyMiscRegs(ThreadContext *src, ThreadContext *dest)
 }
 
 void initCPU(ThreadContext *tc, int cpuId);
+
+/** Send an event (SEV) to a specific PE if there isn't
+ * already a pending event */
+void sendEvent(ThreadContext *tc);
 
 static inline bool
 inUserMode(CPSR cpsr)
@@ -153,9 +150,19 @@ currOpMode(ThreadContext *tc)
 static inline ExceptionLevel
 currEL(ThreadContext *tc)
 {
-    CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
-    return (ExceptionLevel) (uint8_t) cpsr.el;
+    return opModeToEL(currOpMode(tc));
 }
+
+inline ExceptionLevel
+currEL(CPSR cpsr)
+{
+    return opModeToEL((OperatingMode) (uint8_t)cpsr.mode);
+}
+
+bool HaveVirtHostExt(ThreadContext *tc);
+bool HaveSecureEL2Ext(ThreadContext *tc);
+bool IsSecureEL2Enabled(ThreadContext *tc);
+bool EL2Enabled(ThreadContext *tc);
 
 /**
  * This function checks whether selected EL provided as an argument
@@ -178,6 +185,12 @@ ELUsingAArch32K(ThreadContext *tc, ExceptionLevel el);
 bool ELIs32(ThreadContext *tc, ExceptionLevel el);
 
 bool ELIs64(ThreadContext *tc, ExceptionLevel el);
+
+/**
+ * Returns true if the current exception level `el` is executing a Host OS or
+ * an application of a Host OS (Armv8.1 Virtualization Host Extensions).
+ */
+bool ELIsInHost(ThreadContext *tc, ExceptionLevel el);
 
 bool isBigEndian64(ThreadContext *tc);
 
@@ -307,8 +320,8 @@ msrMrs64IssBuild(bool isRead, uint32_t op0, uint32_t op1, uint32_t crn,
 }
 
 bool
-mcrMrc15TrapToHyp(const MiscRegIndex miscReg, HCR hcr, CPSR cpsr, SCR scr,
-                  HDCR hdcr, HSTR hstr, HCPTR hcptr, uint32_t iss);
+mcrMrc15TrapToHyp(const MiscRegIndex miscReg, ThreadContext *tc, uint32_t iss);
+
 bool
 mcrMrc14TrapToHyp(const MiscRegIndex miscReg, HCR hcr, CPSR cpsr, SCR scr,
                   HDCR hdcr, HSTR hstr, HCPTR hcptr, uint32_t iss);

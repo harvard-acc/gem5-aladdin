@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2014, 2016-2018 ARM Limited
+ * Copyright (c) 2009-2014, 2016-2019 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -107,7 +107,7 @@ getArgument(ThreadContext *tc, int &number, uint16_t size, bool fp)
             }
         } else {
             Addr sp = tc->readIntReg(StackPointerReg);
-            FSTranslatingPortProxy &vp = tc->getVirtProxy();
+            PortProxy &vp = tc->getVirtProxy();
             uint64_t arg;
             if (size == sizeof(uint64_t)) {
                 // If the argument is even it must be aligned
@@ -145,6 +145,24 @@ skipFunction(ThreadContext *tc)
     }
 }
 
+static void
+copyVecRegs(ThreadContext *src, ThreadContext *dest)
+{
+    auto src_mode = RenameMode<ArmISA::ISA>::mode(src->pcState());
+
+    // The way vector registers are copied (VecReg vs VecElem) is relevant
+    // in the O3 model only.
+    if (src_mode == Enums::Full) {
+        for (auto idx = 0; idx < NumVecRegs; idx++)
+            dest->setVecRegFlat(idx, src->readVecRegFlat(idx));
+    } else {
+        for (auto idx = 0; idx < NumVecRegs; idx++)
+            for (auto elem_idx = 0; elem_idx < NumVecElemPerVecReg; elem_idx++)
+                dest->setVecElemFlat(
+                    idx, elem_idx, src->readVecElemFlat(idx, elem_idx));
+    }
+}
+
 void
 copyRegs(ThreadContext *src, ThreadContext *dest)
 {
@@ -152,16 +170,15 @@ copyRegs(ThreadContext *src, ThreadContext *dest)
         dest->setIntRegFlat(i, src->readIntRegFlat(i));
 
     for (int i = 0; i < NumFloatRegs; i++)
-        dest->setFloatRegBitsFlat(i, src->readFloatRegBitsFlat(i));
-
-    for (int i = 0; i < NumVecRegs; i++)
-        dest->setVecRegFlat(i, src->readVecRegFlat(i));
+        dest->setFloatRegFlat(i, src->readFloatRegFlat(i));
 
     for (int i = 0; i < NumCCRegs; i++)
         dest->setCCReg(i, src->readCCReg(i));
 
     for (int i = 0; i < NumMiscRegs; i++)
         dest->setMiscRegNoEffect(i, src->readMiscRegNoEffect(i));
+
+    copyVecRegs(src, dest);
 
     // setMiscReg "with effect" will set the misc register mapping correctly.
     // e.g. updateRegMap(val)
@@ -173,6 +190,15 @@ copyRegs(ThreadContext *src, ThreadContext *dest)
     // Invalidate the tlb misc register cache
     dynamic_cast<TLB *>(dest->getITBPtr())->invalidateMiscReg();
     dynamic_cast<TLB *>(dest->getDTBPtr())->invalidateMiscReg();
+}
+
+void
+sendEvent(ThreadContext *tc)
+{
+    if (tc->readMiscReg(MISCREG_SEV_MAILBOX) == 0) {
+        // Post Interrupt and wake cpu if needed
+        tc->getCpuPtr()->postInterrupt(tc->threadId(), INT_SEV, 0);
+    }
 }
 
 bool
@@ -208,9 +234,7 @@ longDescFormatInUse(ThreadContext *tc)
 RegVal
 readMPIDR(ArmSystem *arm_sys, ThreadContext *tc)
 {
-    CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
-    const ExceptionLevel current_el =
-        opModeToEL((OperatingMode) (uint8_t) cpsr.mode);
+    const ExceptionLevel current_el = currEL(tc);
 
     const bool is_secure = isSecureBelowEL3(tc);
 
@@ -266,6 +290,41 @@ getMPIDR(ArmSystem *arm_sys, ThreadContext *tc)
 }
 
 bool
+HaveVirtHostExt(ThreadContext *tc)
+{
+    AA64MMFR1 id_aa64mmfr1 = tc->readMiscReg(MISCREG_ID_AA64MMFR1_EL1);
+    return id_aa64mmfr1.vh;
+}
+
+bool
+HaveSecureEL2Ext(ThreadContext *tc)
+{
+    AA64PFR0 id_aa64pfr0 = tc->readMiscReg(MISCREG_ID_AA64PFR0_EL1);
+    return id_aa64pfr0.sel2;
+}
+
+bool
+IsSecureEL2Enabled(ThreadContext *tc)
+{
+    SCR scr = tc->readMiscReg(MISCREG_SCR_EL3);
+    if (ArmSystem::haveEL(tc, EL2) && HaveSecureEL2Ext(tc)) {
+        if (ArmSystem::haveEL(tc, EL3))
+            return !ELIs32(tc, EL3) && scr.eel2;
+        else
+            return inSecureState(tc);
+    }
+    return false;
+}
+
+bool
+EL2Enabled(ThreadContext *tc)
+{
+    SCR scr = tc->readMiscReg(MISCREG_SCR_EL3);
+    return ArmSystem::haveEL(tc, EL2) &&
+           (!ArmSystem::haveEL(tc, EL3) || scr.ns || IsSecureEL2Enabled(tc));
+}
+
+bool
 ELIs64(ThreadContext *tc, ExceptionLevel el)
 {
     return !ELIs32(tc, el);
@@ -278,6 +337,15 @@ ELIs32(ThreadContext *tc, ExceptionLevel el)
     std::tie(known, aarch32) = ELUsingAArch32K(tc, el);
     panic_if(!known, "EL state is UNKNOWN");
     return aarch32;
+}
+
+bool
+ELIsInHost(ThreadContext *tc, ExceptionLevel el)
+{
+    const HCR hcr = tc->readMiscReg(MISCREG_HCR_EL2);
+    return ((IsSecureEL2Enabled(tc) || !isSecureBelowEL3(tc)) &&
+            HaveVirtHostExt(tc) && !ELIs32(tc, EL2) && hcr.e2h == 1 &&
+            (el == EL2 || (el == EL0 && hcr.tge == 1)));
 }
 
 std::pair<bool, bool>
@@ -313,7 +381,7 @@ ELUsingAArch32K(ThreadContext *tc, ExceptionLevel el)
             // EL0 controlled by PSTATE
             CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
 
-            known = (cpsr.el == EL0);
+            known = (currEL(tc) == EL0);
             aarch32 = (cpsr.width == 1);
         } else {
             known = true;
@@ -328,7 +396,7 @@ ELUsingAArch32K(ThreadContext *tc, ExceptionLevel el)
 bool
 isBigEndian64(ThreadContext *tc)
 {
-    switch (opModeToEL(currOpMode(tc))) {
+    switch (currEL(tc)) {
       case EL3:
         return ((SCTLR) tc->readMiscReg(MISCREG_SCTLR_EL3)).ee;
       case EL2:
@@ -433,8 +501,7 @@ roundPage(Addr addr)
 }
 
 bool
-mcrMrc15TrapToHyp(const MiscRegIndex miscReg, HCR hcr, CPSR cpsr, SCR scr,
-                  HDCR hdcr, HSTR hstr, HCPTR hcptr, uint32_t iss)
+mcrMrc15TrapToHyp(const MiscRegIndex miscReg, ThreadContext *tc, uint32_t iss)
 {
     bool        isRead;
     uint32_t    crm;
@@ -444,6 +511,12 @@ mcrMrc15TrapToHyp(const MiscRegIndex miscReg, HCR hcr, CPSR cpsr, SCR scr,
     uint32_t    opc2;
     bool        trapToHype = false;
 
+    const CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
+    const HCR hcr = tc->readMiscReg(MISCREG_HCR);
+    const SCR scr = tc->readMiscReg(MISCREG_SCR);
+    const HDCR hdcr = tc->readMiscReg(MISCREG_HDCR);
+    const HSTR hstr = tc->readMiscReg(MISCREG_HSTR);
+    const HCPTR hcptr = tc->readMiscReg(MISCREG_HCPTR);
 
     if (!inSecureState(scr, cpsr) && (cpsr.mode != MODE_HYP)) {
         mcrMrcIssExtract(iss, isRead, crm, rt, crn, opc1, opc2);
@@ -546,6 +619,16 @@ mcrMrc15TrapToHyp(const MiscRegIndex miscReg, HCR hcr, CPSR cpsr, SCR scr,
                 break;
               case MISCREG_PMCR:
                 trapToHype = hdcr.tpmcr;
+                break;
+              // GICv3 regs
+              case MISCREG_ICC_SGI0R:
+                if (tc->getIsaPtr()->haveGICv3CpuIfc())
+                    trapToHype = hcr.fmo;
+                break;
+              case MISCREG_ICC_SGI1R:
+              case MISCREG_ICC_ASGI1R:
+                if (tc->getIsaPtr()->haveGICv3CpuIfc())
+                    trapToHype = hcr.imo;
                 break;
               // No default action needed
               default:
@@ -777,7 +860,7 @@ decodeMrsMsrBankedReg(uint8_t sysM, bool r, bool &isIntReg, int &regIdx,
 bool
 SPAlignmentCheckEnabled(ThreadContext* tc)
 {
-    switch (opModeToEL(currOpMode(tc))) {
+    switch (currEL(tc)) {
       case EL3:
         return ((SCTLR) tc->readMiscReg(MISCREG_SCTLR_EL3)).sa;
       case EL2:

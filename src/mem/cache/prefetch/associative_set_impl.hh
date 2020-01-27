@@ -31,6 +31,7 @@
 #ifndef __CACHE_PREFETCH_ASSOCIATIVE_SET_IMPL_HH__
 #define __CACHE_PREFETCH_ASSOCIATIVE_SET_IMPL_HH__
 
+#include "base/intmath.hh"
 #include "mem/cache/prefetch/associative_set.hh"
 
 template<class Entry>
@@ -86,7 +87,7 @@ AssociativeSet<Entry>::findVictim(Addr addr)
     Entry* victim = static_cast<Entry*>(replacementPolicy->getVictim(
                             selected_entries));
     // There is only one eviction for this replacement
-    victim->reset();
+    invalidate(victim);
     return victim;
 }
 
@@ -114,6 +115,14 @@ AssociativeSet<Entry>::insertEntry(Addr addr, bool is_secure, Entry* entry)
    entry->setTag(indexingPolicy->extractTag(addr));
    entry->setSecure(is_secure);
    replacementPolicy->reset(entry->replacementData);
+}
+
+template<class Entry>
+void
+AssociativeSet<Entry>::invalidate(Entry* entry)
+{
+    entry->invalidate();
+    replacementPolicy->invalidate(entry->replacementData);
 }
 
 #endif//__CACHE_PREFETCH_ASSOCIATIVE_SET_IMPL_HH__

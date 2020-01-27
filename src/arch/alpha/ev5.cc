@@ -80,17 +80,6 @@ initCPU(ThreadContext *tc, int cpuId)
     delete reset;
 }
 
-template <class CPU>
-void
-zeroRegisters(CPU *cpu)
-{
-    // Insure ISA semantics
-    // (no longer very clean due to the change in setIntReg() in the
-    // cpu model.  Consider changing later.)
-    cpu->thread->setIntReg(ZeroReg, 0);
-    cpu->thread->setFloatRegBits(ZeroReg, 0);
-}
-
 ////////////////////////////////////////////////////////////////////////
 //
 //
@@ -107,7 +96,7 @@ initIPRs(ThreadContext *tc, int cpuId)
     tc->setMiscRegNoEffect(IPR_PALtemp16, cpuId);
 }
 
-MiscReg
+RegVal
 ISA::readIpr(int idx, ThreadContext *tc)
 {
     uint64_t retval = 0;        // return value, default 0
@@ -219,6 +208,9 @@ int break_ipl = -1;
 void
 ISA::setIpr(int idx, uint64_t val, ThreadContext *tc)
 {
+    auto *stats = dynamic_cast<AlphaISA::Kernel::Statistics *>(
+            tc->getKernelStats());
+    assert(stats || !tc->getKernelStats());
     switch (idx) {
       case IPR_PALtemp0:
       case IPR_PALtemp1:
@@ -267,8 +259,8 @@ ISA::setIpr(int idx, uint64_t val, ThreadContext *tc)
 
       case IPR_PALtemp23:
         // write entire quad w/ no side-effect
-        if (tc->getKernelStats())
-            tc->getKernelStats()->context(ipr[idx], val, tc);
+        if (stats)
+            stats->context(ipr[idx], val, tc);
         ipr[idx] = val;
         break;
 
@@ -291,17 +283,17 @@ ISA::setIpr(int idx, uint64_t val, ThreadContext *tc)
       case IPR_IPLR:
         // only write least significant five bits - interrupt level
         ipr[idx] = val & 0x1f;
-        if (tc->getKernelStats())
-            tc->getKernelStats()->swpipl(ipr[idx]);
+        if (stats)
+            stats->swpipl(ipr[idx]);
         break;
 
       case IPR_DTB_CM:
         if (val & 0x18) {
-            if (tc->getKernelStats())
-                tc->getKernelStats()->mode(Kernel::user, tc);
+            if (stats)
+                stats->mode(Kernel::user, tc);
         } else {
-            if (tc->getKernelStats())
-                tc->getKernelStats()->mode(Kernel::kernel, tc);
+            if (stats)
+                stats->mode(Kernel::kernel, tc);
         }
         M5_FALLTHROUGH;
 
@@ -479,51 +471,3 @@ copyIprs(ThreadContext *src, ThreadContext *dest)
 }
 
 } // namespace AlphaISA
-
-using namespace AlphaISA;
-
-Fault
-SimpleThread::hwrei()
-{
-    PCState pc = pcState();
-    if (!(pc.pc() & 0x3))
-        return std::make_shared<UnimplementedOpcodeFault>();
-
-    pc.npc(readMiscRegNoEffect(IPR_EXC_ADDR));
-    pcState(pc);
-
-    CPA::cpa()->swAutoBegin(tc, pc.npc());
-
-    if (kernelStats)
-        kernelStats->hwrei();
-
-    // FIXME: XXX check for interrupts? XXX
-    return NoFault;
-}
-
-/**
- * Check for special simulator handling of specific PAL calls.
- * If return value is false, actual PAL call will be suppressed.
- */
-bool
-SimpleThread::simPalCheck(int palFunc)
-{
-    if (kernelStats)
-        kernelStats->callpal(palFunc, tc);
-
-    switch (palFunc) {
-      case PAL::halt:
-        halt();
-        if (--System::numSystemsRunning == 0)
-            exitSimLoop("all cpus halted");
-        break;
-
-      case PAL::bpt:
-      case PAL::bugchk:
-        if (system->breakpoint())
-            return false;
-        break;
-    }
-
-    return true;
-}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 ARM Limited
+ * Copyright (c) 2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -149,6 +149,12 @@ class TarmacTracerRecord : public TarmacBaseRecord
         virtual void
         updateInt(const TarmacContext& tarmCtx, RegIndex regRelIdx);
 
+        virtual void
+        updateVec(const TarmacContext& tarmCtx, RegIndex regRelIdx) {};
+
+        virtual void
+        updatePred(const TarmacContext& tarmCtx, RegIndex regRelIdx) {};
+
       public:
         /** True if register entry is valid */
         bool regValid;
@@ -178,7 +184,7 @@ class TarmacTracerRecord : public TarmacBaseRecord
 
   public:
     TarmacTracerRecord(Tick _when, ThreadContext *_thread,
-                       const StaticInstPtr _staticInst, TheISA::PCState _pc,
+                       const StaticInstPtr _staticInst, ArmISA::PCState _pc,
                        TarmacTracer& _tracer,
                        const StaticInstPtr _macroStaticInst = NULL);
 

@@ -40,15 +40,19 @@
 #ifndef __MEM_CACHE_PREFETCH_ACCESS_MAP_PATTERN_MATCHING_HH__
 #define __MEM_CACHE_PREFETCH_ACCESS_MAP_PATTERN_MATCHING_HH__
 
-#include "mem/cache/base.hh"
 #include "mem/cache/prefetch/associative_set.hh"
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
+#include "sim/clocked_object.hh"
 
-struct AccessMapPatternMatchingPrefetcherParams;
+struct AccessMapPatternMatchingParams;
 
-class AccessMapPatternMatchingPrefetcher : public QueuedPrefetcher
+class AccessMapPatternMatching : public ClockedObject
 {
+    /** Cacheline size used by the prefetcher using this object */
+    const unsigned blkSize;
+    /** Limit the stride checking to -limitStride/+limitStride */
+    const unsigned limitStride;
     /** Maximum number of prefetch generated */
     const unsigned startDegree;
     /** Amount of memory covered by a hot zone */
@@ -85,12 +89,15 @@ class AccessMapPatternMatchingPrefetcher : public QueuedPrefetcher
         /** vector containing the state of the cachelines in this zone */
         std::vector<AccessMapState> states;
 
-        AccessMapEntry(size_t num_entries) : states(num_entries, AM_INIT)
-        {}
-
-        /** Reset the entries to their initial values */
-        void reset() override
+        AccessMapEntry(size_t num_entries)
+          : TaggedEntry(), states(num_entries, AM_INIT)
         {
+        }
+
+        void
+        invalidate() override
+        {
+            TaggedEntry::invalidate();
             for (auto &entry : states) {
                 entry = AM_INIT;
             }
@@ -173,9 +180,23 @@ class AccessMapPatternMatchingPrefetcher : public QueuedPrefetcher
     EventFunctionWrapper epochEvent;
 
   public:
-    AccessMapPatternMatchingPrefetcher(
-        const AccessMapPatternMatchingPrefetcherParams* p);
-    ~AccessMapPatternMatchingPrefetcher() {}
+    AccessMapPatternMatching(const AccessMapPatternMatchingParams* p);
+    ~AccessMapPatternMatching()
+    {}
+    void startup() override;
+    void calculatePrefetch(const BasePrefetcher::PrefetchInfo &pfi,
+        std::vector<QueuedPrefetcher::AddrPriority> &addresses);
+};
+
+struct AMPMPrefetcherParams;
+
+class AMPMPrefetcher : public QueuedPrefetcher
+{
+    AccessMapPatternMatching &ampm;
+  public:
+    AMPMPrefetcher(const AMPMPrefetcherParams* p);
+    ~AMPMPrefetcher()
+    {}
     void calculatePrefetch(const PrefetchInfo &pfi,
                            std::vector<AddrPriority> &addresses) override;
 };

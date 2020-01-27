@@ -51,6 +51,7 @@
 
 #include "arch/x86/interrupts.hh"
 
+#include <list>
 #include <memory>
 
 #include "arch/x86/intmessage.hh"
@@ -191,11 +192,11 @@ Tick
 X86ISA::Interrupts::read(PacketPtr pkt)
 {
     Addr offset = pkt->getAddr() - pioAddr;
-    //Make sure we're at least only accessing one register.
+    // Make sure we're at least only accessing one register.
     if ((offset & ~mask(3)) != ((offset + pkt->getSize()) & ~mask(3)))
         panic("Accessed more than one register at a time in the APIC!\n");
     ApicRegIndex reg = decodeAddr(offset);
-    uint32_t val = htog(readReg(reg));
+    uint32_t val = htole(readReg(reg));
     DPRINTF(LocalApic,
             "Reading Local APIC register %d at offset %#x as %#x.\n",
             reg, offset, val);
@@ -208,7 +209,7 @@ Tick
 X86ISA::Interrupts::write(PacketPtr pkt)
 {
     Addr offset = pkt->getAddr() - pioAddr;
-    //Make sure we're at least only accessing one register.
+    // Make sure we're at least only accessing one register.
     if ((offset & ~mask(3)) != ((offset + pkt->getSize()) & ~mask(3)))
         panic("Accessed more than one register at a time in the APIC!\n");
     ApicRegIndex reg = decodeAddr(offset);
@@ -216,8 +217,8 @@ X86ISA::Interrupts::write(PacketPtr pkt)
     pkt->writeData(((uint8_t *)&val) + (offset & mask(3)));
     DPRINTF(LocalApic,
             "Writing Local APIC register %d at offset %#x as %#x.\n",
-            reg, offset, gtoh(val));
-    setReg(reg, gtoh(val));
+            reg, offset, letoh(val));
+    setReg(reg, letoh(val));
     pkt->makeAtomicResponse();
     return pioDelay;
 }
@@ -289,17 +290,13 @@ X86ISA::Interrupts::setCPU(BaseCPU * newCPU)
 void
 X86ISA::Interrupts::init()
 {
-    //
-    // The local apic must register its address ranges on both its pio
-    // port via the basicpiodevice(piodevice) init() function and its
-    // int port that it inherited from IntDevice.  Note IntDevice is
-    // not a SimObject itself.
-    //
-    BasicPioDevice::init();
-    IntDevice::init();
+    panic_if(!intMasterPort.isConnected(),
+            "Int port not connected to anything!");
+    panic_if(!pioPort.isConnected(),
+            "Pio port of %s not connected to anything!", name());
 
-    // the slave port has a range so inform the connected master
     intSlavePort.sendRangeChange();
+    pioPort.sendRangeChange();
 }
 
 
@@ -307,7 +304,7 @@ Tick
 X86ISA::Interrupts::recvMessage(PacketPtr pkt)
 {
     Addr offset = pkt->getAddr() - x86InterruptAddress(initialApicId, 0);
-    assert(pkt->cmd == MemCmd::MessageReq);
+    assert(pkt->cmd == MemCmd::WriteReq);
     switch(offset)
     {
       case 0:
@@ -331,11 +328,9 @@ X86ISA::Interrupts::recvMessage(PacketPtr pkt)
 }
 
 
-Tick
-X86ISA::Interrupts::recvResponse(PacketPtr pkt)
+void
+X86ISA::Interrupts::completeIPI(PacketPtr pkt)
 {
-    assert(!pkt->isError());
-    assert(pkt->cmd == MemCmd::MessageResp);
     if (--pendingIPIs == 0) {
         InterruptCommandRegLow low = regs[APIC_INTERRUPT_COMMAND_LOW];
         // Record that the ICR is now idle.
@@ -343,7 +338,17 @@ X86ISA::Interrupts::recvResponse(PacketPtr pkt)
         regs[APIC_INTERRUPT_COMMAND_LOW] = low;
     }
     DPRINTF(LocalApic, "ICR is now idle.\n");
-    return 0;
+    delete pkt;
+}
+
+
+AddrRangeList
+X86ISA::Interrupts::getAddrRanges() const
+{
+    assert(cpu);
+    AddrRangeList ranges;
+    ranges.push_back(RangeSize(pioAddr, PageBytes));
+    return ranges;
 }
 
 
@@ -475,7 +480,7 @@ X86ISA::Interrupts::setReg(ApicRegIndex reg, uint32_t val)
             message.destMode = low.destMode;
             message.level = low.level;
             message.trigger = low.trigger;
-            ApicList apics;
+            std::list<int> apics;
             int numContexts = sys->numContexts();
             switch (low.destShorthand) {
               case 0:
@@ -536,7 +541,11 @@ X86ISA::Interrupts::setReg(ApicRegIndex reg, uint32_t val)
                 pendingIPIs += apics.size();
             }
             regs[APIC_INTERRUPT_COMMAND_LOW] = low;
-            intMasterPort.sendMessage(apics, message, sys->isTimingMode());
+            for (auto id: apics) {
+                PacketPtr pkt = buildIntTriggerPacket(id, message);
+                intMasterPort.sendMessage(pkt, sys->isTimingMode(),
+                        [this](PacketPtr pkt) { completeIPI(pkt); });
+            }
             newVal = regs[APIC_INTERRUPT_COMMAND_LOW];
         }
         break;
@@ -587,7 +596,7 @@ X86ISA::Interrupts::setReg(ApicRegIndex reg, uint32_t val)
 
 
 X86ISA::Interrupts::Interrupts(Params * p)
-    : BasicPioDevice(p, PageBytes), IntDevice(this, p->int_latency),
+    : BaseInterrupts(p), sys(p->system), clockDomain(*p->clk_domain),
       apicTimerEvent([this]{ processApicTimerEvent(); }, name()),
       pendingSmi(false), smiVector(0),
       pendingNmi(false), nmiVector(0),
@@ -596,13 +605,17 @@ X86ISA::Interrupts::Interrupts(Params * p)
       pendingStartup(false), startupVector(0),
       startedUp(false), pendingUnmaskableInt(false),
       pendingIPIs(0), cpu(NULL),
-      intSlavePort(name() + ".int_slave", this, this)
+      intSlavePort(name() + ".int_slave", this, this),
+      intMasterPort(name() + ".int_master", this, this, p->int_latency),
+      pioPort(this), pioDelay(p->pio_latency)
 {
     memset(regs, 0, sizeof(regs));
     //Set the local apic DFR to the flat model.
     regs[APIC_DESTINATION_FORMAT] = (uint32_t)(-1);
     ISRV = 0;
     IRRV = 0;
+
+    regs[APIC_VERSION] = (5 << 16) | 0x14;
 }
 
 

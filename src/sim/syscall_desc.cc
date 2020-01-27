@@ -43,13 +43,12 @@
 #include "sim/faults.hh"
 #include "sim/process.hh"
 #include "sim/syscall_debug_macros.hh"
-#include "sim/syscall_return.hh"
 
 void
-SyscallDesc::doSyscall(int callnum, Process *process, ThreadContext *tc,
-                       Fault *fault)
+SyscallDesc::doSyscall(int callnum, ThreadContext *tc, Fault *fault)
 {
     RegVal arg[6] M5_VAR_USED;
+    auto process = tc->getProcessPtr();
 
     /**
      * Step through the first six parameters for the system call and
@@ -69,7 +68,7 @@ SyscallDesc::doSyscall(int callnum, Process *process, ThreadContext *tc,
                     _name, arg[0], arg[1], arg[2], arg[3], arg[4], arg[5]);
 
     /** Invoke the system call */
-    SyscallReturn retval = (*executor)(this, callnum, process, tc);
+    SyscallReturn retval = executor(this, callnum, tc);
 
     /**
      * If the system call needs to be restarted, most likely due to
@@ -82,14 +81,6 @@ SyscallDesc::doSyscall(int callnum, Process *process, ThreadContext *tc,
     } else
         DPRINTF_SYSCALL(Base, "%s returns %d\n", _name, retval.encodedValue());
 
-    if (!(_flags & SyscallDesc::SuppressReturnValue) && !retval.needsRetry())
+    if (!retval.suppressed() && !retval.needsRetry())
         process->setSyscallReturn(tc, retval);
-}
-
-bool
-SyscallDesc::needWarning()
-{
-    bool suppress_warning = warnOnce() && _warned;
-    _warned = true;
-    return !suppress_warning;
 }

@@ -472,7 +472,7 @@ VldMultOp::VldMultOp(const char *mnem, ExtMachInst machInst, OpClass __opClass,
     if (deinterleave) numMicroops += (regs / elems);
     microOps = new StaticInstPtr[numMicroops];
 
-    RegIndex rMid = deinterleave ? NumFloatV7ArchRegs : vd * 2;
+    RegIndex rMid = deinterleave ? VecSpecialElem : vd * 2;
 
     uint32_t noAlign = TLB::MustBeOne;
 
@@ -575,7 +575,7 @@ VldSingleOp::VldSingleOp(const char *mnem, ExtMachInst machInst,
     numMicroops += (regs / elems);
     microOps = new StaticInstPtr[numMicroops];
 
-    RegIndex ufp0 = NumFloatV7ArchRegs;
+    RegIndex ufp0 = VecSpecialElem;
 
     unsigned uopIdx = 0;
     switch (loadSize) {
@@ -837,7 +837,7 @@ VstMultOp::VstMultOp(const char *mnem, ExtMachInst machInst, OpClass __opClass,
 
     uint32_t noAlign = TLB::MustBeOne;
 
-    RegIndex rMid = interleave ? NumFloatV7ArchRegs : vd * 2;
+    RegIndex rMid = interleave ? VecSpecialElem : vd * 2;
 
     unsigned uopIdx = 0;
     if (interleave) {
@@ -939,7 +939,7 @@ VstSingleOp::VstSingleOp(const char *mnem, ExtMachInst machInst,
     numMicroops += (regs / elems);
     microOps = new StaticInstPtr[numMicroops];
 
-    RegIndex ufp0 = NumFloatV7ArchRegs;
+    RegIndex ufp0 = VecSpecialElem;
 
     unsigned uopIdx = 0;
     switch (elems) {
@@ -1123,7 +1123,7 @@ VldMultOp64::VldMultOp64(const char *mnem, ExtMachInst machInst,
                          uint8_t numStructElems, uint8_t numRegs, bool wb) :
     PredMacroOp(mnem, machInst, __opClass)
 {
-    RegIndex vx = NumFloatV8ArchRegs / 4;
+    RegIndex vx = NumVecV8ArchRegs;
     RegIndex rnsp = (RegIndex) makeSP((IntRegIndex) rn);
     bool baseIsSP = isSP((IntRegIndex) rnsp);
 
@@ -1208,7 +1208,7 @@ VstMultOp64::VstMultOp64(const char *mnem, ExtMachInst machInst,
                          uint8_t numStructElems, uint8_t numRegs, bool wb) :
     PredMacroOp(mnem, machInst, __opClass)
 {
-    RegIndex vx = NumFloatV8ArchRegs / 4;
+    RegIndex vx = NumVecV8ArchRegs;
     RegIndex rnsp = (RegIndex) makeSP((IntRegIndex) rn);
     bool baseIsSP = isSP((IntRegIndex) rnsp);
 
@@ -1297,7 +1297,7 @@ VldSingleOp64::VldSingleOp64(const char *mnem, ExtMachInst machInst,
     wb(false), replicate(false)
 
 {
-    RegIndex vx = NumFloatV8ArchRegs / 4;
+    RegIndex vx = NumVecV8ArchRegs;
     RegIndex rnsp = (RegIndex) makeSP((IntRegIndex) rn);
     bool baseIsSP = isSP((IntRegIndex) rnsp);
 
@@ -1370,7 +1370,7 @@ VstSingleOp64::VstSingleOp64(const char *mnem, ExtMachInst machInst,
     eSize(0), dataSize(0), numStructElems(0), index(0),
     wb(false), replicate(false)
 {
-    RegIndex vx = NumFloatV8ArchRegs / 4;
+    RegIndex vx = NumVecV8ArchRegs;
     RegIndex rnsp = (RegIndex) makeSP((IntRegIndex) rn);
     bool baseIsSP = isSP((IntRegIndex) rnsp);
 
@@ -1446,15 +1446,6 @@ MacroVFPMemOp::MacroVFPMemOp(const char *mnem, ExtMachInst machInst,
     // to be functionally identical except that fldmx is deprecated. For now
     // we'll assume they're otherwise interchangable.
     int count = (single ? offset : (offset / 2));
-    if (count == 0 || count > NumFloatV7ArchRegs)
-        warn_once("Bad offset field for VFP load/store multiple.\n");
-    if (count == 0) {
-        // Force there to be at least one microop so the macroop makes sense.
-        writeback = true;
-    }
-    if (count > NumFloatV7ArchRegs)
-        count = NumFloatV7ArchRegs;
-
     numMicroops = count * (single ? 1 : 2) + (writeback ? 1 : 0);
     microOps = new StaticInstPtr[numMicroops];
 

@@ -52,54 +52,57 @@ from m5.params import *
 from m5.proxy import *
 from m5.util.fdthelper import *
 
-from XBar import L2XBar
-from InstTracer import InstTracer
-from CPUTracers import ExeTracer
-from MemObject import MemObject
-from SubSystem import SubSystem
-from ClockDomain import *
-from Platform import Platform
+from m5.objects.ClockedObject import ClockedObject
+from m5.objects.XBar import L2XBar
+from m5.objects.InstTracer import InstTracer
+from m5.objects.CPUTracers import ExeTracer
+from m5.objects.SubSystem import SubSystem
+from m5.objects.ClockDomain import *
+from m5.objects.Platform import Platform
 
 default_tracer = ExeTracer()
 
 if buildEnv['TARGET_ISA'] == 'alpha':
-    from AlphaTLB import AlphaDTB as ArchDTB, AlphaITB as ArchITB
-    from AlphaInterrupts import AlphaInterrupts
-    from AlphaISA import AlphaISA
-    default_isa_class = AlphaISA
+    from m5.objects.AlphaTLB import AlphaDTB as ArchDTB, AlphaITB as ArchITB
+    from m5.objects.AlphaInterrupts import AlphaInterrupts as ArchInterrupts
+    from m5.objects.AlphaISA import AlphaISA as ArchISA
+    ArchISAsParam = VectorParam.AlphaISA
 elif buildEnv['TARGET_ISA'] == 'sparc':
-    from SparcTLB import SparcTLB as ArchDTB, SparcTLB as ArchITB
-    from SparcInterrupts import SparcInterrupts
-    from SparcISA import SparcISA
-    default_isa_class = SparcISA
+    from m5.objects.SparcTLB import SparcTLB as ArchDTB, SparcTLB as ArchITB
+    from m5.objects.SparcInterrupts import SparcInterrupts as ArchInterrupts
+    from m5.objects.SparcISA import SparcISA as ArchISA
+    ArchISAsParam = VectorParam.SparcISA
 elif buildEnv['TARGET_ISA'] == 'x86':
-    from X86TLB import X86TLB as ArchDTB, X86TLB as ArchITB
-    from X86LocalApic import X86LocalApic
-    from X86ISA import X86ISA
-    default_isa_class = X86ISA
+    from m5.objects.X86TLB import X86TLB as ArchDTB, X86TLB as ArchITB
+    from m5.objects.X86LocalApic import X86LocalApic as ArchInterrupts
+    from m5.objects.X86ISA import X86ISA as ArchISA
+    ArchISAsParam = VectorParam.X86ISA
 elif buildEnv['TARGET_ISA'] == 'mips':
-    from MipsTLB import MipsTLB as ArchDTB, MipsTLB as ArchITB
-    from MipsInterrupts import MipsInterrupts
-    from MipsISA import MipsISA
-    default_isa_class = MipsISA
+    from m5.objects.MipsTLB import MipsTLB as ArchDTB, MipsTLB as ArchITB
+    from m5.objects.MipsInterrupts import MipsInterrupts as ArchInterrupts
+    from m5.objects.MipsISA import MipsISA as ArchISA
+    ArchISAsParam = VectorParam.MipsISA
 elif buildEnv['TARGET_ISA'] == 'arm':
-    from ArmTLB import ArmTLB as ArchDTB, ArmTLB as ArchITB
-    from ArmTLB import ArmStage2IMMU, ArmStage2DMMU
-    from ArmInterrupts import ArmInterrupts
-    from ArmISA import ArmISA
-    default_isa_class = ArmISA
+    from m5.objects.ArmTLB import ArmDTB as ArchDTB, ArmITB as ArchITB
+    from m5.objects.ArmInterrupts import ArmInterrupts as ArchInterrupts
+    from m5.objects.ArmISA import ArmISA as ArchISA
+    ArchISAsParam = VectorParam.ArmISA
 elif buildEnv['TARGET_ISA'] == 'power':
-    from PowerTLB import PowerTLB as ArchDTB, PowerTLB as ArchITB
-    from PowerInterrupts import PowerInterrupts
-    from PowerISA import PowerISA
-    default_isa_class = PowerISA
+    from m5.objects.PowerTLB import PowerTLB as ArchDTB, PowerTLB as ArchITB
+    from m5.objects.PowerInterrupts import PowerInterrupts as ArchInterrupts
+    from m5.objects.PowerISA import PowerISA as ArchISA
+    ArchISAsParam = VectorParam.PowerISA
 elif buildEnv['TARGET_ISA'] == 'riscv':
-    from RiscvTLB import RiscvTLB as ArchDTB, RiscvTLB as ArchITB
-    from RiscvInterrupts import RiscvInterrupts
-    from RiscvISA import RiscvISA
-    default_isa_class = RiscvISA
+    from m5.objects.RiscvTLB import RiscvTLB as ArchDTB, RiscvTLB as ArchITB
+    from m5.objects.RiscvInterrupts import RiscvInterrupts as ArchInterrupts
+    from m5.objects.RiscvISA import RiscvISA as ArchISA
+    ArchISAsParam = VectorParam.RiscvISA
+else:
+    print("Don't know what object types to use for ISA %s" %
+            buildEnv['TARGET_ISA'])
+    sys.exit(1)
 
-class BaseCPU(MemObject):
+class BaseCPU(ClockedObject):
     type = 'BaseCPU'
     abstract = True
     cxx_header = "cpu/base.hh"
@@ -111,7 +114,6 @@ class BaseCPU(MemObject):
         PyBindMethod("flushTLBs"),
         PyBindMethod("totalInsts"),
         PyBindMethod("scheduleInstStop"),
-        PyBindMethod("scheduleLoadStop"),
         PyBindMethod("getCurrentInstCount"),
     ]
 
@@ -171,40 +173,10 @@ class BaseCPU(MemObject):
 
     dtb = Param.BaseTLB(ArchDTB(), "Data TLB")
     itb = Param.BaseTLB(ArchITB(), "Instruction TLB")
-    if buildEnv['TARGET_ISA'] == 'sparc':
-        interrupts = VectorParam.SparcInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.SparcISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'alpha':
-        interrupts = VectorParam.AlphaInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.AlphaISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'x86':
-        interrupts = VectorParam.X86LocalApic([], "Interrupt Controller")
-        isa = VectorParam.X86ISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'mips':
-        interrupts = VectorParam.MipsInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.MipsISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'arm':
-        istage2_mmu = Param.ArmStage2MMU(ArmStage2IMMU(), "Stage 2 trans")
-        dstage2_mmu = Param.ArmStage2MMU(ArmStage2DMMU(), "Stage 2 trans")
-        interrupts = VectorParam.ArmInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.ArmISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'power':
+    if buildEnv['TARGET_ISA'] == 'power':
         UnifiedTLB = Param.Bool(True, "Is this a Unified TLB?")
-        interrupts = VectorParam.PowerInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.PowerISA([], "ISA instance")
-    elif buildEnv['TARGET_ISA'] == 'riscv':
-        interrupts = VectorParam.RiscvInterrupts(
-                [], "Interrupt Controller")
-        isa = VectorParam.RiscvISA([], "ISA instance")
-    else:
-        print("Don't know what TLB to use for ISA %s" %
-              buildEnv['TARGET_ISA'])
-        sys.exit(1)
+    interrupts = VectorParam.BaseInterrupts([], "Interrupt Controller")
+    isa = ArchISAsParam([], "ISA instance")
 
     max_insts_all_threads = Param.Counter(0,
         "terminate when all threads have reached this inst count")
@@ -212,10 +184,6 @@ class BaseCPU(MemObject):
         "terminate when any thread reaches this inst count")
     simpoint_start_insts = VectorParam.Counter([],
         "starting instruction counts of simpoints")
-    max_loads_all_threads = Param.Counter(0,
-        "terminate when all threads have reached this load count")
-    max_loads_any_thread = Param.Counter(0,
-        "terminate when any thread reaches this load count")
     progress_interval = Param.Frequency('0Hz',
         "frequency to print out the progress message")
 
@@ -240,31 +208,7 @@ class BaseCPU(MemObject):
         _uncached_master_ports += ["interrupts[0].int_master"]
 
     def createInterruptController(self):
-        if buildEnv['TARGET_ISA'] == 'sparc':
-            self.interrupts = [SparcInterrupts() for i in xrange(self.numThreads)]
-        elif buildEnv['TARGET_ISA'] == 'alpha':
-            self.interrupts = [AlphaInterrupts() for i in xrange(self.numThreads)]
-        elif buildEnv['TARGET_ISA'] == 'x86':
-            self.apic_clk_domain = DerivedClockDomain(clk_domain =
-                                                      Parent.clk_domain,
-                                                      clk_divider = 16)
-            self.interrupts = [X86LocalApic(clk_domain = self.apic_clk_domain,
-                                           pio_addr=0x2000000000000000)
-                               for i in xrange(self.numThreads)]
-            _localApic = self.interrupts
-        elif buildEnv['TARGET_ISA'] == 'mips':
-            self.interrupts = [MipsInterrupts() for i in xrange(self.numThreads)]
-        elif buildEnv['TARGET_ISA'] == 'arm':
-            self.interrupts = [ArmInterrupts() for i in xrange(self.numThreads)]
-        elif buildEnv['TARGET_ISA'] == 'power':
-            self.interrupts = [PowerInterrupts() for i in xrange(self.numThreads)]
-        elif buildEnv['TARGET_ISA'] == 'riscv':
-            self.interrupts = \
-                [RiscvInterrupts() for i in xrange(self.numThreads)]
-        else:
-            print("Don't know what Interrupt Controller to use for ISA %s" %
-                  buildEnv['TARGET_ISA'])
-            sys.exit(1)
+        self.interrupts = [ArchInterrupts() for i in range(self.numThreads)]
 
     def connectCachedPorts(self, bus):
         for p in self._cached_ports:
@@ -318,7 +262,7 @@ class BaseCPU(MemObject):
         # If no ISAs have been created, assume that the user wants the
         # default ISA.
         if len(self.isa) == 0:
-            self.isa = [ default_isa_class() for i in xrange(self.numThreads) ]
+            self.isa = [ ArchISA() for i in range(self.numThreads) ]
         else:
             if len(self.isa) != int(self.numThreads):
                 raise RuntimeError("Number of ISA instances doesn't "
@@ -365,7 +309,7 @@ class BaseCPU(MemObject):
                 warn("Platform not found for device tree generation; " \
                      "system or multiple CPUs may not start")
 
-            freq = round(self.clk_domain.unproxy(self).clock[0].frequency)
+            freq = int(self.clk_domain.unproxy(self).clock[0].frequency)
             node.append(FdtPropertyWords("clock-frequency", freq))
 
             # Unique key for this CPU

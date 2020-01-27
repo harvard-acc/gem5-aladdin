@@ -27,8 +27,27 @@
 
 Import('*')
 
+from m5.util import compareVersions
+
+from gem5_scons import warning
+
+def use_systemc_check(env, warn=False):
+    if ('GCC_VERSION' in env and
+            compareVersions(env['GCC_VERSION'], '5.0') < 0):
+        if warn:
+            warning('Systemc may not work on gcc versions less than 5.0.')
+        return False
+    elif env['PLATFORM'] == 'darwin':
+        if warn:
+            warning('Warning: Systemc may not work on Mac OS.')
+        return False
+    return True
+
+main.AddMethod(use_systemc_check, 'UseSystemcCheck')
+
 sticky_vars.AddVariables(
-    BoolVariable('USE_SYSTEMC', 'Enable SystemC API support', True)
+    BoolVariable('USE_SYSTEMC', 'Enable SystemC API support',
+                 main.UseSystemcCheck())
     )
 
 export_vars.append('USE_SYSTEMC')

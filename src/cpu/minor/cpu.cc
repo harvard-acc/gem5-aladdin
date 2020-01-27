@@ -108,17 +108,6 @@ MinorCPU::init()
 
         tc->initMemProxies(tc);
     }
-
-    /* Initialise CPUs (== threads in the ISA) */
-    if (FullSystem && !params()->switched_out) {
-        for (ThreadID thread_id = 0; thread_id < threads.size(); thread_id++)
-        {
-            ThreadContext *tc = getContext(thread_id);
-
-            /* Initialize CPU, including PC */
-            TheISA::initCPU(tc, cpuId());
-        }
-    }
 }
 
 /** Stats interface from SimObject (by way of BaseCPU) */
@@ -321,12 +310,14 @@ MinorCPUParams::create()
     return new MinorCPU(this);
 }
 
-MasterPort &MinorCPU::getInstPort()
+Port &
+MinorCPU::getInstPort()
 {
     return pipeline->getInstPort();
 }
 
-MasterPort &MinorCPU::getDataPort()
+Port &
+MinorCPU::getDataPort()
 {
     return pipeline->getDataPort();
 }

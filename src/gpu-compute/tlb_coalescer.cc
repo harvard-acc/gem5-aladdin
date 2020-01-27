@@ -42,7 +42,7 @@
 #include "sim/process.hh"
 
 TLBCoalescer::TLBCoalescer(const Params *p)
-    : MemObject(p),
+    : ClockedObject(p),
       clock(p->clk_domain->clockPeriod()),
       TLBProbesPerCycle(p->probesPerCycle),
       coalescingWindow(p->coalescingWindow),
@@ -67,31 +67,23 @@ TLBCoalescer::TLBCoalescer(const Params *p)
     }
 }
 
-BaseSlavePort&
-TLBCoalescer::getSlavePort(const std::string &if_name, PortID idx)
+Port &
+TLBCoalescer::getPort(const std::string &if_name, PortID idx)
 {
     if (if_name == "slave") {
         if (idx >= static_cast<PortID>(cpuSidePort.size())) {
-            panic("TLBCoalescer::getSlavePort: unknown index %d\n", idx);
+            panic("TLBCoalescer::getPort: unknown index %d\n", idx);
         }
 
         return *cpuSidePort[idx];
-    } else {
-        panic("TLBCoalescer::getSlavePort: unknown port %s\n", if_name);
-    }
-}
-
-BaseMasterPort&
-TLBCoalescer::getMasterPort(const std::string &if_name, PortID idx)
-{
-    if (if_name == "master") {
+    } else  if (if_name == "master") {
         if (idx >= static_cast<PortID>(memSidePort.size())) {
-            panic("TLBCoalescer::getMasterPort: unknown index %d\n", idx);
+            panic("TLBCoalescer::getPort: unknown index %d\n", idx);
         }
 
         return *memSidePort[idx];
     } else {
-        panic("TLBCoalescer::getMasterPort: unknown port %s\n", if_name);
+        panic("TLBCoalescer::getPort: unknown port %s\n", if_name);
     }
 }
 
@@ -533,7 +525,7 @@ TLBCoalescer::processCleanupEvent()
 void
 TLBCoalescer::regStats()
 {
-    MemObject::regStats();
+    ClockedObject::regStats();
 
     uncoalescedAccesses
         .name(name() + ".uncoalesced_accesses")

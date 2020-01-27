@@ -118,11 +118,11 @@ VirtIO9PBase::VirtIO9PBase(Params *params)
     : VirtIODeviceBase(params, ID_9P,
                        sizeof(Config) + params->tag.size(),
                        F_MOUNT_TAG),
-      queue(params->system->physProxy, params->queueSize, *this)
+      queue(params->system->physProxy, byteOrder, params->queueSize, *this)
 {
     config.reset((Config *)
                  operator new(configSize));
-    config->len = htov_legacy(params->tag.size());
+    config->len = htog(params->tag.size(), byteOrder);
     memcpy(config->tag, params->tag.c_str(), params->tag.size());
 
     registerQueue(queue);
@@ -394,6 +394,7 @@ VirtIO9PDiod::startDiod()
 
         // Start diod
         execlp(diod, diod,
+               "-d", DTRACE(VIO9P) ? "1" : "0", // show debug output
                "-f", // start in foreground
                "-r", "3", // setup read FD
                "-w", "4", // setup write FD

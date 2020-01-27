@@ -45,10 +45,11 @@ class PowerLinuxProcess : public PowerProcess
 
     void initState();
 
-    PowerISA::IntReg getSyscallArg(ThreadContext *tc, int &i);
+    void syscall(ThreadContext *tc, Fault *fault) override;
+
+    RegVal getSyscallArg(ThreadContext *tc, int &i);
     /// Explicitly import the otherwise hidden getSyscallArg
     using Process::getSyscallArg;
-    void setSyscallArg(ThreadContext *tc, int i, PowerISA::IntReg val);
 
     /// Array of syscall descriptors, indexed by call number.
     static SyscallDesc syscallDescs[];

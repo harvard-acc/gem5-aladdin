@@ -45,7 +45,8 @@
 
 VirtIOBlock::VirtIOBlock(Params *params)
     : VirtIODeviceBase(params, ID_BLOCK, sizeof(Config), 0),
-      qRequests(params->system->physProxy, params->queueSize, *this),
+      qRequests(params->system->physProxy, byteOrder,
+                params->queueSize, *this),
       image(*params->image)
 {
     registerQueue(qRequests);
@@ -62,7 +63,7 @@ void
 VirtIOBlock::readConfig(PacketPtr pkt, Addr cfgOffset)
 {
     Config cfg_out;
-    cfg_out.capacity = htov_legacy(config.capacity);
+    cfg_out.capacity = htog(config.capacity, byteOrder);
 
     readConfigBlob(pkt, cfgOffset, (uint8_t *)&cfg_out);
 }
@@ -71,7 +72,7 @@ VirtIOBlock::Status
 VirtIOBlock::read(const BlkRequest &req, VirtDescriptor *desc_chain,
                   size_t off_data, size_t size)
 {
-    uint8_t data[size];
+    std::vector<uint8_t> data(size);
     uint64_t sector(req.sector);
 
     DPRINTF(VIOBlock, "Read request starting @ sector %i (size: %i)\n",
@@ -81,14 +82,14 @@ VirtIOBlock::read(const BlkRequest &req, VirtDescriptor *desc_chain,
         panic("Unexpected request/sector size relationship\n");
 
     for (Addr offset = 0; offset < size; offset += SectorSize) {
-        if (image.read(data + offset, sector) != SectorSize) {
+        if (image.read(&data[offset], sector) != SectorSize) {
             warn("Failed to read sector %i\n", sector);
             return S_IOERR;
         }
         ++sector;
     }
 
-    desc_chain->chainWrite(off_data, data, size);
+    desc_chain->chainWrite(off_data, &data[0], size);
 
     return S_OK;
 }
@@ -97,7 +98,7 @@ VirtIOBlock::Status
 VirtIOBlock::write(const BlkRequest &req, VirtDescriptor *desc_chain,
                   size_t off_data, size_t size)
 {
-    uint8_t data[size];
+    std::vector<uint8_t> data(size);
     uint64_t sector(req.sector);
 
     DPRINTF(VIOBlock, "Write request starting @ sector %i (size: %i)\n",
@@ -107,10 +108,10 @@ VirtIOBlock::write(const BlkRequest &req, VirtDescriptor *desc_chain,
         panic("Unexpected request/sector size relationship\n");
 
 
-    desc_chain->chainRead(off_data, data, size);
+    desc_chain->chainRead(off_data, &data[0], size);
 
     for (Addr offset = 0; offset < size; offset += SectorSize) {
-        if (image.write(data + offset, sector) != SectorSize) {
+        if (image.write(&data[offset], sector) != SectorSize) {
             warn("Failed to write sector %i\n", sector);
             return S_IOERR;
         }
@@ -132,8 +133,8 @@ VirtIOBlock::RequestQueue::onNotifyDescriptor(VirtDescriptor *desc)
      */
     BlkRequest req;
     desc->chainRead(0, (uint8_t *)&req, sizeof(req));
-    req.type = htov_legacy(req.type);
-    req.sector = htov_legacy(req.sector);
+    req.type = htog(req.type, byteOrder);
+    req.sector = htog(req.sector, byteOrder);
 
     Status status;
     const size_t data_size(desc->chainSize()

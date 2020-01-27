@@ -245,9 +245,8 @@ void
 NoncoherentCache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt,
                                      CacheBlk *blk)
 {
-    MSHR::Target *initial_tgt = mshr->getTarget();
     // First offset for critical word first calculations
-    const int initial_offset = initial_tgt->pkt->getOffset(blkSize);
+    const int initial_offset = mshr->getTarget()->pkt->getOffset(blkSize);
 
     MSHR::TargetList targets = mshr->extractServiceableTargets(pkt);
     for (auto &target: targets) {
@@ -279,7 +278,7 @@ NoncoherentCache::serviceMSHRTargets(MSHR *mshr, const PacketPtr pkt,
                 (transfer_offset ? pkt->payloadDelay : 0);
 
             assert(tgt_pkt->req->masterId() < system->maxMasters());
-            missLatency[tgt_pkt->cmdToIndex()][tgt_pkt->req->masterId()] +=
+            stats.cmdStats(tgt_pkt).missLatency[tgt_pkt->req->masterId()] +=
                 completion_time - target.recvTime;
 
             tgt_pkt->makeTimingResponse();

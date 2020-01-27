@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017 ARM Limited
+ * Copyright (c) 2015, 2017, 2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -51,7 +51,7 @@ static_assert(NUM_XREGS == 31, "Unexpected number of aarch64 int. regs.");
 
 // The KVM interface accesses vector registers of 4 single precision
 // floats instead of individual registers.
-constexpr static unsigned NUM_QREGS = NumFloatV8ArchRegs / 4;
+constexpr static unsigned NUM_QREGS = NumVecV8ArchRegs;
 static_assert(NUM_QREGS == 32, "Unexpected number of aarch64 vector regs.");
 
 #define EXTRACT_FIELD(v, name) \
@@ -109,8 +109,8 @@ const std::vector<ArmV8KvmCPU::MiscRegInfo> ArmV8KvmCPU::miscRegMap = {
     MiscRegInfo(INT_REG(spsr[KVM_SPSR_UND]), MISCREG_SPSR_UND, "SPSR(UND)"),
     MiscRegInfo(INT_REG(spsr[KVM_SPSR_IRQ]), MISCREG_SPSR_IRQ, "SPSR(IRQ)"),
     MiscRegInfo(INT_REG(spsr[KVM_SPSR_FIQ]), MISCREG_SPSR_FIQ, "SPSR(FIQ)"),
-    MiscRegInfo(INT_REG(fp_regs.fpsr), MISCREG_FPSR, "FPSR"),
-    MiscRegInfo(INT_REG(fp_regs.fpcr), MISCREG_FPCR, "FPCR"),
+    MiscRegInfo(CORE_REG(fp_regs.fpsr, U32), MISCREG_FPSR, "FPSR"),
+    MiscRegInfo(CORE_REG(fp_regs.fpcr, U32), MISCREG_FPCR, "FPCR"),
 };
 
 const std::set<MiscRegIndex> ArmV8KvmCPU::deviceRegSet = {
@@ -249,10 +249,10 @@ ArmV8KvmCPU::updateKvmState()
     }
 
     for (int i = 0; i < NUM_QREGS; ++i) {
-        const RegIndex reg_base(i * FP_REGS_PER_VFP_REG);
         KvmFPReg reg;
+        auto v = tc->readVecReg(RegId(VecRegClass, i)).as<VecElem>();
         for (int j = 0; j < FP_REGS_PER_VFP_REG; j++)
-            reg.s[j].i = tc->readFloatRegBits(reg_base + j);
+            reg.s[j].i = v[j];
 
         setOneReg(kvmFPReg(i), reg.data);
         DPRINTF(KvmContext, "  Q%i: %s\n", i, getAndFormatOneReg(kvmFPReg(i)));
@@ -321,12 +321,12 @@ ArmV8KvmCPU::updateThreadContext()
     }
 
     for (int i = 0; i < NUM_QREGS; ++i) {
-        const RegIndex reg_base(i * FP_REGS_PER_VFP_REG);
         KvmFPReg reg;
         DPRINTF(KvmContext, "  Q%i: %s\n", i, getAndFormatOneReg(kvmFPReg(i)));
         getOneReg(kvmFPReg(i), reg.data);
+        auto v = tc->getWritableVecReg(RegId(VecRegClass, i)).as<VecElem>();
         for (int j = 0; j < FP_REGS_PER_VFP_REG; j++)
-            tc->setFloatRegBits(reg_base + j, reg.s[j].i);
+            v[j] = reg.s[j].i;
     }
 
     for (const auto &ri : getSysRegMap()) {

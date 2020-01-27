@@ -217,17 +217,6 @@ isSnan(void *val_ptr, int size)
     }
 }
 
-template <class CPU>
-void
-zeroRegisters(CPU *cpu)
-{
-    // Insure ISA semantics
-    // (no longer very clean due to the change in setIntReg() in the
-    // cpu model.  Consider changing later.)
-    cpu->thread->setIntReg(ZeroReg, 0);
-    cpu->thread->setFloatRegBits(ZeroReg, 0);
-}
-
 void
 startupCPU(ThreadContext *tc, int cpuId)
 {
@@ -247,7 +236,7 @@ copyRegs(ThreadContext *src, ThreadContext *dest)
 
     // Then loop through the floating point registers.
     for (int i = 0; i < NumFloatRegs; i++)
-        dest->setFloatRegBitsFlat(i, src->readFloatRegBitsFlat(i));
+        dest->setFloatRegFlat(i, src->readFloatRegFlat(i));
 
     // Would need to add condition-code regs if implemented
     assert(NumCCRegs == 0);
@@ -268,7 +257,7 @@ copyMiscRegs(ThreadContext *src, ThreadContext *dest)
 void
 skipFunction(ThreadContext *tc)
 {
-    TheISA::PCState newPC = tc->pcState();
+    PCState newPC = tc->pcState();
     newPC.set(tc->readIntReg(ReturnAddressReg));
     tc->pcState(newPC);
 }

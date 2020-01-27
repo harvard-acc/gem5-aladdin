@@ -36,8 +36,8 @@ import m5
 from m5.objects import *
 from m5.defines import buildEnv
 from m5.util import addToPath
-from Ruby import create_topology
-from Ruby import send_evicts
+from .Ruby import create_topology
+from .Ruby import send_evicts
 
 addToPath('../')
 
@@ -76,28 +76,28 @@ class TccDirCache(RubyCache):
                             options.tcc_dir_factor) / long(options.num_tccs)
         self.start_index_bit = math.log(options.cacheline_size, 2) + \
                                math.log(options.num_tccs, 2)
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L1DCache(RubyCache):
     resourceStalls = False
     def create(self, options):
         self.size = MemorySize(options.l1d_size)
         self.assoc = options.l1d_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L1ICache(RubyCache):
     resourceStalls = False
     def create(self, options):
         self.size = MemorySize(options.l1i_size)
         self.assoc = options.l1i_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L2Cache(RubyCache):
     resourceStalls = False
     def create(self, options):
         self.size = MemorySize(options.l2_size)
         self.assoc = options.l2_assoc
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 
 class CPCntrl(CorePair_Controller, CntrlBase):
@@ -115,8 +115,6 @@ class CPCntrl(CorePair_Controller, CntrlBase):
         self.L2cache.create(options)
 
         self.sequencer = RubySequencer()
-        self.sequencer.icache_hit_latency = 2
-        self.sequencer.dcache_hit_latency = 2
         self.sequencer.version = self.seqCount()
         self.sequencer.icache = self.L1Icache
         self.sequencer.dcache = self.L1D0cache
@@ -128,11 +126,12 @@ class CPCntrl(CorePair_Controller, CntrlBase):
         self.sequencer1.version = self.seqCount()
         self.sequencer1.icache = self.L1Icache
         self.sequencer1.dcache = self.L1D1cache
-        self.sequencer1.icache_hit_latency = 2
-        self.sequencer1.dcache_hit_latency = 2
         self.sequencer1.ruby_system = ruby_system
         self.sequencer1.coreid = 1
         self.sequencer1.is_cpu_sequencer = True
+
+        # Defines icache/dcache hit latency
+        self.mandatory_queue_latency = 2
 
         self.issue_latency = options.cpu_to_dir_latency
         self.send_evictions = send_evicts(options)
@@ -150,7 +149,7 @@ class TCPCache(RubyCache):
     tagAccessLatency = 1
     def create(self, options):
         self.size = MemorySize(options.tcp_size)
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class TCPCntrl(TCP_Controller, CntrlBase):
 
@@ -223,7 +222,7 @@ class SQCCache(RubyCache):
     dataAccessLatency = 4
     tagAccessLatency = 1
     def create(self, options):
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class SQCCntrl(SQC_Controller, CntrlBase):
 
@@ -283,7 +282,7 @@ class TCC(RubyCache):
             self.size.value = long(128 * self.assoc)
         self.start_index_bit = math.log(options.cacheline_size, 2) + \
                                math.log(options.num_tccs, 2)
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class TCCCntrl(TCC_Controller, CntrlBase):
     def create(self, options, ruby_system, system):
@@ -348,7 +347,7 @@ class L3Cache(RubyCache):
         self.dataAccessLatency = options.l3_data_latency
         self.tagAccessLatency = options.l3_tag_latency
         self.resourceStalls = options.no_resource_stalls
-        self.replacement_policy = PseudoLRUReplacementPolicy()
+        self.replacement_policy = TreePLRURP()
 
 class L3Cntrl(L3Cache_Controller, CntrlBase):
     def create(self, options, ruby_system, system):
@@ -470,7 +469,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         block_size_bits = int(math.log(options.cacheline_size, 2))
         numa_bit = block_size_bits + dir_bits - 1
 
-    for i in xrange(options.num_dirs):
+    for i in range(options.num_dirs):
         dir_ranges = []
         for r in system.mem_ranges:
             addr_range = m5.objects.AddrRange(r.start, size = r.size(),
@@ -511,7 +510,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
 
     # For an odd number of CPUs, still create the right number of controllers
     cpuCluster = Cluster(extBW = 512, intBW = 512)  # 1 TB/s
-    for i in xrange((options.num_cpus + 1) / 2):
+    for i in range((options.num_cpus + 1) // 2):
 
         cp_cntrl = CPCntrl()
         cp_cntrl.create(options, ruby_system, system)
@@ -545,7 +544,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
 
     gpuCluster = Cluster(extBW = 512, intBW = 512)  # 1 TB/s
 
-    for i in xrange(options.num_compute_units):
+    for i in range(options.num_compute_units):
 
         tcp_cntrl = TCPCntrl(TCC_select_num_bits = TCC_bits,
                              number_of_TBEs = 2560) # max outstanding requests
@@ -578,7 +577,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
 
         gpuCluster.add(tcp_cntrl)
 
-    for i in xrange(options.num_sqc):
+    for i in range(options.num_sqc):
 
         sqc_cntrl = SQCCntrl(TCC_select_num_bits = TCC_bits)
         sqc_cntrl.create(options, ruby_system, system)
@@ -610,7 +609,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         # SQC also in GPU cluster
         gpuCluster.add(sqc_cntrl)
 
-    for i in xrange(options.num_cp):
+    for i in range(options.num_cp):
 
         tcp_cntrl = TCPCntrl(TCC_select_num_bits = TCC_bits,
                              number_of_TBEs = 2560) # max outstanding requests
@@ -673,7 +672,7 @@ def create_system(options, full_system, system, dma_devices, bootmem,
         # SQC also in GPU cluster
         gpuCluster.add(sqc_cntrl)
 
-    for i in xrange(options.num_tccs):
+    for i in range(options.num_tccs):
 
         tcc_cntrl = TCCCntrl(TCC_select_num_bits = TCC_bits,
                              number_of_TBEs = options.num_compute_units * 2560)

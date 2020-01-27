@@ -37,8 +37,8 @@
 
 from m5.params import *
 from m5.proxy import *
-from ClockedObject import ClockedObject
-from IndexingPolicies import *
+from m5.objects.ClockedObject import ClockedObject
+from m5.objects.IndexingPolicies import *
 
 class BaseTags(ClockedObject):
     type = 'BaseTags'
@@ -100,6 +100,21 @@ class SectorTags(BaseTags):
     # Get replacement policy from the parent (cache)
     replacement_policy = Param.BaseReplacementPolicy(
         Parent.replacement_policy, "Replacement policy")
+
+class CompressedTags(SectorTags):
+    type = 'CompressedTags'
+    cxx_header = "mem/cache/tags/compressed_tags.hh"
+
+    # Maximum number of compressed blocks per tag
+    max_compression_ratio = Param.Int(2,
+        "Maximum number of compressed blocks per tag.")
+
+    # We simulate superblock as sector blocks
+    num_blocks_per_sector = Self.max_compression_ratio
+
+    # We virtually increase the number of data blocks per tag by multiplying
+    # the cache size by the compression ratio
+    size = Parent.size * Self.max_compression_ratio
 
 class FALRU(BaseTags):
     type = 'FALRU'

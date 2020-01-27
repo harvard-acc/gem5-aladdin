@@ -1,4 +1,4 @@
-# Copyright (c) 2016 ARM Limited
+# Copyright (c) 2016, 2019 Arm Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -53,9 +53,21 @@ version="%prog 2.0"
 brief_copyright=\
     "gem5 is copyrighted software; use the --copyright option for details."
 
+def _stats_help(option, opt, value, parser):
+    import m5
+    print("A stat file can either be specified as a URI or a plain")
+    print("path. When specified as a path, gem5 uses the default text ")
+    print("format.")
+    print()
+    print("The following stat formats are supported:")
+    print()
+    m5.stats.printStatVisitorTypes()
+    sys.exit(0)
+
+
 def parse_options():
-    import config
-    from options import OptionParser
+    from . import config
+    from .options import OptionParser
 
     options = OptionParser(usage=usage, version=version,
                            description=brief_copyright)
@@ -108,6 +120,9 @@ def parse_options():
     option("--stats-db-file", metavar="FILE", default="",
         help = "Sets the output database file for statistics [Default: \
             %default]")
+    option("--stats-help",
+           action="callback", callback=_stats_help,
+           help="Display documentation for available stat visitors")
 
     # Configuration Options
     group("Configuration Options")
@@ -151,7 +166,7 @@ def parse_options():
     options_file = config.get('options.py')
     if options_file:
         scope = { 'options' : options }
-        execfile(options_file, scope)
+        exec(compile(open(options_file).read(), options_file, 'exec'), scope)
 
     arguments = options.parse_args()
     return options,arguments
@@ -194,33 +209,37 @@ def interact(scope):
         # isn't available.
         code.InteractiveConsole(scope).interact(banner)
 
+
+def _check_tracing():
+    from . import defines
+
+    if defines.TRACING_ON:
+        return
+
+    fatal("Tracing is not enabled.  Compile with TRACING_ON")
+
 def main(*args):
     import m5
 
-    import core
-    import debug
-    import defines
-    import event
-    import info
-    import stats
-    import trace
+    from . import core
+    from . import debug
+    from . import defines
+    from . import event
+    from . import info
+    from . import stats
+    from . import trace
 
-    from util import inform, fatal, warn, panic, isInteractive
+    from .util import inform, fatal, panic, isInteractive
+    from m5.util.terminal_formatter import TerminalFormatter
 
     if len(args) == 0:
         options, arguments = parse_options()
     elif len(args) == 2:
         options, arguments = args
     else:
-        raise TypeError, "main() takes 0 or 2 arguments (%d given)" % len(args)
+        raise TypeError("main() takes 0 or 2 arguments (%d given)" % len(args))
 
     m5.options = options
-
-    def check_tracing():
-        if defines.TRACING_ON:
-            return
-
-        fatal("Tracing is not enabled.  Compile with TRACING_ON")
 
     # Set the main event queue for the main thread.
     event.mainq = event.getEventQueue(0)
@@ -261,7 +280,7 @@ def main(*args):
         print()
         print('compiled %s' % defines.compileDate)
         print('build options:')
-        keys = defines.buildEnv.keys()
+        keys = list(defines.buildEnv.keys())
         keys.sort()
         for key in keys:
             val = defines.buildEnv[key]
@@ -282,27 +301,30 @@ def main(*args):
 
     if options.debug_help:
         done = True
-        check_tracing()
+        _check_tracing()
         debug.help()
 
     if options.list_sim_objects:
-        import SimObject
+        from . import SimObject
         done = True
         print("SimObjects:")
-        objects = SimObject.allClasses.keys()
+        objects = list(SimObject.allClasses.keys())
         objects.sort()
+        terminal_formatter = TerminalFormatter()
         for name in objects:
             obj = SimObject.allClasses[name]
-            print("    %s" % obj)
-            params = obj._params.keys()
+            print(terminal_formatter.format_output(str(obj), indent=4))
+            params = list(obj._params.keys())
             params.sort()
             for pname in params:
                 param = obj._params[pname]
                 default = getattr(param, 'default', '')
-                print("        %s" % pname)
+                print(terminal_formatter.format_output(pname, indent=8))
                 if default:
-                    print("            default: %s" % default)
-                print("            desc: %s" % param.desc)
+                    print(terminal_formatter.format_output(
+                        str(default), label="default: ", indent=21))
+                print(terminal_formatter.format_output(
+                    param.desc, label="desc: ", indent=21))
                 print()
             print()
 
@@ -377,7 +399,7 @@ def main(*args):
         debug.schedBreak(int(when))
 
     if options.debug_flags:
-        check_tracing()
+        _check_tracing()
 
         on_flags = []
         off_flags = []
@@ -397,28 +419,28 @@ def main(*args):
                 debug.flags[flag].enable()
 
     if options.debug_start:
-        check_tracing()
+        _check_tracing()
         e = event.create(trace.enable, event.Event.Debug_Enable_Pri)
         event.mainq.schedule(e, options.debug_start)
     else:
         trace.enable()
 
     if options.debug_end:
-        check_tracing()
+        _check_tracing()
         e = event.create(trace.disable, event.Event.Debug_Enable_Pri)
         event.mainq.schedule(e, options.debug_end)
 
     trace.output(options.debug_file)
 
     for ignore in options.debug_ignore:
-        check_tracing()
+        _check_tracing()
         trace.ignore(ignore)
 
     sys.argv = arguments
     sys.path = [ os.path.dirname(sys.argv[0]) ] + sys.path
 
     filename = sys.argv[0]
-    filedata = file(filename, 'r').read()
+    filedata = open(filename, 'r').read()
     filecode = compile(filedata, filename, 'exec')
     scope = { '__file__' : filename,
               '__name__' : '__m5_main__' }
@@ -443,7 +465,7 @@ def main(*args):
                 t = t.tb_next
                 pdb.interaction(t.tb_frame,t)
     else:
-        exec filecode in scope
+        exec(filecode, scope)
 
     # once the script is done
     if options.interactive:

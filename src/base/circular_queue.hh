@@ -40,6 +40,11 @@
 #ifndef __BASE_CIRCULAR_QUEUE_HH__
 #define __BASE_CIRCULAR_QUEUE_HH__
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <type_traits>
 #include <vector>
 
 /** Circular queue.
@@ -106,8 +111,17 @@ class CircularQueue : private std::vector<T>
     static uint32_t
     moduloSub(uint32_t op1, uint32_t op2, uint32_t size)
     {
-        int ret = (uint32_t)(op1 - op2) % size;
+        int32_t ret = sub(op1, op2, size);
         return ret >= 0 ? ret : ret + size;
+    }
+
+    static int32_t
+    sub(uint32_t op1, uint32_t op2, uint32_t size)
+    {
+        if (op1 > op2)
+            return (op1 - op2) % size;
+        else
+            return -((op2 - op1) % size);
     }
 
     void increase(uint32_t& v, size_t delta = 1)
@@ -314,12 +328,12 @@ class CircularQueue : private std::vector<T>
             assert(_cq);
 
             /* C does not do euclidean division, so we have to adjust */
-            if (t >= 0)
+            if (t >= 0) {
                 _round += (-t + _idx) / _cq->capacity();
-            else
-                _round += (-t + _idx - _cq->capacity() + 1) / _cq->capacity();
-
-            _idx = _cq->moduloSub(_idx, t);
+                _idx = _cq->moduloSub(_idx, t);
+            } else {
+                *this += -t;
+            }
             return *this;
         }
 
@@ -355,10 +369,10 @@ class CircularQueue : private std::vector<T>
         difference_type operator-(const iterator& that)
         {
             /* If a is already at the end, we can safely return 0. */
-            auto ret = _cq->moduloSub(this->_idx, that._idx);
+            auto ret = _cq->sub(this->_idx, that._idx, _cq->capacity());
 
-            if (ret == 0 && this->_round != that._round) {
-                ret += this->_round * _cq->capacity();
+            if (this->_round != that._round) {
+                ret += ((this->_round - that._round) * _cq->capacity());
             }
             return ret;
         }

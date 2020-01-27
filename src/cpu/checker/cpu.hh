@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016 ARM Limited
+ * Copyright (c) 2011, 2016-2018 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved
  *
@@ -105,7 +105,8 @@ class CheckerCPU : public BaseCPU, public ExecContext
 
     void setDcachePort(MasterPort *dcache_port);
 
-    MasterPort &getDataPort() override
+    Port &
+    getDataPort() override
     {
         // the checker does not have ports on its own so return the
         // data port of the actual CPU core
@@ -113,7 +114,8 @@ class CheckerCPU : public BaseCPU, public ExecContext
         return *dcachePort;
     }
 
-    MasterPort &getInstPort() override
+    Port &
+    getInstPort() override
     {
         // the checker does not have ports on its own so return the
         // data port of the actual CPU core
@@ -199,7 +201,7 @@ class CheckerCPU : public BaseCPU, public ExecContext
     {
         const RegId& reg = si->srcRegIdx(idx);
         assert(reg.isFloatReg());
-        return thread->readFloatRegBits(reg.index());
+        return thread->readFloatReg(reg.index());
     }
 
     /**
@@ -304,7 +306,23 @@ class CheckerCPU : public BaseCPU, public ExecContext
         return thread->readVecElem(reg);
     }
 
-    CCReg
+    const VecPredRegContainer&
+    readVecPredRegOperand(const StaticInst *si, int idx) const override
+    {
+        const RegId& reg = si->srcRegIdx(idx);
+        assert(reg.isVecPredReg());
+        return thread->readVecPredReg(reg);
+    }
+
+    VecPredRegContainer&
+    getWritableVecPredRegOperand(const StaticInst *si, int idx) override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecPredReg());
+        return thread->getWritableVecPredReg(reg);
+    }
+
+    RegVal
     readCCRegOperand(const StaticInst *si, int idx) override
     {
         const RegId& reg = si->srcRegIdx(idx);
@@ -336,6 +354,14 @@ class CheckerCPU : public BaseCPU, public ExecContext
                                InstResult::ResultType::VecElem));
     }
 
+    template<typename T>
+    void
+    setVecPredResult(T&& t)
+    {
+        result.push(InstResult(std::forward<T>(t),
+                               InstResult::ResultType::VecPredReg));
+    }
+
     void
     setIntRegOperand(const StaticInst *si, int idx, RegVal val) override
     {
@@ -350,12 +376,12 @@ class CheckerCPU : public BaseCPU, public ExecContext
     {
         const RegId& reg = si->destRegIdx(idx);
         assert(reg.isFloatReg());
-        thread->setFloatRegBits(reg.index(), val);
+        thread->setFloatReg(reg.index(), val);
         setScalarResult(val);
     }
 
     void
-    setCCRegOperand(const StaticInst *si, int idx, CCReg val) override
+    setCCRegOperand(const StaticInst *si, int idx, RegVal val) override
     {
         const RegId& reg = si->destRegIdx(idx);
         assert(reg.isCCReg());
@@ -383,12 +409,33 @@ class CheckerCPU : public BaseCPU, public ExecContext
         setVecElemResult(val);
     }
 
+    void setVecPredRegOperand(const StaticInst *si, int idx,
+                              const VecPredRegContainer& val) override
+    {
+        const RegId& reg = si->destRegIdx(idx);
+        assert(reg.isVecPredReg());
+        thread->setVecPredReg(reg, val);
+        setVecPredResult(val);
+    }
+
     bool readPredicate() const override { return thread->readPredicate(); }
 
     void
     setPredicate(bool val) override
     {
         thread->setPredicate(val);
+    }
+
+    bool
+    readMemAccPredicate() const override
+    {
+        return thread->readMemAccPredicate();
+    }
+
+    void
+    setMemAccPredicate(bool val) override
+    {
+        thread->setMemAccPredicate(val);
     }
 
     TheISA::PCState pcState() const override { return thread->pcState(); }
@@ -450,21 +497,6 @@ class CheckerCPU : public BaseCPU, public ExecContext
         return this->setMiscReg(reg.index(), val);
     }
 
-#if THE_ISA == MIPS_ISA
-    RegVal
-    readRegOtherThread(const RegId &misc_reg, ThreadID tid) override
-    {
-        panic("MIPS MT not defined for CheckerCPU.\n");
-        return 0;
-    }
-
-    void
-    setRegOtherThread(const RegId& misc_reg, RegVal val, ThreadID tid) override
-    {
-        panic("MIPS MT not defined for CheckerCPU.\n");
-    }
-#endif
-
     /////////////////////////////////////////
 
     void
@@ -501,10 +533,42 @@ class CheckerCPU : public BaseCPU, public ExecContext
         this->dtb->demapPage(vaddr, asn);
     }
 
+    /**
+     * Helper function used to generate the request for a single fragment of a
+     * memory access.
+     *
+     * Takes care of setting up the appropriate byte-enable mask for the
+     * fragment, given the mask for the entire memory access.
+     *
+     * @param frag_addr Start address of the fragment.
+     * @param size Total size of the memory access in bytes.
+     * @param flags Request flags.
+     * @param byte_enable Byte-enable mask for the entire memory access.
+     * @param[out] frag_size Fragment size.
+     * @param[in,out] size_left Size left to be processed in the memory access.
+     * @return Pointer to the allocated Request, nullptr if the byte-enable
+     * mask is all-false for the fragment.
+     */
+    RequestPtr genMemFragmentRequest(Addr frag_addr, int size,
+                                     Request::Flags flags,
+                                     const std::vector<bool>& byte_enable,
+                                     int& frag_size, int& size_left) const;
+
     Fault readMem(Addr addr, uint8_t *data, unsigned size,
-                  Request::Flags flags) override;
+                  Request::Flags flags,
+                  const std::vector<bool>& byte_enable = std::vector<bool>())
+        override;
+
     Fault writeMem(uint8_t *data, unsigned size, Addr addr,
-                   Request::Flags flags, uint64_t *res) override;
+                   Request::Flags flags, uint64_t *res,
+                   const std::vector<bool>& byte_enable = std::vector<bool>())
+        override;
+
+    Fault amoMem(Addr addr, uint8_t* data, unsigned size,
+                 Request::Flags flags, AtomicOpFunctorPtr amo_op) override
+    {
+        panic("AMO is not supported yet in CPU checker\n");
+    }
 
     unsigned int
     readStCondFailures() const override {
@@ -514,13 +578,10 @@ class CheckerCPU : public BaseCPU, public ExecContext
     void setStCondFailures(unsigned int sc_failures) override {}
     /////////////////////////////////////////////////////
 
-    Fault hwrei() override { return thread->hwrei(); }
-    bool simPalCheck(int palFunc) override
-    { return thread->simPalCheck(palFunc); }
     void wakeup(ThreadID tid) override { }
     // Assume that the normal CPU's call to syscall was successful.
     // The checker's state would have already been updated by the syscall.
-    void syscall(int64_t callnum, Fault *fault) override { }
+    void syscall(Fault *fault) override { }
 
     void
     handleError()

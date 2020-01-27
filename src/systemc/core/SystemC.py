@@ -25,32 +25,15 @@
 #
 # Authors: Gabe Black
 
-from m5.SimObject import SimObject
+from m5.SimObject import SimObject, cxxMethod
 
 # This class represents the systemc kernel. There should be exactly one in the
 # simulation. It receives gem5 SimObject lifecycle callbacks (init, regStats,
 # etc.) and manages the lifecycle of the systemc simulation accordingly.
-# It also acts as a collecting point for systemc related control functionality.
 class SystemC_Kernel(SimObject):
     type = 'SystemC_Kernel'
     cxx_class = 'sc_gem5::Kernel'
     cxx_header = 'systemc/core/kernel.hh'
-
-    class ScMainResult(object):
-        def __init__(self, code, message):
-            self.code = code
-            self.message = message
-
-    def sc_main(self, *args):
-        '''Call the systemc sc_main function with the given string args'''
-        from _m5.systemc import sc_main
-        sc_main(*args)
-
-    def sc_main_result(self):
-        '''Retrieve and return the results of running sc_main'''
-        from _m5.systemc import sc_main_result_code, sc_main_result_str
-        return SystemC_Kernel.ScMainResult(
-                sc_main_result_code(), sc_main_result_str());
 
 # This class represents systemc sc_object instances in python config files. It
 # inherits from SimObject in python, but the c++ version, sc_core::sc_object,
@@ -78,6 +61,10 @@ class SystemC_ScModule(SystemC_ScObject):
     abstract = True
     cxx_class = 'sc_core::sc_module'
     cxx_header = 'systemc/ext/core/sc_module.hh'
+
+    @cxxMethod(return_value_policy="reference", cxx_name="gem5_getPort")
+    def getPort(self, if_name, iex):
+        return None
 
 try:
     import _m5

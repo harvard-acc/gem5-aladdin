@@ -27,8 +27,9 @@
 # Authors: Ali Saidi
 
 from __future__ import print_function
+from __future__ import absolute_import
 
-from SysPaths import script, disk, binary
+from .SysPaths import script, disk, binary
 from os import environ as env
 from m5.defines import buildEnv
 
@@ -141,6 +142,6 @@ Benchmarks = {
                             None, 'android-ics')]
 }
 
-benchs = Benchmarks.keys()
+benchs = list(Benchmarks.keys())
 benchs.sort()
 DefinedBenchmarks = ", ".join(benchs)

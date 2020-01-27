@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2012,2017 ARM Limited
+ * Copyright (c) 2010-2012,2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -57,9 +57,13 @@
 using namespace std;
 
 AbstractMemory::AbstractMemory(const Params *p) :
-    MemObject(p), range(params()->range), pmemAddr(NULL),
+    ClockedObject(p), range(params()->range), pmemAddr(NULL),
+    backdoor(params()->range, nullptr,
+             (MemBackdoor::Flags)(MemBackdoor::Readable |
+                                  MemBackdoor::Writeable)),
     confTableReported(p->conf_table_reported), inAddrMap(p->in_addr_map),
-    kvmMap(p->kvm_map), _system(NULL)
+    kvmMap(p->kvm_map), _system(NULL),
+    stats(*this)
 {
 }
 
@@ -75,113 +79,136 @@ AbstractMemory::init()
 void
 AbstractMemory::setBackingStore(uint8_t* pmem_addr)
 {
+    // If there was an existing backdoor, let everybody know it's going away.
+    if (backdoor.ptr())
+        backdoor.invalidate();
+
+    // The back door can't handle interleaved memory.
+    backdoor.ptr(range.interleaved() ? nullptr : pmem_addr);
+
     pmemAddr = pmem_addr;
 }
 
-void
-AbstractMemory::regStats()
+AbstractMemory::MemStats::MemStats(AbstractMemory &_mem)
+    : Stats::Group(&_mem), mem(_mem),
+    bytesRead(this, "bytes_read",
+              "Number of bytes read from this memory"),
+    bytesInstRead(this, "bytes_inst_read",
+                  "Number of instructions bytes read from this memory"),
+    bytesWritten(this, "bytes_written",
+                 "Number of bytes written to this memory"),
+    numReads(this, "num_reads",
+             "Number of read requests responded to by this memory"),
+    numWrites(this, "num_writes",
+              "Number of write requests responded to by this memory"),
+    numOther(this, "num_other",
+             "Number of other requests responded to by this memory"),
+    bwRead(this, "bw_read",
+           "Total read bandwidth from this memory (bytes/s)"),
+    bwInstRead(this, "bw_inst_read",
+               "Instruction read bandwidth from this memory (bytes/s)"),
+    bwWrite(this, "bw_write",
+            "Write bandwidth from this memory (bytes/s)"),
+    bwTotal(this, "bw_total",
+            "Total bandwidth to/from this memory (bytes/s)")
 {
-    MemObject::regStats();
+}
 
+void
+AbstractMemory::MemStats::regStats()
+{
     using namespace Stats;
 
-    assert(system());
+    Stats::Group::regStats();
+
+    System *sys = mem.system();
+    assert(sys);
+    const auto max_masters = sys->maxMasters();
 
     bytesRead
-        .init(system()->maxMasters())
-        .name(name() + ".bytes_read")
-        .desc("Number of bytes read from this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bytesRead.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bytesRead.subname(i, sys->getMasterName(i));
     }
+
     bytesInstRead
-        .init(system()->maxMasters())
-        .name(name() + ".bytes_inst_read")
-        .desc("Number of instructions bytes read from this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bytesInstRead.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bytesInstRead.subname(i, sys->getMasterName(i));
     }
+
     bytesWritten
-        .init(system()->maxMasters())
-        .name(name() + ".bytes_written")
-        .desc("Number of bytes written to this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bytesWritten.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bytesWritten.subname(i, sys->getMasterName(i));
     }
+
     numReads
-        .init(system()->maxMasters())
-        .name(name() + ".num_reads")
-        .desc("Number of read requests responded to by this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        numReads.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        numReads.subname(i, sys->getMasterName(i));
     }
+
     numWrites
-        .init(system()->maxMasters())
-        .name(name() + ".num_writes")
-        .desc("Number of write requests responded to by this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        numWrites.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        numWrites.subname(i, sys->getMasterName(i));
     }
+
     numOther
-        .init(system()->maxMasters())
-        .name(name() + ".num_other")
-        .desc("Number of other requests responded to by this memory")
+        .init(max_masters)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        numOther.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        numOther.subname(i, sys->getMasterName(i));
     }
+
     bwRead
-        .name(name() + ".bw_read")
-        .desc("Total read bandwidth from this memory (bytes/s)")
         .precision(0)
         .prereq(bytesRead)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bwRead.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bwRead.subname(i, sys->getMasterName(i));
     }
 
     bwInstRead
-        .name(name() + ".bw_inst_read")
-        .desc("Instruction read bandwidth from this memory (bytes/s)")
         .precision(0)
         .prereq(bytesInstRead)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bwInstRead.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bwInstRead.subname(i, sys->getMasterName(i));
     }
+
     bwWrite
-        .name(name() + ".bw_write")
-        .desc("Write bandwidth from this memory (bytes/s)")
         .precision(0)
         .prereq(bytesWritten)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bwWrite.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bwWrite.subname(i, sys->getMasterName(i));
     }
+
     bwTotal
-        .name(name() + ".bw_total")
-        .desc("Total bandwidth to/from this memory (bytes/s)")
         .precision(0)
         .prereq(bwTotal)
         .flags(total | nozero | nonan)
         ;
-    for (int i = 0; i < system()->maxMasters(); i++) {
-        bwTotal.subname(i, system()->getMasterName(i));
+    for (int i = 0; i < max_masters; i++) {
+        bwTotal.subname(i, sys->getMasterName(i));
     }
+
     bwRead = bytesRead / simSeconds;
     bwInstRead = bytesInstRead / simSeconds;
     bwWrite = bytesWritten / simSeconds;
@@ -274,7 +301,10 @@ AbstractMemory::checkLockedAddrList(PacketPtr pkt)
                 DPRINTF(LLSC, "Erasing lock record: context %d addr %#x\n",
                         i->contextId, paddr);
                 ContextID owner_cid = i->contextId;
-                ContextID requester_cid = pkt->req->contextId();
+                assert(owner_cid != InvalidContextID);
+                ContextID requester_cid = req->hasContextId() ?
+                                           req->contextId() :
+                                           InvalidContextID;
                 if (owner_cid != requester_cid) {
                     ThreadContext* ctx = system()->getThreadContext(owner_cid);
                     TheISA::globalClearExclusive(ctx);
@@ -329,16 +359,15 @@ AbstractMemory::access(PacketPtr pkt)
       return;
     }
 
-    assert(AddrRange(pkt->getAddr(),
-                     pkt->getAddr() + (pkt->getSize() - 1)).isSubset(range));
+    assert(pkt->getAddrRange().isSubset(range));
 
-    uint8_t *hostAddr = pmemAddr + pkt->getAddr() - range.start();
+    uint8_t *host_addr = toHostAddr(pkt->getAddr());
 
     if (pkt->cmd == MemCmd::SwapReq) {
         if (pkt->isAtomicOp()) {
             if (pmemAddr) {
-                pkt->setData(hostAddr);
-                (*(pkt->getAtomicOp()))(hostAddr);
+                pkt->setData(host_addr);
+                (*(pkt->getAtomicOp()))(host_addr);
             }
         } else {
             std::vector<uint8_t> overwrite_val(pkt->getSize());
@@ -352,27 +381,27 @@ AbstractMemory::access(PacketPtr pkt)
             // keep a copy of our possible write value, and copy what is at the
             // memory address into the packet
             pkt->writeData(&overwrite_val[0]);
-            pkt->setData(hostAddr);
+            pkt->setData(host_addr);
 
             if (pkt->req->isCondSwap()) {
                 if (pkt->getSize() == sizeof(uint64_t)) {
                     condition_val64 = pkt->req->getExtraData();
-                    overwrite_mem = !std::memcmp(&condition_val64, hostAddr,
+                    overwrite_mem = !std::memcmp(&condition_val64, host_addr,
                                                  sizeof(uint64_t));
                 } else if (pkt->getSize() == sizeof(uint32_t)) {
                     condition_val32 = (uint32_t)pkt->req->getExtraData();
-                    overwrite_mem = !std::memcmp(&condition_val32, hostAddr,
+                    overwrite_mem = !std::memcmp(&condition_val32, host_addr,
                                                  sizeof(uint32_t));
                 } else
                     panic("Invalid size for conditional read/write\n");
             }
 
             if (overwrite_mem)
-                std::memcpy(hostAddr, &overwrite_val[0], pkt->getSize());
+                std::memcpy(host_addr, &overwrite_val[0], pkt->getSize());
 
             assert(!pkt->req->isInstFetch());
             TRACE_PACKET("Read/Write");
-            numOther[pkt->req->masterId()]++;
+            stats.numOther[pkt->req->masterId()]++;
         }
     } else if (pkt->isRead()) {
         assert(!pkt->isWrite());
@@ -383,13 +412,13 @@ AbstractMemory::access(PacketPtr pkt)
             trackLoadLocked(pkt);
         }
         if (pmemAddr) {
-            pkt->setData(hostAddr);
+            pkt->setData(host_addr);
         }
         TRACE_PACKET(pkt->req->isInstFetch() ? "IFetch" : "Read");
-        numReads[pkt->req->masterId()]++;
-        bytesRead[pkt->req->masterId()] += pkt->getSize();
+        stats.numReads[pkt->req->masterId()]++;
+        stats.bytesRead[pkt->req->masterId()] += pkt->getSize();
         if (pkt->req->isInstFetch())
-            bytesInstRead[pkt->req->masterId()] += pkt->getSize();
+            stats.bytesInstRead[pkt->req->masterId()] += pkt->getSize();
     } else if (pkt->isInvalidate() || pkt->isClean()) {
         assert(!pkt->isWrite());
         // in a fastmem system invalidating and/or cleaning packets
@@ -399,14 +428,14 @@ AbstractMemory::access(PacketPtr pkt)
     } else if (pkt->isWrite()) {
         if (writeOK(pkt)) {
             if (pmemAddr) {
-                pkt->writeData(hostAddr);
-                DPRINTF(MemoryAccess, "%s wrote %i bytes to address %x\n",
-                        __func__, pkt->getSize(), pkt->getAddr());
+                pkt->writeData(host_addr);
+                DPRINTF(MemoryAccess, "%s write due to %s\n",
+                        __func__, pkt->print());
             }
             assert(!pkt->req->isInstFetch());
             TRACE_PACKET("Write");
-            numWrites[pkt->req->masterId()]++;
-            bytesWritten[pkt->req->masterId()] += pkt->getSize();
+            stats.numWrites[pkt->req->masterId()]++;
+            stats.bytesWritten[pkt->req->masterId()] += pkt->getSize();
         }
     } else {
         panic("Unexpected packet %s", pkt->print());
@@ -420,20 +449,19 @@ AbstractMemory::access(PacketPtr pkt)
 void
 AbstractMemory::functionalAccess(PacketPtr pkt)
 {
-    assert(AddrRange(pkt->getAddr(),
-                     pkt->getAddr() + pkt->getSize() - 1).isSubset(range));
+    assert(pkt->getAddrRange().isSubset(range));
 
-    uint8_t *hostAddr = pmemAddr + pkt->getAddr() - range.start();
+    uint8_t *host_addr = toHostAddr(pkt->getAddr());
 
     if (pkt->isRead()) {
         if (pmemAddr) {
-            pkt->setData(hostAddr);
+            pkt->setData(host_addr);
         }
         TRACE_PACKET("Read");
         pkt->makeResponse();
     } else if (pkt->isWrite()) {
         if (pmemAddr) {
-            pkt->writeData(hostAddr);
+            pkt->writeData(host_addr);
         }
         TRACE_PACKET("Write");
         pkt->makeResponse();
@@ -445,7 +473,7 @@ AbstractMemory::functionalAccess(PacketPtr pkt)
         // through printObj().
         prs->printLabels();
         // Right now we just print the single byte at the specified address.
-        ccprintf(prs->os, "%s%#x\n", prs->curPrefix(), *hostAddr);
+        ccprintf(prs->os, "%s%#x\n", prs->curPrefix(), *host_addr);
     } else {
         panic("AbstractMemory: unimplemented functional command %s",
               pkt->cmdString());

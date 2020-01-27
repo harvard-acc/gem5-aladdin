@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 ARM Limited
+ * Copyright (c) 2016-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -60,6 +60,7 @@ enum RegClass {
     VecRegClass,
     /** Vector Register Native Elem lane. */
     VecElemClass,
+    VecPredRegClass,
     CCRegClass,         ///< Condition-code register
     MiscRegClass        ///< Control (misc) register
 };
@@ -76,27 +77,32 @@ const int NumRegClasses = MiscRegClass + 1;
  * index 3 is represented by Regid(IntRegClass, 3).
  */
 class RegId {
-  private:
+  protected:
     static const char* regClassStrings[];
     RegClass regClass;
     RegIndex regIdx;
     ElemIndex elemIdx;
     static constexpr size_t Scale = TheISA::NumVecElemPerVecReg;
+    int numPinnedWrites;
+
     friend struct std::hash<RegId>;
+
   public:
-    RegId() : regClass(IntRegClass), regIdx(0), elemIdx(-1) {}
+    RegId() : RegId(IntRegClass, 0) {}
+
     RegId(RegClass reg_class, RegIndex reg_idx)
-        : regClass(reg_class), regIdx(reg_idx), elemIdx(-1)
-    {
-        panic_if(regClass == VecElemClass,
-                "Creating vector physical index w/o element index");
-    }
+        : RegId(reg_class, reg_idx, ILLEGAL_ELEM_INDEX) {}
 
     explicit RegId(RegClass reg_class, RegIndex reg_idx, ElemIndex elem_idx)
-        : regClass(reg_class), regIdx(reg_idx), elemIdx(elem_idx)
-    {
-        panic_if(regClass != VecElemClass,
-                "Creating non-vector physical index w/ element index");
+        : regClass(reg_class), regIdx(reg_idx), elemIdx(elem_idx),
+          numPinnedWrites(0) {
+        if (elemIdx == ILLEGAL_ELEM_INDEX) {
+            panic_if(regClass == VecElemClass,
+                    "Creating vector physical index w/o element index");
+        } else {
+            panic_if(regClass != VecElemClass,
+                    "Creating non-vector physical index w/ element index");
+        }
     }
 
     bool operator==(const RegId& that) const {
@@ -151,6 +157,9 @@ class RegId {
     /** @Return true if it is a  condition-code physical register. */
     bool isVecElem() const { return regClass == VecElemClass; }
 
+    /** @Return true if it is a predicate physical register. */
+    bool isVecPredReg() const { return regClass == VecPredRegClass; }
+
     /** @Return true if it is a  condition-code physical register. */
     bool isCCReg() const { return regClass == CCRegClass; }
 
@@ -179,6 +188,7 @@ class RegId {
           case IntRegClass:
           case FloatRegClass:
           case VecRegClass:
+          case VecPredRegClass:
           case CCRegClass:
           case MiscRegClass:
             return regIdx;
@@ -197,11 +207,149 @@ class RegId {
     /** Return a const char* with the register class name. */
     const char* className() const { return regClassStrings[regClass]; }
 
+    int getNumPinnedWrites() const { return numPinnedWrites; }
+    void setNumPinnedWrites(int num_writes) { numPinnedWrites = num_writes; }
+
     friend std::ostream&
     operator<<(std::ostream& os, const RegId& rid) {
         return os << rid.className() << "{" << rid.index() << "}";
     }
 };
+
+/** Physical register index type.
+ * Although the Impl might be a better for this, but there are a few classes
+ * that need this typedef yet are not templated on the Impl.
+ */
+using PhysRegIndex = short int;
+
+/** Physical register ID.
+ * Like a register ID but physical. The inheritance is private because the
+ * only relationship between this types is functional, and it is done to
+ * prevent code replication. */
+class PhysRegId : private RegId {
+  private:
+    PhysRegIndex flatIdx;
+    int numPinnedWritesToComplete;
+    bool pinned;
+
+  public:
+    explicit PhysRegId() : RegId(IntRegClass, -1), flatIdx(-1),
+                           numPinnedWritesToComplete(0)
+    {}
+
+    /** Scalar PhysRegId constructor. */
+    explicit PhysRegId(RegClass _regClass, PhysRegIndex _regIdx,
+              PhysRegIndex _flatIdx)
+        : RegId(_regClass, _regIdx), flatIdx(_flatIdx),
+          numPinnedWritesToComplete(0), pinned(false)
+    {}
+
+    /** Vector PhysRegId constructor (w/ elemIndex). */
+    explicit PhysRegId(RegClass _regClass, PhysRegIndex _regIdx,
+              ElemIndex elem_idx, PhysRegIndex flat_idx)
+        : RegId(_regClass, _regIdx, elem_idx), flatIdx(flat_idx),
+          numPinnedWritesToComplete(0), pinned(false)
+    {}
+
+    /** Visible RegId methods */
+    /** @{ */
+    using RegId::index;
+    using RegId::classValue;
+    using RegId::isZeroReg;
+    using RegId::className;
+    using RegId::elemIndex;
+     /** @} */
+    /**
+     * Explicit forward methods, to prevent comparisons of PhysRegId with
+     * RegIds.
+     */
+    /** @{ */
+    bool operator<(const PhysRegId& that) const {
+        return RegId::operator<(that);
+    }
+
+    bool operator==(const PhysRegId& that) const {
+        return RegId::operator==(that);
+    }
+
+    bool operator!=(const PhysRegId& that) const {
+        return RegId::operator!=(that);
+    }
+    /** @} */
+
+    /** @return true if it is an integer physical register. */
+    bool isIntPhysReg() const { return isIntReg(); }
+
+    /** @return true if it is a floating-point physical register. */
+    bool isFloatPhysReg() const { return isFloatReg(); }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isCCPhysReg() const { return isCCReg(); }
+
+    /** @Return true if it is a vector physical register. */
+    bool isVectorPhysReg() const { return isVecReg(); }
+
+    /** @Return true if it is a vector element physical register. */
+    bool isVectorPhysElem() const { return isVecElem(); }
+
+    /** @return true if it is a vector predicate physical register. */
+    bool isVecPredPhysReg() const { return isVecPredReg(); }
+
+    /** @Return true if it is a  condition-code physical register. */
+    bool isMiscPhysReg() const { return isMiscReg(); }
+
+    /**
+     * Returns true if this register is always associated to the same
+     * architectural register.
+     */
+    bool isFixedMapping() const
+    {
+        return !isRenameable();
+    }
+
+    /** Flat index accessor */
+    const PhysRegIndex& flatIndex() const { return flatIdx; }
+
+    static PhysRegId elemId(PhysRegId* vid, ElemIndex elem)
+    {
+        assert(vid->isVectorPhysReg());
+        return PhysRegId(VecElemClass, vid->index(), elem);
+    }
+
+    int getNumPinnedWrites() const { return numPinnedWrites; }
+
+    void setNumPinnedWrites(int numWrites)
+    {
+        // An instruction with a pinned destination reg can get
+        // squashed. The numPinnedWrites counter may be zero when
+        // the squash happens but we need to know if the dest reg
+        // was pinned originally in order to reset counters properly
+        // for a possible re-rename using the same physical reg (which
+        // may be required in case of a mem access order violation).
+        pinned = (numWrites != 0);
+        numPinnedWrites = numWrites;
+    }
+
+    void decrNumPinnedWrites() { --numPinnedWrites; }
+    void incrNumPinnedWrites() { ++numPinnedWrites; }
+
+    bool isPinned() const { return pinned; }
+
+    int getNumPinnedWritesToComplete() const
+    {
+        return numPinnedWritesToComplete;
+    }
+
+    void setNumPinnedWritesToComplete(int numWrites)
+    {
+        numPinnedWritesToComplete = numWrites;
+    }
+
+    void decrNumPinnedWritesToComplete() { --numPinnedWritesToComplete; }
+    void incrNumPinnedWritesToComplete() { ++numPinnedWritesToComplete; }
+};
+
+using PhysRegIdPtr = PhysRegId*;
 
 namespace std
 {

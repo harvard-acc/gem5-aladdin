@@ -16,7 +16,7 @@ class SpadXBar(NoncoherentXBar):
   forward_latency = 1
   response_latency = 1
 
-class Scratchpad(MemObject):
+class Scratchpad(ClockedObject):
   type = "Scratchpad"
   cxx_class = "systolic::Scratchpad"
   cxx_header = "systolic_array/scratchpad.h"
@@ -29,7 +29,7 @@ class Scratchpad(MemObject):
   partType = Param.String("cyclic", "Partition type of the scratchpad.")
   accelSidePort = SlavePort("Port that goes to the accelerator.")
 
-class SystolicArray(MemObject):
+class SystolicArray(ClockedObject):
   type = 'SystolicArray'
   cxx_class = "systolic::SystolicArray"
   cxx_header = "systolic_array/systolic_array.h"

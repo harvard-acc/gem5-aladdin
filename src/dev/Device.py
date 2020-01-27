@@ -1,4 +1,4 @@
-# Copyright (c) 2012-2016 ARM Limited
+# Copyright (c) 2012-2016,2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -42,9 +42,10 @@
 from m5.params import *
 from m5.proxy import *
 from m5.util.fdthelper import *
-from MemObject import MemObject
 
-class PioDevice(MemObject):
+from m5.objects.ClockedObject import ClockedObject
+
+class PioDevice(ClockedObject):
     type = 'PioDevice'
     cxx_header = "dev/io_device.hh"
     abstract = True
@@ -83,6 +84,26 @@ class DmaDevice(PioDevice):
     abstract = True
     dma = MasterPort("DMA port")
 
+    _iommu = None
+
+    sid = Param.Unsigned(0,
+        "Stream identifier used by an IOMMU to distinguish amongst "
+        "several devices attached to it")
+    ssid = Param.Unsigned(0,
+        "Substream identifier used by an IOMMU to distinguish amongst "
+        "several devices attached to it")
+
+    def addIommuProperty(self, state, node):
+        """
+        This method takes an FdtState and a FdtNode as parameters, and
+        it is appending a "iommus = <>" property in case the DmaDevice
+        is attached to an IOMMU.
+        This method is necessary for autogenerating a binding between
+        a dma device and the iommu.
+        """
+        if self._iommu is not None:
+            node.append(FdtPropertyWords("iommus",
+                [ state.phandle(self._iommu), self.sid ]))
 
 class IsaFake(BasicPioDevice):
     type = 'IsaFake'

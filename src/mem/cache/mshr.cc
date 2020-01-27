@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, 2015-2018 ARM Limited
+ * Copyright (c) 2012-2013, 2015-2019 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -108,6 +108,52 @@ MSHR::TargetList::populateFlags()
     resetFlags();
     for (auto& t: *this) {
         updateFlags(t.pkt, t.source, t.allocOnFill);
+    }
+}
+
+void
+MSHR::TargetList::updateWriteFlags(PacketPtr pkt)
+{
+    if (isWholeLineWrite()) {
+        // if we have already seen writes for the full block
+        // stop here, this might be a full line write followed
+        // by other compatible requests (e.g., reads)
+        return;
+    }
+
+    if (canMergeWrites) {
+        if (!pkt->isWrite()) {
+            // We won't allow further merging if this hasn't
+            // been a write
+            canMergeWrites = false;
+            return;
+        }
+
+        // Avoid merging requests with special flags (e.g.,
+        // strictly ordered)
+        const Request::FlagsType no_merge_flags =
+            Request::UNCACHEABLE | Request::STRICT_ORDER |
+            Request::MMAPPED_IPR | Request::PRIVILEGED |
+            Request::LLSC | Request::MEM_SWAP |
+            Request::MEM_SWAP_COND | Request::SECURE;
+        const auto &req_flags = pkt->req->getFlags();
+        bool compat_write = !req_flags.isSet(no_merge_flags);
+
+        // if this is the first write, it might be a whole
+        // line write and even if we can't merge any
+        // subsequent write requests, we still need to service
+        // it as a whole line write (e.g., SECURE whole line
+        // write)
+        bool first_write = empty();
+        if (first_write || compat_write) {
+            auto offset = pkt->getOffset(blkSize);
+            auto begin = writesBitmap.begin() + offset;
+            std::fill(begin, begin + pkt->getSize(), true);
+        }
+
+        // We won't allow further merging if this has been a
+        // special write
+        canMergeWrites &= compat_write;
     }
 }
 
@@ -273,6 +319,9 @@ MSHR::allocate(Addr blk_addr, unsigned blk_size, PacketPtr target,
     Target::Source source = (target->cmd == MemCmd::HardPFReq) ?
         Target::FromPrefetcher : Target::FromCPU;
     targets.add(target, when_ready, _order, source, true, alloc_on_fill);
+
+    // All targets must refer to the same block
+    assert(target->matchBlockAddr(targets.front().pkt, blkSize));
 }
 
 
@@ -416,6 +465,10 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
         return true;
     }
 
+    // Start by determining if we will eventually respond or not,
+    // matching the conditions checked in Cache::handleSnoop
+    const bool will_respond = isPendingModified() && pkt->needsResponse() &&
+        !pkt->isClean();
     if (isPendingModified() || pkt->isInvalidate()) {
         // We need to save and replay the packet in two cases:
         // 1. We're awaiting a writable copy (Modified or Exclusive),
@@ -424,11 +477,6 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
         // 2. It's an invalidation (e.g., UpgradeReq), and we need
         //    to forward the snoop up the hierarchy after the current
         //    transaction completes.
-
-        // Start by determining if we will eventually respond or not,
-        // matching the conditions checked in Cache::handleSnoop
-        bool will_respond = isPendingModified() && pkt->needsResponse() &&
-                      !pkt->isClean();
 
         // The packet we are snooping may be deleted by the time we
         // actually process the target, and we consequently need to
@@ -459,17 +507,20 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
             // in the case of an uncacheable request there is no need
             // to set the responderHadWritable flag, but since the
             // recipient does not care there is no harm in doing so
+        } else if (isPendingModified() && pkt->isClean()) {
+            // this cache doesn't respond to the clean request, a
+            // destination xbar will respond to this request, but to
+            // do so it needs to know if it should wait for the
+            // WriteCleanReq
+            pkt->setSatisfied();
         }
+
         targets.add(cp_pkt, curTick(), _order, Target::FromSnoop,
                     downstreamPending && targets.needsWritable, false);
 
         if (pkt->needsWritable() || pkt->isInvalidate()) {
             // This transaction will take away our pending copy
             postInvalidate = true;
-        }
-
-        if (isPendingModified() && pkt->isClean()) {
-            pkt->setSatisfied();
         }
     }
 
@@ -483,7 +534,7 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
         pkt->setHasSharers();
     }
 
-    return true;
+    return will_respond;
 }
 
 MSHR::TargetList
@@ -606,8 +657,10 @@ MSHR::promoteReadable()
 void
 MSHR::promoteWritable()
 {
+    PacketPtr def_tgt_pkt = deferredTargets.front().pkt;
     if (deferredTargets.needsWritable &&
-        !(hasPostInvalidate() || hasPostDowngrade())) {
+        !(hasPostInvalidate() || hasPostDowngrade()) &&
+        !def_tgt_pkt->req->isCacheInvalidate()) {
         // We got a writable response, but we have deferred targets
         // which are waiting to request a writable copy (not because
         // of a pending invalidate).  This can happen if the original
@@ -681,4 +734,25 @@ MSHR::print() const
     std::ostringstream str;
     print(str);
     return str.str();
+}
+
+bool
+MSHR::matchBlockAddr(const Addr addr, const bool is_secure) const
+{
+    assert(hasTargets());
+    return (blkAddr == addr) && (isSecure == is_secure);
+}
+
+bool
+MSHR::matchBlockAddr(const PacketPtr pkt) const
+{
+    assert(hasTargets());
+    return pkt->matchBlockAddr(blkAddr, isSecure, blkSize);
+}
+
+bool
+MSHR::conflictAddr(const QueueEntry* entry) const
+{
+    assert(hasTargets());
+    return entry->matchBlockAddr(blkAddr, isSecure);
 }

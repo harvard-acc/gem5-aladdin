@@ -145,15 +145,15 @@ Interrupts::getInterrupt(ThreadContext * tc)
 bool
 Interrupts::onCpuTimerInterrupt(ThreadContext * tc) const
 {
-    MiscReg compare = tc->readMiscRegNoEffect(MISCREG_COMPARE);
-    MiscReg count = tc->readMiscRegNoEffect(MISCREG_COUNT);
+    RegVal compare = tc->readMiscRegNoEffect(MISCREG_COMPARE);
+    RegVal count = tc->readMiscRegNoEffect(MISCREG_COUNT);
     if (compare == count && count != 0)
         return true;
     return false;
 }
 
 void
-Interrupts::updateIntrInfo(ThreadContext *tc) const
+Interrupts::updateIntrInfo(ThreadContext *tc)
 {
     //Nothing needs to be done.
 }

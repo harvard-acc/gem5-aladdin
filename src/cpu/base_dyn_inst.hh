@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, 2016-2018 ARM Limited
+ * Copyright (c) 2011, 2013, 2016-2019 ARM Limited
  * Copyright (c) 2013 Advanced Micro Devices, Inc.
  * All rights reserved.
  *
@@ -61,7 +61,6 @@
 #include "cpu/exetrace.hh"
 #include "cpu/inst_res.hh"
 #include "cpu/inst_seq.hh"
-#include "cpu/o3/comm.hh"
 #include "cpu/op_class.hh"
 #include "cpu/static_inst.hh"
 #include "cpu/translation.hh"
@@ -117,6 +116,9 @@ class BaseDynInst : public ExecContext, public RefCounted
         SquashedInIQ,            /// Instruction is squashed in the IQ
         SquashedInLSQ,           /// Instruction is squashed in the LSQ
         SquashedInROB,           /// Instruction is squashed in the ROB
+        PinnedRegsRenamed,       /// Pinned registers are renamed
+        PinnedRegsWritten,       /// Pinned registers are written back
+        PinnedRegsSquashDone,    /// Regs pinning status updated after squash
         RecoverInst,             /// Is a recover instruction
         BlockingInst,            /// Is a blocking instruction
         ThreadsyncWait,          /// Is a thread synchronization instruction
@@ -136,6 +138,7 @@ class BaseDynInst : public ExecContext, public RefCounted
         EffAddrValid,
         RecordResult,
         Predicate,
+        MemAccPredicate,
         PredTaken,
         IsStrictlyOrdered,
         ReqMade,
@@ -173,12 +176,14 @@ class BaseDynInst : public ExecContext, public RefCounted
     /** PC state for this instruction. */
     TheISA::PCState pc;
 
+  private:
     /* An amalgamation of a lot of boolean values into one */
     std::bitset<MaxFlags> instFlags;
 
     /** The status of this BaseDynInst.  Several bits can be set. */
     std::bitset<NumStatus> status;
 
+  protected:
      /** Whether or not the source register is ready.
      *  @todo: Not sure this should be here vs the derived class.
      */
@@ -216,7 +221,7 @@ class BaseDynInst : public ExecContext, public RefCounted
     short asid;
 
     /** The size of the request */
-    uint8_t effSize;
+    unsigned effSize;
 
     /** Pointer to the data for the memory access. */
     uint8_t *memData;
@@ -298,10 +303,15 @@ class BaseDynInst : public ExecContext, public RefCounted
         cpu->demapPage(vaddr, asn);
     }
 
-    Fault initiateMemRead(Addr addr, unsigned size, Request::Flags flags);
+    Fault initiateMemRead(Addr addr, unsigned size, Request::Flags flags,
+            const std::vector<bool>& byte_enable = std::vector<bool>());
 
     Fault writeMem(uint8_t *data, unsigned size, Addr addr,
-                   Request::Flags flags, uint64_t *res);
+                   Request::Flags flags, uint64_t *res,
+                   const std::vector<bool>& byte_enable = std::vector<bool>());
+
+    Fault initiateMemAMO(Addr addr, unsigned size, Request::Flags flags,
+                         AtomicOpFunctorPtr amo_op);
 
     /** True if the DTB address translation has started. */
     bool translationStarted() const { return instFlags[TranslationStarted]; }
@@ -380,6 +390,8 @@ class BaseDynInst : public ExecContext, public RefCounted
     {
         _destRegIdx[idx] = renamed_dest;
         _prevDestRegIdx[idx] = previous_rename;
+        if (renamed_dest->isPinned())
+            setPinnedRegsRenamed();
     }
 
     /** Renames a source logical register to the physical register which
@@ -584,6 +596,11 @@ class BaseDynInst : public ExecContext, public RefCounted
     {
         return staticInst->numVecElemDestRegs();
     }
+    int8_t
+    numVecPredDestRegs() const
+    {
+        return staticInst->numVecPredDestRegs();
+    }
 
     /** Returns the logical register index of the i'th destination register. */
     const RegId& destRegIdx(int i) const { return staticInst->destRegIdx(i); }
@@ -638,6 +655,16 @@ class BaseDynInst : public ExecContext, public RefCounted
                         InstResult::ResultType::VecElem));
         }
     }
+
+    /** Predicate result. */
+    template<typename T>
+    void setVecPredResult(T&& t)
+    {
+        if (instFlags[RecordResult]) {
+            instResult.push(InstResult(std::forward<T>(t),
+                            InstResult::ResultType::VecPredReg));
+        }
+    }
     /** @} */
 
     /** Records an integer register being set to a value. */
@@ -647,7 +674,7 @@ class BaseDynInst : public ExecContext, public RefCounted
     }
 
     /** Records a CC register being set to a value. */
-    void setCCRegOperand(const StaticInst *si, int idx, CCReg val)
+    void setCCRegOperand(const StaticInst *si, int idx, RegVal val)
     {
         setScalarResult(val);
     }
@@ -670,6 +697,13 @@ class BaseDynInst : public ExecContext, public RefCounted
     void setVecElemOperand(const StaticInst *si, int idx, const VecElem val)
     {
         setVecElemResult(val);
+    }
+
+    /** Record a vector register being set to a value */
+    void setVecPredRegOperand(const StaticInst *si, int idx,
+                              const VecPredRegContainer& val)
+    {
+        setVecPredResult(val);
     }
 
     /** Records that one of the source registers is ready. */
@@ -740,7 +774,7 @@ class BaseDynInst : public ExecContext, public RefCounted
     bool isCommitted() const { return status[Committed]; }
 
     /** Sets this instruction as squashed. */
-    void setSquashed() { status.set(Squashed); }
+    void setSquashed();
 
     /** Returns whether or not this instruction is squashed. */
     bool isSquashed() const { return status[Squashed]; }
@@ -775,7 +809,7 @@ class BaseDynInst : public ExecContext, public RefCounted
     bool isInLSQ() const { return status[LsqEntry]; }
 
     /** Sets this instruction as squashed in the LSQ. */
-    void setSquashedInLSQ() { status.set(SquashedInLSQ);}
+    void setSquashedInLSQ() { status.set(SquashedInLSQ); status.set(Squashed);}
 
     /** Returns whether or not this instruction is squashed in the LSQ. */
     bool isSquashedInLSQ() const { return status[SquashedInLSQ]; }
@@ -797,6 +831,41 @@ class BaseDynInst : public ExecContext, public RefCounted
 
     /** Returns whether or not this instruction is squashed in the ROB. */
     bool isSquashedInROB() const { return status[SquashedInROB]; }
+
+    /** Returns whether pinned registers are renamed */
+    bool isPinnedRegsRenamed() const { return status[PinnedRegsRenamed]; }
+
+    /** Sets the destination registers as renamed */
+    void
+    setPinnedRegsRenamed()
+    {
+        assert(!status[PinnedRegsSquashDone]);
+        assert(!status[PinnedRegsWritten]);
+        status.set(PinnedRegsRenamed);
+    }
+
+    /** Returns whether destination registers are written */
+    bool isPinnedRegsWritten() const { return status[PinnedRegsWritten]; }
+
+    /** Sets destination registers as written */
+    void
+    setPinnedRegsWritten()
+    {
+        assert(!status[PinnedRegsSquashDone]);
+        assert(status[PinnedRegsRenamed]);
+        status.set(PinnedRegsWritten);
+    }
+
+    /** Return whether dest registers' pinning status updated after squash */
+    bool
+    isPinnedRegsSquashDone() const { return status[PinnedRegsSquashDone]; }
+
+    /** Sets dest registers' status updated after squash */
+    void
+    setPinnedRegsSquashDone() {
+        assert(!status[PinnedRegsSquashDone]);
+        status.set(PinnedRegsSquashDone);
+    }
 
     /** Read the PC state of this instruction. */
     TheISA::PCState pcState() const { return pc; }
@@ -825,6 +894,18 @@ class BaseDynInst : public ExecContext, public RefCounted
         if (traceData) {
             traceData->setPredicate(val);
         }
+    }
+
+    bool
+    readMemAccPredicate() const
+    {
+        return instFlags[MemAccPredicate];
+    }
+
+    void
+    setMemAccPredicate(bool val)
+    {
+        instFlags[MemAccPredicate] = val;
     }
 
     /** Sets the ASID. */
@@ -881,21 +962,44 @@ class BaseDynInst : public ExecContext, public RefCounted
 template<class Impl>
 Fault
 BaseDynInst<Impl>::initiateMemRead(Addr addr, unsigned size,
-                                   Request::Flags flags)
+                                   Request::Flags flags,
+                                   const std::vector<bool>& byte_enable)
 {
+    assert(byte_enable.empty() || byte_enable.size() == size);
     return cpu->pushRequest(
             dynamic_cast<typename DynInstPtr::PtrType>(this),
-            /* ld */ true, nullptr, size, addr, flags, nullptr);
+            /* ld */ true, nullptr, size, addr, flags, nullptr, nullptr,
+            byte_enable);
 }
 
 template<class Impl>
 Fault
 BaseDynInst<Impl>::writeMem(uint8_t *data, unsigned size, Addr addr,
-                            Request::Flags flags, uint64_t *res)
+                            Request::Flags flags, uint64_t *res,
+                            const std::vector<bool>& byte_enable)
 {
+    assert(byte_enable.empty() || byte_enable.size() == size);
     return cpu->pushRequest(
             dynamic_cast<typename DynInstPtr::PtrType>(this),
-            /* st */ false, data, size, addr, flags, res);
+            /* st */ false, data, size, addr, flags, res, nullptr,
+            byte_enable);
+}
+
+template<class Impl>
+Fault
+BaseDynInst<Impl>::initiateMemAMO(Addr addr, unsigned size,
+                                  Request::Flags flags,
+                                  AtomicOpFunctorPtr amo_op)
+{
+    // atomic memory instructions do not have data to be written to memory yet
+    // since the atomic operations will be executed directly in cache/memory.
+    // Therefore, its `data` field is nullptr.
+    // Atomic memory requests need to carry their `amo_op` fields to cache/
+    // memory
+    return cpu->pushRequest(
+            dynamic_cast<typename DynInstPtr::PtrType>(this),
+            /* atomic */ false, nullptr, size, addr, flags, nullptr,
+            std::move(amo_op));
 }
 
 #endif // __CPU_BASE_DYN_INST_HH__

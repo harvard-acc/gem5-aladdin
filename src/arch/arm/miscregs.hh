@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2018 ARM Limited
+ * Copyright (c) 2010-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -182,6 +182,7 @@ namespace ArmISA
         MISCREG_HSCTLR,
         MISCREG_HACTLR,
         MISCREG_HCR,
+        MISCREG_HCR2,
         MISCREG_HDCR,
         MISCREG_HCPTR,
         MISCREG_HSTR,
@@ -891,9 +892,12 @@ namespace ArmISA
         MISCREG_ICH_LRC14,
         MISCREG_ICH_LRC15,
 
-        // These MISCREG_FREESLOT are available Misc Register
-        // slots for future registers to be implemented.
-        MISCREG_FREESLOT_1,
+        // SVE
+        MISCREG_ID_AA64ZFR0_EL1,
+        MISCREG_ZCR_EL3,
+        MISCREG_ZCR_EL2,
+        MISCREG_ZCR_EL12,
+        MISCREG_ZCR_EL1,
 
         // NUM_PHYS_MISCREGS specifies the number of actual physical
         // registers, not considering the following pseudo-registers
@@ -927,6 +931,9 @@ namespace ArmISA
         MISCREG_VSESR_EL2,
         MISCREG_VDISR_EL2,
 
+        // PSTATE
+        MISCREG_PAN,
+
         // Total number of Misc Registers: Physical + Dummy
         NUM_MISCREGS
     };
@@ -943,6 +950,9 @@ namespace ArmISA
         MISCREG_BANKED,  // True if the register is banked between the two
                          // security states, and this is the parent node of the
                          // two banked registers
+        MISCREG_BANKED64, // True if the register is banked between the two
+                          // security states, and this is the parent node of
+                          // the two banked registers. Used in AA64 only.
         MISCREG_BANKED_CHILD, // The entry is one of the child registers that
                               // forms a banked set of regs (along with the
                               // other child regs)
@@ -1118,6 +1128,7 @@ namespace ArmISA
         "hsctlr",
         "hactlr",
         "hcr",
+        "hcr2",
         "hdcr",
         "hcptr",
         "hstr",
@@ -1825,7 +1836,11 @@ namespace ArmISA
         "ich_lrc14",
         "ich_lrc15",
 
-        "freeslot2",
+        "id_aa64zfr0_el1",
+        "zcr_el3",
+        "zcr_el2",
+        "zcr_el12",
+        "zcr_el1",
 
         "num_phys_regs",
 
@@ -1847,6 +1862,9 @@ namespace ArmISA
         "disr_el1",
         "vsesr_el2",
         "vdisr_el2",
+
+        // PSTATE
+        "pan",
     };
 
     static_assert(sizeof(miscRegName) / sizeof(*miscRegName) == NUM_MISCREGS,
@@ -1927,6 +1945,9 @@ namespace ArmISA
     // processor
     int
     snsBankedIndex(MiscRegIndex reg, ThreadContext *tc, bool ns);
+
+    int
+    snsBankedIndex64(MiscRegIndex reg, ThreadContext *tc);
 
     // Takes a misc reg index and returns the root reg if its one of a set of
     // banked registers

@@ -56,116 +56,47 @@
 #include <vector>
 
 #include "base/types.hh"
+#include "cpu/pred/loop_predictor.hh"
 #include "cpu/pred/tage.hh"
 #include "params/LTAGE.hh"
 
-class LTAGE: public TAGE
+class LTAGE : public TAGE
 {
   public:
     LTAGE(const LTAGEParams *params);
 
     // Base class methods.
     void squash(ThreadID tid, void *bp_history) override;
+    void update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
+                bool squashed, const StaticInstPtr & inst,
+                Addr corrTarget = MaxAddr) override;
 
-    void regStats() override;
+    void init() override;
+    virtual void regStats() override;
 
-  private:
-    // Prediction Structures
-    // Loop Predictor Entry
-    struct LoopEntry
-    {
-        uint16_t numIter;
-        uint16_t currentIter;
-        uint16_t currentIterSpec; // only for useSpeculation
-        uint8_t confidence;
-        uint16_t tag;
-        uint8_t age;
-        bool dir; // only for useDirectionBit
-
-        LoopEntry() : numIter(0), currentIter(0), currentIterSpec(0),
-                      confidence(0), tag(0), age(0), dir(0) { }
-    };
+  protected:
+    /** The loop predictor object */
+    LoopPredictor *loopPredictor;
 
     // more provider types
     enum {
-        LOOP = LAST_TAGE_PROVIDER_TYPE + 1
+        LOOP = TAGEBase::LAST_TAGE_PROVIDER_TYPE + 1,
+        LAST_LTAGE_PROVIDER_TYPE = LOOP
     };
 
     // Primary branch history entry
     struct LTageBranchInfo : public TageBranchInfo
     {
-        uint16_t loopTag;
-        uint16_t currentIter;
-
-        bool loopPred;
-        bool loopPredValid;
-        int  loopIndex;
-        int  loopLowPcBits;  // only for useHashing
-        int loopHit;
-
-        LTageBranchInfo(int sz)
-            : TageBranchInfo(sz),
-              loopTag(0), currentIter(0),
-              loopPred(false),
-              loopPredValid(false), loopIndex(0), loopLowPcBits(0), loopHit(0)
+        LoopPredictor::BranchInfo *lpBranchInfo;
+        LTageBranchInfo(TAGEBase &tage, LoopPredictor &lp)
+          : TageBranchInfo(tage), lpBranchInfo(lp.makeBranchInfo())
         {}
+
+        virtual ~LTageBranchInfo()
+        {
+            delete lpBranchInfo;
+        }
     };
-
-    /**
-     * Computes the index used to access the
-     * loop predictor.
-     * @param pc_in The unshifted branch PC.
-     */
-    int lindex(Addr pc_in) const;
-
-    /**
-     * Computes the index used to access the
-     * ltable structures.
-     * It may take hashing into account
-     * @param index Result of lindex function
-     * @param lowPcBits PC bits masked with set size
-     * @param way Way to be used
-     */
-    int finallindex(int lindex, int lowPcBits, int way) const;
-
-    /**
-     * Get a branch prediction from the loop
-     * predictor.
-     * @param pc The unshifted branch PC.
-     * @param bi Pointer to information on the
-     * prediction.
-     * @param speculative Use speculative number of iterations
-     */
-    bool getLoop(Addr pc, LTageBranchInfo* bi, bool speculative) const;
-
-   /**
-    * Updates the loop predictor.
-    * @param pc The unshifted branch PC.
-    * @param taken The actual branch outcome.
-    * @param bi Pointer to information on the
-    * prediction recorded at prediction time.
-    */
-    void loopUpdate(Addr pc, bool Taken, LTageBranchInfo* bi);
-
-    /**
-     * Speculatively updates the loop predictor
-     * iteration count (only for useSpeculation).
-     * @param taken The predicted branch outcome.
-     * @param bi Pointer to information on the prediction
-     * recorded at prediction time.
-     */
-    void specLoopUpdate(bool taken, LTageBranchInfo* bi);
-
-    /**
-     * Update LTAGE for conditional branches.
-     * @param branch_pc The unshifted branch PC.
-     * @param taken Actual branch outcome.
-     * @param bi Pointer to information on the prediction
-     * recorded at prediction time.
-     * @nrand Random int number from 0 to 3
-     */
-    void condBranchUpdate(
-        Addr branch_pc, bool taken, TageBranchInfo* bi, int nrand) override;
 
     /**
      * Get a branch prediction from LTAGE. *NOT* an override of
@@ -179,53 +110,6 @@ class LTAGE: public TAGE
      */
     bool predict(
         ThreadID tid, Addr branch_pc, bool cond_branch, void* &b) override;
-
-    /**
-     * Restores speculatively updated path and direction histories.
-     * Also recomputes compressed (folded) histories based on the
-     * correct branch outcome.
-     * This version of squash() is called once on a branch misprediction.
-     * @param tid The Thread ID to select the histories to rollback.
-     * @param taken The correct branch outcome.
-     * @param bp_history Wrapping pointer to TageBranchInfo (to allow
-     * storing derived class prediction information in the
-     * base class).
-     * @post bp_history points to valid memory.
-     */
-    void squash(
-        ThreadID tid, bool taken, void *bp_history) override;
-
-    /**
-     * Update the stats
-     * @param taken Actual branch outcome
-     * @param bi Pointer to information on the prediction
-     * recorded at prediction time.
-     */
-    void updateStats(bool taken, TageBranchInfo* bi) override;
-
-    const unsigned logSizeLoopPred;
-    const unsigned loopTableAgeBits;
-    const unsigned loopTableConfidenceBits;
-    const unsigned loopTableTagBits;
-    const unsigned loopTableIterBits;
-    const unsigned logLoopTableAssoc;
-    const uint8_t confidenceThreshold;
-    const uint16_t loopTagMask;
-    const uint16_t loopNumIterMask;
-    const int loopSetMask;
-
-    LoopEntry *ltable;
-
-    int8_t loopUseCounter;
-    unsigned withLoopBits;
-
-    const bool useDirectionBit;
-    const bool useSpeculation;
-    const bool useHashing;
-
-    // stats
-    Stats::Scalar loopPredictorCorrect;
-    Stats::Scalar loopPredictorWrong;
 };
 
 #endif // __CPU_PRED_LTAGE

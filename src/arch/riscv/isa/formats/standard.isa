@@ -90,6 +90,88 @@ def template ImmExecute {{
     }
 }};
 
+def template CILuiExecute {{
+    Fault
+    %(class_name)s::execute(
+        ExecContext *xc, Trace::InstRecord *traceData) const
+    {
+        Fault fault = NoFault;
+
+        %(op_decl)s;
+        %(op_rd)s;
+        if (fault == NoFault) {
+            %(code)s;
+            if (fault == NoFault) {
+                %(op_wb)s;
+            }
+        }
+        return fault;
+    }
+
+    std::string
+    %(class_name)s::generateDisassembly(Addr pc,
+            const SymbolTable *symtab) const
+    {
+        std::vector<RegId> indices = {%(regs)s};
+        std::stringstream ss;
+        ss << mnemonic << ' ';
+        for (const RegId& idx: indices)
+            ss << registerName(idx) << ", ";
+        // To be compliant with GCC, the immediate is formated to a 20-bit
+        // signed integer.
+        ss << ((((uint64_t)imm) >> 12) & 0xFFFFF);
+        return ss.str();
+    }
+}};
+
+def template FenceExecute {{
+    Fault
+    %(class_name)s::execute(
+        ExecContext *xc, Trace::InstRecord *traceData) const
+    {
+        Fault fault = NoFault;
+
+        %(op_decl)s;
+        %(op_rd)s;
+        if (fault == NoFault) {
+            %(code)s;
+            if (fault == NoFault) {
+                %(op_wb)s;
+            }
+        }
+        return fault;
+    }
+
+    std::string
+    %(class_name)s::generateDisassembly(Addr pc,
+            const SymbolTable *symtab) const
+    {
+        std::stringstream ss;
+        ss << mnemonic;
+        if (!FUNCT3) {
+            ss << ' ';
+            if (PRED & 0x8)
+                ss << 'i';
+            if (PRED & 0x4)
+                ss << 'o';
+            if (PRED & 0x2)
+                ss << 'r';
+            if (PRED & 0x1)
+                ss << 'w';
+            ss << ", ";
+            if (SUCC & 0x8)
+                ss << 'i';
+            if (SUCC & 0x4)
+                ss << 'o';
+            if (SUCC & 0x2)
+                ss << 'r';
+            if (SUCC & 0x1)
+                ss << 'w';
+        }
+        return ss.str();
+    }
+}};
+
 def template BranchDeclare {{
     //
     // Static instruction class for "%(mnemonic)s".
@@ -203,9 +285,7 @@ def template JumpExecute {{
         std::vector<RegId> indices = {%(regs)s};
         std::stringstream ss;
         ss << mnemonic << ' ';
-        for (const RegId& idx: indices)
-            ss << registerName(idx) << ", ";
-        ss << imm;
+        ss << registerName(indices[0]);
         return ss.str();
     }
 }};
@@ -220,7 +300,7 @@ def template CSRExecute {{
         %(op_decl)s;
         %(op_rd)s;
 
-        MiscReg data, olddata;
+        RegVal data, olddata;
         switch (csr) {
           case CSR_FCSR:
             olddata = xc->readMiscReg(MISCREG_FFLAGS) |
@@ -298,7 +378,19 @@ def format ROp(code, *opt_flags) {{
     exec_output = BasicExecute.subst(iop)
 }};
 
-def format IOp(code, imm_type='int64_t', *opt_flags) {{
+def format IOp(code, imm_type='int64_t', imm_code='imm = sext<12>(IMM12);',
+              *opt_flags) {{
+    regs = ['_destRegIdx[0]','_srcRegIdx[0]']
+    iop = InstObjParams(name, Name, 'ImmOp<%s>' % imm_type,
+        {'imm_code': imm_code, 'code': code,
+         'regs': ','.join(regs)}, opt_flags)
+    header_output = ImmDeclare.subst(iop)
+    decoder_output = ImmConstructor.subst(iop)
+    decode_block = BasicDecode.subst(iop)
+    exec_output = ImmExecute.subst(iop)
+}};
+
+def format FenceOp(code, imm_type='int64_t', *opt_flags) {{
     regs = ['_destRegIdx[0]','_srcRegIdx[0]']
     iop = InstObjParams(name, Name, 'ImmOp<%s>' % imm_type,
         {'code': code, 'imm_code': 'imm = sext<12>(IMM12);',
@@ -306,7 +398,7 @@ def format IOp(code, imm_type='int64_t', *opt_flags) {{
     header_output = ImmDeclare.subst(iop)
     decoder_output = ImmConstructor.subst(iop)
     decode_block = BasicDecode.subst(iop)
-    exec_output = ImmExecute.subst(iop)
+    exec_output = FenceExecute.subst(iop)
 }};
 
 def format BOp(code, *opt_flags) {{
@@ -328,7 +420,7 @@ def format BOp(code, *opt_flags) {{
 }};
 
 def format Jump(code, *opt_flags) {{
-    regs = ['_destRegIdx[0]', '_srcRegIdx[0]']
+    regs = ['_srcRegIdx[0]']
     iop = InstObjParams(name, Name, 'ImmOp<int64_t>',
         {'code': code, 'imm_code': 'imm = sext<12>(IMM12);',
          'regs': ','.join(regs)}, opt_flags)
@@ -341,7 +433,7 @@ def format Jump(code, *opt_flags) {{
 def format UOp(code, *opt_flags) {{
     regs = ['_destRegIdx[0]']
     iop = InstObjParams(name, Name, 'ImmOp<int64_t>',
-        {'code': code, 'imm_code': 'imm = sext<20>(IMM20) << 12;',
+        {'code': code, 'imm_code': 'imm = IMM20;',
          'regs': ','.join(regs)}, opt_flags)
     header_output = ImmDeclare.subst(iop)
     decoder_output = ImmConstructor.subst(iop)

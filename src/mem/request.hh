@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013,2017-2018 ARM Limited
+ * Copyright (c) 2012-2013,2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -55,6 +55,7 @@
 #include <cassert>
 #include <climits>
 
+#include "base/amo.hh"
 #include "base/flags.hh"
 #include "base/logging.hh"
 #include "base/types.hh"
@@ -320,6 +321,9 @@ class Request
      */
     unsigned _size;
 
+    /** Byte-enable mask for writes. */
+    std::vector<bool> _byteEnable;
+
     /** The requestor ID which is unique in the system for all ports
      * that are capable of issuing a transaction
      */
@@ -386,7 +390,7 @@ class Request
     InstSeqNum _reqInstSeqNum;
 
     /** A pointer to an atomic operation */
-    AtomicOpFunctor *atomicOpFunctor;
+    AtomicOpFunctorPtr atomicOpFunctor;
 
   public:
 
@@ -467,14 +471,15 @@ class Request
 
     Request(uint64_t asid, Addr vaddr, unsigned size, Flags flags,
             MasterID mid, Addr pc, ContextID cid,
-            AtomicOpFunctor *atomic_op)
+            AtomicOpFunctorPtr atomic_op)
     {
-        setVirt(asid, vaddr, size, flags, mid, pc, atomic_op);
+        setVirt(asid, vaddr, size, flags, mid, pc, std::move(atomic_op));
         setContext(cid);
     }
 
     Request(const Request& other)
         : _paddr(other._paddr), _size(other._size),
+          _byteEnable(other._byteEnable),
           _masterId(other._masterId),
           _flags(other._flags),
           _memSpaceConfigFlags(other._memSpaceConfigFlags),
@@ -486,18 +491,12 @@ class Request
           translateDelta(other.translateDelta),
           accessDelta(other.accessDelta), depth(other.depth)
     {
-        if (other.atomicOpFunctor)
-            atomicOpFunctor = (other.atomicOpFunctor)->clone();
-        else
-            atomicOpFunctor = nullptr;
+
+        atomicOpFunctor.reset(other.atomicOpFunctor ?
+                                other.atomicOpFunctor->clone() : nullptr);
     }
 
-    ~Request()
-    {
-        if (hasAtomicOpFunctor()) {
-            delete atomicOpFunctor;
-        }
-    }
+    ~Request() {}
 
     /**
      * Set up Context numbers.
@@ -530,7 +529,7 @@ class Request
      */
     void
     setVirt(uint64_t asid, Addr vaddr, unsigned size, Flags flags,
-            MasterID mid, Addr pc, AtomicOpFunctor *amo_op = nullptr)
+            MasterID mid, Addr pc, AtomicOpFunctorPtr amo_op = nullptr)
     {
         _asid = asid;
         _vaddr = vaddr;
@@ -546,7 +545,7 @@ class Request
         depth = 0;
         accessDelta = 0;
         translateDelta = 0;
-        atomicOpFunctor = amo_op;
+        atomicOpFunctor = std::move(amo_op);
     }
 
     /**
@@ -567,6 +566,9 @@ class Request
      * Generate two requests as if this request had been split into two
      * pieces. The original request can't have been translated already.
      */
+    // TODO: this function is still required by TimingSimpleCPU - should be
+    // removed once TimingSimpleCPU will support arbitrarily long multi-line
+    // mem. accesses
     void splitOnVaddr(Addr split_addr, RequestPtr &req1, RequestPtr &req2)
     {
         assert(privateFlags.isSet(VALID_VADDR));
@@ -577,6 +579,14 @@ class Request
         req1->_size = split_addr - _vaddr;
         req2->_vaddr = split_addr;
         req2->_size = _size - req1->_size;
+        if (!_byteEnable.empty()) {
+            req1->_byteEnable = std::vector<bool>(
+                _byteEnable.begin(),
+                _byteEnable.begin() + req1->_size);
+            req2->_byteEnable = std::vector<bool>(
+                _byteEnable.begin() + req1->_size,
+                _byteEnable.end());
+        }
     }
 
     /**
@@ -628,6 +638,33 @@ class Request
         return _size;
     }
 
+    const std::vector<bool>&
+    getByteEnable() const
+    {
+        return _byteEnable;
+    }
+
+    void
+    setByteEnable(const std::vector<bool>& be)
+    {
+        assert(be.empty() || be.size() == _size);
+        _byteEnable = be;
+    }
+
+    /**
+     * Returns true if the memory request is masked, which means
+     * there is at least one byteEnable element which is false
+     * (byte is masked)
+     */
+    bool
+    isMasked() const
+    {
+        return std::find(
+            _byteEnable.begin(),
+            _byteEnable.end(),
+            false) != _byteEnable.end();
+    }
+
     /** Accessor for time. */
     Tick
     time() const
@@ -642,14 +679,14 @@ class Request
     bool
     hasAtomicOpFunctor()
     {
-        return atomicOpFunctor != NULL;
+        return (bool)atomicOpFunctor;
     }
 
     AtomicOpFunctor *
     getAtomicOpFunctor()
     {
-        assert(atomicOpFunctor != NULL);
-        return atomicOpFunctor;
+        assert(atomicOpFunctor);
+        return atomicOpFunctor.get();
     }
 
     /** Accessor for flags. */

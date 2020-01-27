@@ -34,15 +34,10 @@
 #include <limits>
 #include <string>
 
-#ifdef SINIC_VTOPHYS
-#include "arch/vtophys.hh"
-
-#endif
 #include "base/compiler.hh"
 #include "base/debug.hh"
 #include "base/inet.hh"
 #include "base/types.hh"
-#include "config/the_isa.hh"
 #include "debug/EthernetAll.hh"
 #include "dev/net/etherlink.hh"
 #include "mem/packet.hh"
@@ -52,7 +47,6 @@
 
 using namespace std;
 using namespace Net;
-using namespace TheISA;
 
 namespace Sinic {
 
@@ -142,16 +136,12 @@ Device::resetStats()
     _maxVnicDistance = 0;
 }
 
-EtherInt*
-Device::getEthPort(const std::string &if_name, int idx)
+Port &
+Device::getPort(const std::string &if_name, PortID idx)
 {
-    if (if_name == "interface") {
-        if (interface->getPeer())
-            panic("interface already connected to\n");
-
-        return interface;
-    }
-    return NULL;
+    if (if_name == "interface")
+        return *interface;
+    return EtherDevBase::getPort(if_name, idx);
 }
 
 
@@ -369,15 +359,6 @@ Device::write(PacketPtr pkt)
 
         if (Regs::get_RxData_Vaddr(pkt->getLE<uint64_t>())) {
             panic("vtophys not implemented in newmem");
-#ifdef SINIC_VTOPHYS
-            Addr vaddr = Regs::get_RxData_Addr(reg64);
-            Addr paddr = vtophys(req->xc, vaddr);
-            DPRINTF(EthernetPIO, "write RxData vnic %d (rxunique %d): "
-                    "vaddr=%#x, paddr=%#x\n",
-                    index, vnic.rxUnique, vaddr, paddr);
-
-            vnic.RxData = Regs::set_RxData_Addr(vnic.RxData, paddr);
-#endif
         } else {
             DPRINTF(EthernetPIO, "write RxData vnic %d (rxunique %d)\n",
                     index, vnic.rxUnique);
@@ -407,15 +388,6 @@ Device::write(PacketPtr pkt)
 
         if (Regs::get_TxData_Vaddr(pkt->getLE<uint64_t>())) {
             panic("vtophys won't work here in newmem.\n");
-#ifdef SINIC_VTOPHYS
-            Addr vaddr = Regs::get_TxData_Addr(reg64);
-            Addr paddr = vtophys(req->xc, vaddr);
-            DPRINTF(EthernetPIO, "write TxData vnic %d (txunique %d): "
-                    "vaddr=%#x, paddr=%#x\n",
-                    index, vnic.txUnique, vaddr, paddr);
-
-            vnic.TxData = Regs::set_TxData_Addr(vnic.TxData, paddr);
-#endif
         } else {
             DPRINTF(EthernetPIO, "write TxData vnic %d (txunique %d)\n",
                     index, vnic.txUnique);
@@ -1174,40 +1146,6 @@ Device::rxFilter(const EthPacketPtr &packet)
 
     panic("receive filter not implemented\n");
     bool drop = true;
-
-#if 0
-    string type;
-
-    EthHdr *eth = packet->eth();
-    if (eth->unicast()) {
-        // If we're accepting all unicast addresses
-        if (acceptUnicast)
-            drop = false;
-
-        // If we make a perfect match
-        if (acceptPerfect && params->eaddr == eth.dst())
-            drop = false;
-
-        if (acceptArp && eth->type() == ETH_TYPE_ARP)
-            drop = false;
-
-    } else if (eth->broadcast()) {
-        // if we're accepting broadcasts
-        if (acceptBroadcast)
-            drop = false;
-
-    } else if (eth->multicast()) {
-        // if we're accepting all multicasts
-        if (acceptMulticast)
-            drop = false;
-
-    }
-
-    if (drop) {
-        DPRINTF(Ethernet, "rxFilter drop\n");
-        DDUMP(EthernetData, packet->data, packet->length);
-    }
-#endif
     return drop;
 }
 

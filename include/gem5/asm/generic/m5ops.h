@@ -73,7 +73,6 @@
 #define M5OP_PANIC              0x54
 
 #define M5OP_GET_CPUID          0x56
-#define M5OP_RESERVED2          0x56 // Reserved for user
 #define M5OP_RESERVED3          0x57 // Reserved for user
 #define M5OP_RESERVED4          0x58 // Reserved for user
 #define M5OP_RESERVED5          0x59 // Reserved for user

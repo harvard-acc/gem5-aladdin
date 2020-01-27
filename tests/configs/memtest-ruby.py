@@ -66,7 +66,7 @@ nb_cores = 8
 # ruby does not support atomic, functional, or uncacheable accesses
 cpus = [ MemTest(percent_functional=50,
                  percent_uncacheable=0, suppress_func_warnings=True) \
-         for i in xrange(nb_cores) ]
+         for i in range(nb_cores) ]
 
 # overwrite options.num_cpus with the nb_cores value
 options.num_cpus = nb_cores
@@ -116,6 +116,3 @@ for (i, ruby_port) in enumerate(system.ruby._cpu_ports):
 
 root = Root(full_system = False, system = system)
 root.system.mem_mode = 'timing'
-
-# Not much point in this being higher than the L1 latency
-m5.ticks.setGlobalFrequency('1ns')

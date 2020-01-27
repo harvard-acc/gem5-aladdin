@@ -49,23 +49,23 @@
 #include "base/logging.hh"
 #include "base/statistics.hh"
 #include "gpu-compute/gpu_tlb.hh"
-#include "mem/mem_object.hh"
 #include "mem/port.hh"
 #include "mem/request.hh"
 #include "params/TLBCoalescer.hh"
+#include "sim/clocked_object.hh"
 
 class BaseTLB;
 class Packet;
 class ThreadContext;
 
 /**
- * The TLBCoalescer is a MemObject sitting on the front side (CPUSide) of
+ * The TLBCoalescer is a ClockedObject sitting on the front side (CPUSide) of
  * each TLB. It receives packets and issues coalesced requests to the
  * TLB below it. It controls how requests are coalesced (the rules)
  * and the permitted number of TLB probes per cycle (i.e., how many
  * coalesced requests it feeds the TLB per cycle).
  */
-class TLBCoalescer : public MemObject
+class TLBCoalescer : public ClockedObject
 {
    protected:
     // TLB clock: will inherit clock from shader's clock period in terms
@@ -143,7 +143,7 @@ class TLBCoalescer : public MemObject
 
     bool canCoalesce(PacketPtr pkt1, PacketPtr pkt2);
     void updatePhysAddresses(PacketPtr pkt);
-    void regStats();
+    void regStats() override;
 
     // Clock related functions. Maps to-and-from
     // Simulation ticks and object clocks.
@@ -211,8 +211,8 @@ class TLBCoalescer : public MemObject
     // Coalescer master ports on the memory side
     std::vector<MemSidePort*> memSidePort;
 
-    BaseMasterPort& getMasterPort(const std::string &if_name, PortID idx);
-    BaseSlavePort& getSlavePort(const std::string &if_name, PortID idx);
+    Port &getPort(const std::string &if_name,
+                  PortID idx=InvalidPortID) override;
 
     void processProbeTLBEvent();
     /// This event issues the TLB probes

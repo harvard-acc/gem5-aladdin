@@ -246,16 +246,16 @@ run_cmd("copy DTBs",
     ["cp"] + glob(dt_dir + "/*dtb") + [binaries_dir])
 
 # Build bootloaders arm64
-bootloader_arm64_dir = gem5_dir + "/system/arm/aarch64_bootloader"
+bootloader_arm64_dir = gem5_dir + "/system/arm/bootloader/arm64"
 run_cmd("compile arm64 bootloader",
     bootloader_arm64_dir,
     ["make"])
 run_cmd("copy arm64 bootloader",
     bootloader_arm64_dir,
-    ["cp", "boot_emm.arm64", binaries_dir])
+    ["cp", "boot.arm64", "boot_emm.arm64", "boot_v2.arm64", binaries_dir])
 
 # Build bootloaders arm
-bootloader_arm_dir = gem5_dir + "/system/arm/simple_bootloader"
+bootloader_arm_dir = gem5_dir + "/system/arm/bootloader/arm"
 run_cmd("compile arm bootloader",
     bootloader_arm_dir,
     ["make"])

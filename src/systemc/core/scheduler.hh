@@ -32,6 +32,7 @@
 
 #include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 #include <vector>
 
@@ -191,6 +192,8 @@ class Scheduler
 
     // Schedule an update for a given channel.
     void requestUpdate(Channel *c);
+    // Same as above, but may be called from a different thread.
+    void asyncRequestUpdate(Channel *c);
 
     // Run the given process immediately, preempting whatever may be running.
     void
@@ -363,7 +366,9 @@ class Scheduler
     uint64_t changeStamp() { return _changeStamp; }
     void stepChangeStamp() { _changeStamp++; }
 
-    void throwToScMain();
+    // Throw upwards, either to sc_main or to the report handler if sc_main
+    // isn't running.
+    void throwUp();
 
     Status status() { return _status; }
     void status(Status s) { _status = s; }
@@ -424,7 +429,7 @@ class Scheduler
     EventWrapper<Scheduler, &Scheduler::pause> pauseEvent;
     EventWrapper<Scheduler, &Scheduler::stop> stopEvent;
 
-    const ::sc_core::sc_report *_throwToScMain;
+    const ::sc_core::sc_report *_throwUp;
 
     bool
     starved()
@@ -479,6 +484,9 @@ class Scheduler
 
     ChannelList updateList;
 
+    ChannelList asyncUpdateList;
+    std::mutex asyncListMutex;
+
     std::map<::Event *, Tick> eventsToSchedule;
 
     std::set<TraceFile *> traceFiles;
@@ -505,7 +513,7 @@ Scheduler::TimeSlot::process()
             scheduler.completeTimeSlot(this);
         else
             scheduler.schedule(this);
-        scheduler.throwToScMain();
+        scheduler.throwUp();
     }
 
     scheduler.status(StatusOther);

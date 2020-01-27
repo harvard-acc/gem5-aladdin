@@ -171,6 +171,7 @@ class Fetch2 : public Named
     Stats::Scalar vecInstructions;
     Stats::Scalar loadInstructions;
     Stats::Scalar storeInstructions;
+    Stats::Scalar amoInstructions;
 
   protected:
     /** Get a piece of data to work on from the inputBuffer, or 0 if there

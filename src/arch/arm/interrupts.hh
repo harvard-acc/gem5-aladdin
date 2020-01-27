@@ -48,15 +48,15 @@
 #include "arch/arm/miscregs.hh"
 #include "arch/arm/registers.hh"
 #include "arch/arm/utility.hh"
+#include "arch/generic/interrupts.hh"
 #include "cpu/thread_context.hh"
 #include "debug/Interrupt.hh"
 #include "params/ArmInterrupts.hh"
-#include "sim/sim_object.hh"
 
 namespace ArmISA
 {
 
-class Interrupts : public SimObject
+class Interrupts : public BaseInterrupts
 {
   private:
     BaseCPU * cpu;
@@ -80,7 +80,7 @@ class Interrupts : public SimObject
         return dynamic_cast<const Params *>(_params);
     }
 
-    Interrupts(Params * p) : SimObject(p), cpu(NULL)
+    Interrupts(Params * p) : BaseInterrupts(p), cpu(NULL)
     {
         clearAll();
     }
@@ -142,7 +142,7 @@ class Interrupts : public SimObject
 
         CPSR cpsr = tc->readMiscReg(MISCREG_CPSR);
 
-        bool isHypMode   = cpsr.mode == MODE_HYP;
+        bool isHypMode   = currEL(tc) == EL2;
         bool isSecure    = inSecureState(tc);
         bool allowVIrq   = !cpsr.i && hcr.imo && !isSecure && !isHypMode;
         bool allowVFiq   = !cpsr.f && hcr.fmo && !isSecure && !isHypMode;
@@ -232,7 +232,7 @@ class Interrupts : public SimObject
         // Calculate a few temp vars so we can work out if there's a pending
         // virtual interrupt, and if its allowed to happen
         // ARM ARM Issue C section B1.9.9, B1.9.11, and B1.9.13
-        bool isHypMode   = cpsr.mode == MODE_HYP;
+        bool isHypMode   = currEL(tc) == EL2;
         bool isSecure    = inSecureState(tc);
         bool allowVIrq   = !cpsr.i && hcr.imo && !isSecure && !isHypMode;
         bool allowVFiq   = !cpsr.f && hcr.fmo && !isSecure && !isHypMode;

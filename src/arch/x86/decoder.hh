@@ -222,7 +222,7 @@ class Decoder
   protected:
     /// Caching for decoded instruction objects.
 
-    typedef MiscReg CacheKey;
+    typedef RegVal CacheKey;
 
     typedef DecodeCache::AddrMap<Decoder::InstBytes> DecodePages;
     DecodePages *decodePages;
@@ -310,7 +310,7 @@ class Decoder
         DPRINTF(Decoder, "Getting more bytes.\n");
         basePC = fetchPC;
         offset = (fetchPC >= pc.instAddr()) ? 0 : pc.instAddr() - fetchPC;
-        fetchChunk = data;
+        fetchChunk = letoh(data);
         outOfBytes = false;
         process();
     }

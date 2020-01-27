@@ -202,8 +202,11 @@ public:
     ~MultiLevelPageTable() {}
 
     void
-    initState(ThreadContext* tc) override
+    initState() override
     {
+        if (shared)
+            return;
+
         _basePtr = prepTopTable<EntryTypes...>(system, pageSize);
     }
 

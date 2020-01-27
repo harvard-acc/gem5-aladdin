@@ -48,6 +48,7 @@
 #ifndef __MEM_CACHE_TAGS_BASE_SET_ASSOC_HH__
 #define __MEM_CACHE_TAGS_BASE_SET_ASSOC_HH__
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -60,6 +61,7 @@
 #include "mem/cache/replacement_policies/replaceable_entry.hh"
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/tags/indexing_policies/base.hh"
+#include "mem/packet.hh"
 #include "params/BaseSetAssoc.hh"
 
 /**
@@ -129,13 +131,13 @@ class BaseSetAssoc : public BaseTags
         // Access all tags in parallel, hence one in each way.  The data side
         // either accesses all blocks in parallel, or one block sequentially on
         // a hit.  Sequential access with a miss doesn't access data.
-        tagAccesses += allocAssoc;
+        stats.tagAccesses += allocAssoc;
         if (sequentialAccess) {
             if (blk != nullptr) {
-                dataAccesses += 1;
+                stats.dataAccesses += 1;
             }
         } else {
-            dataAccesses += allocAssoc;
+            stats.dataAccesses += allocAssoc;
         }
 
         // If a cache hit
@@ -159,11 +161,13 @@ class BaseSetAssoc : public BaseTags
      *
      * @param addr Address to find a victim for.
      * @param is_secure True if the target memory space is secure.
+     * @param size Size, in bits, of new block to allocate.
      * @param evict_blks Cache blocks to be evicted.
      * @return Cache block to be replaced.
      */
     CacheBlk* findVictim(Addr addr, const bool is_secure,
-                         std::vector<CacheBlk*>& evict_blks) const override
+                         const std::size_t size,
+                         std::vector<CacheBlk*>& evict_blks) override
     {
         // Get possible entries to be victimized
         const std::vector<ReplaceableEntry*> entries =
@@ -182,21 +186,16 @@ class BaseSetAssoc : public BaseTags
     /**
      * Insert the new block into the cache and update replacement data.
      *
-     * @param addr Address of the block.
-     * @param is_secure Whether the block is in secure space or not.
-     * @param src_master_ID The source requestor ID.
-     * @param task_ID The new task ID.
+     * @param pkt Packet holding the address to update
      * @param blk The block to update.
      */
-    void insertBlock(const Addr addr, const bool is_secure,
-                     const int src_master_ID, const uint32_t task_ID,
-                     CacheBlk *blk) override
+    void insertBlock(const PacketPtr pkt, CacheBlk *blk) override
     {
         // Insert block
-        BaseTags::insertBlock(addr, is_secure, src_master_ID, task_ID, blk);
+        BaseTags::insertBlock(pkt, blk);
 
         // Increment tag counter
-        tagsInUse++;
+        stats.tagsInUse++;
 
         // Update replacement policy
         replacementPolicy->reset(blk->replacementData);

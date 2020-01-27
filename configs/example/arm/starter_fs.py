@@ -44,16 +44,19 @@ at: http://www.arm.com/ResearchEnablement/SystemModeling
 """
 
 from __future__ import print_function
+from __future__ import absolute_import
 
 import os
 import m5
 from m5.util import addToPath
 from m5.objects import *
+from m5.options import *
 import argparse
 
 m5.util.addToPath('../..')
 
 from common import SysPaths
+from common import ObjectList
 from common import MemConfig
 from common.cores.arm import HPI
 
@@ -92,12 +95,6 @@ def create_cow_image(name):
 def create(args):
     ''' Create and configure the system object. '''
 
-    if not args.dtb:
-        dtb_file = SysPaths.binary("armv8_gem5_v1_%icpu.%s.dtb" %
-                                   (args.num_cores, default_dist_version))
-    else:
-        dtb_file = args.dtb
-
     if args.script and not os.path.isfile(args.script):
         print("Error: Bootscript %s does not exist" % args.script)
         sys.exit(1)
@@ -107,10 +104,10 @@ def create(args):
     # Only simulate caches when using a timing CPU (e.g., the HPI model)
     want_caches = True if mem_mode == "timing" else False
 
-    system = devices.SimpleSystem(want_caches,
+    system = devices.simpleSystem(LinuxArmSystem,
+                                  want_caches,
                                   args.mem_size,
                                   mem_mode=mem_mode,
-                                  dtb_filename=dtb_file,
                                   kernel=SysPaths.binary(args.kernel),
                                   readfile=args.script)
 
@@ -151,7 +148,13 @@ def create(args):
         system.addCaches(want_caches, last_cache_level=2)
 
     # Setup gem5's minimal Linux boot loader.
-    system.realview.setupBootLoader(system.membus, system, SysPaths.binary)
+    system.realview.setupBootLoader(system, SysPaths.binary)
+
+    if args.dtb:
+        system.dtb_filename = args.dtb
+    else:
+        # No DTB specified: autogenerate DTB
+        system.generateDtb(m5.options.outdir, 'system.dtb')
 
     # Linux boot command flags
     kernel_cmd = [
@@ -213,7 +216,7 @@ def main():
     parser.add_argument("--num-cores", type=int, default=1,
                         help="Number of CPU cores")
     parser.add_argument("--mem-type", default="DDR3_1600_8x8",
-                        choices=MemConfig.mem_names(),
+                        choices=ObjectList.mem_list.get_names(),
                         help = "type of memory to use")
     parser.add_argument("--mem-channels", type=int, default=1,
                         help = "number of memory channels")

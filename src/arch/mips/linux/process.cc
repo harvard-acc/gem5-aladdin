@@ -34,6 +34,7 @@
 
 #include "arch/mips/isa_traits.hh"
 #include "arch/mips/linux/linux.hh"
+#include "base/loader/object_file.hh"
 #include "base/trace.hh"
 #include "cpu/thread_context.hh"
 #include "debug/SyscallVerbose.hh"
@@ -47,21 +48,51 @@
 using namespace std;
 using namespace MipsISA;
 
+namespace
+{
+
+class MipsLinuxObjectFileLoader : public Process::Loader
+{
+  public:
+    Process *
+    load(ProcessParams *params, ObjectFile *obj_file) override
+    {
+        if (obj_file->getArch() != ObjectFile::Mips)
+            return nullptr;
+
+        auto opsys = obj_file->getOpSys();
+
+        if (opsys == ObjectFile::UnknownOpSys) {
+            warn("Unknown operating system; assuming Linux.");
+            opsys = ObjectFile::Linux;
+        }
+
+        if (opsys != ObjectFile::Linux)
+            return nullptr;
+
+        return new MipsLinuxProcess(params, obj_file);
+    }
+};
+
+MipsLinuxObjectFileLoader loader;
+
+} // anonymous namespace
+
 /// Target uname() handler.
 static SyscallReturn
-unameFunc(SyscallDesc *desc, int callnum, Process *process,
-          ThreadContext *tc)
+unameFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
+    auto process = tc->getProcessPtr();
     TypedBufferArg<Linux::utsname> name(process->getSyscallArg(tc, index));
 
     strcpy(name->sysname, "Linux");
     strcpy(name->nodename,"sim.gem5.org");
-    strcpy(name->release, "3.0.0");
+    strcpy(name->release, process->release.c_str());
     strcpy(name->version, "#1 Mon Aug 18 11:32:15 EDT 2003");
     strcpy(name->machine, "mips");
 
-    name.copyOut(tc->getMemProxy());
+    name.copyOut(tc->getVirtProxy());
     return 0;
 }
 
@@ -69,10 +100,10 @@ unameFunc(SyscallDesc *desc, int callnum, Process *process,
 /// borrowed from Tru64, the subcases that get used appear to be
 /// different in practice from those used by Tru64 processes.
 static SyscallReturn
-sys_getsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
-                   ThreadContext *tc)
+sys_getsysinfoFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
+    auto process = tc->getProcessPtr();
     unsigned op = process->getSyscallArg(tc, index);
     unsigned bufPtr = process->getSyscallArg(tc, index);
     // unsigned nbytes = process->getSyscallArg(tc, index);
@@ -84,7 +115,7 @@ sys_getsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
             TypedBufferArg<uint64_t> fpcr(bufPtr);
             // I don't think this exactly matches the HW FPCR
             *fpcr = 0;
-            fpcr.copyOut(tc->getMemProxy());
+            fpcr.copyOut(tc->getVirtProxy());
             return 0;
         }
       default:
@@ -98,10 +129,10 @@ sys_getsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
 
 /// Target sys_setsysinfo() handler.
 static SyscallReturn
-sys_setsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
-                   ThreadContext *tc)
+sys_setsysinfoFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
+    auto process = tc->getProcessPtr();
     unsigned op = process->getSyscallArg(tc, index);
     Addr bufPtr = process->getSyscallArg(tc, index);
     // unsigned nbytes = process->getSyscallArg(tc, index);
@@ -113,9 +144,9 @@ sys_setsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
             // SSI_IEEE_FP_CONTROL
             TypedBufferArg<uint64_t> fpcr(bufPtr);
             // I don't think this exactly matches the HW FPCR
-            fpcr.copyIn(tc->getMemProxy());
+            fpcr.copyIn(tc->getVirtProxy());
             DPRINTFR(SyscallVerbose, "sys_setsysinfo(SSI_IEEE_FP_CONTROL): "
-                   " setting FPCR to 0x%x\n", gtoh(*(uint64_t*)fpcr));
+                   " setting FPCR to 0x%x\n", letoh(*(uint64_t*)fpcr));
             return 0;
         }
       default:
@@ -128,10 +159,10 @@ sys_setsysinfoFunc(SyscallDesc *desc, int callnum, Process *process,
 }
 
 static SyscallReturn
-setThreadAreaFunc(SyscallDesc *desc, int callnum, Process *process,
-                  ThreadContext *tc)
+setThreadAreaFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
+    auto process = tc->getProcessPtr();
     Addr addr = process->getSyscallArg(tc, index);
     tc->setMiscRegNoEffect(MISCREG_TP_VALUE, addr);
     return 0;
@@ -478,7 +509,8 @@ MipsLinuxProcess::getDesc(int callnum)
     return &syscallDescs[m5_sys_idx];
 }
 
-
-
-
-
+void
+MipsLinuxProcess::syscall(ThreadContext *tc, Fault *fault)
+{
+    doSyscall(tc->readIntReg(2), tc, fault);
+}

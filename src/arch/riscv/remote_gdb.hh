@@ -50,25 +50,21 @@ namespace RiscvISA
 class RemoteGDB : public BaseRemoteGDB
 {
   protected:
-    static const int ExplicitCSRs = 4;
+    static const int NumGDBRegs = 4162;
+    static const int NumCSRs = 4096;
 
     bool acc(Addr addr, size_t len);
+    // A breakpoint will be 2 bytes if it is compressed and 4 if not
+    bool checkBpLen(size_t len) override { return len == 2 || len == 4; }
 
     class RiscvGdbRegCache : public BaseGdbRegCache
     {
       using BaseGdbRegCache::BaseGdbRegCache;
       private:
         struct {
-            IntReg gpr[NumIntArchRegs];
-            IntReg pc;
-            FloatRegBits fpr[NumFloatRegs];
-
-            MiscReg csr_base;
-            uint32_t fflags;
-            uint32_t frm;
-            uint32_t fcsr;
-            MiscReg csr[NumMiscRegs - ExplicitCSRs];
-        } __attribute__((__packed__)) r;
+            uint64_t gpr[NumIntArchRegs];
+            uint64_t pc;
+        } r;
       public:
         char *data() const { return (char *)&r; }
         size_t size() const { return sizeof(r); }

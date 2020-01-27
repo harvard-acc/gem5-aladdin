@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014,2017-2018 ARM Limited
+ * Copyright (c) 2011-2014,2017-2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -71,6 +71,7 @@
 #include "sim/byteswap.hh"
 #include "sim/debug.hh"
 #include "sim/full_system.hh"
+#include "sim/redirect_path.hh"
 
 #include "aladdin/gem5/Gem5Datapath.h"
 #include "debug/Aladdin.hh"
@@ -92,7 +93,7 @@ vector<System *> System::systemList;
 int System::numSystemsRunning = 0;
 
 System::System(Params *p)
-    : MemObject(p), _systemPort("system_port", this),
+    : SimObject(p), _systemPort("system_port", this),
       multiThread(p->multi_thread),
       pagePtr(0),
       init_param(p->init_param),
@@ -114,9 +115,13 @@ System::System(Params *p)
       numWorkIds(p->num_work_ids),
       thermalModel(p->thermal_model),
       _params(p),
+      _m5opRange(p->m5ops_base ?
+                 RangeSize(p->m5ops_base, 0x10000) :
+                 AddrRange(1, 0)), // Create an empty range if disabled
       totalNumInsts(0),
-      instEventQueue("system instruction-based event queue")
+      redirectPaths(p->redirect_paths)
 {
+
     // add self to global system list
     systemList.push_back(this);
 
@@ -158,9 +163,11 @@ System::System(Params *p)
             if (kernel == NULL)
                 fatal("Could not load kernel file %s", params()->kernel);
 
+            kernelImage = kernel->buildImage();
+
             // setup entry points
-            kernelStart = kernel->textBase();
-            kernelEnd = kernel->bssBase() + kernel->bssSize();
+            kernelStart = kernelImage.minAddr();
+            kernelEnd = kernelImage.maxAddr();
             kernelEntry = kernel->entryPoint();
 
             // If load_addr_mask is set to 0x0, then auto-calculate
@@ -170,6 +177,10 @@ System::System(Params *p)
                 Addr shift_amt = findMsbSet(kernelEnd - kernelStart) + 1;
                 loadAddrMask = ((Addr)1 << shift_amt) - 1;
             }
+
+            kernelImage.move([this](Addr a) {
+                return (a & loadAddrMask) + loadAddrOffset;
+            });
 
             // load symbols
             if (!kernel->loadGlobalSymbols(kernelSymtab))
@@ -188,10 +199,15 @@ System::System(Params *p)
             // connected so it will happen in initState()
         }
 
-        for (const auto &obj_name : p->kernel_extras) {
-            inform("Loading additional kernel object: %s", obj_name);
-            ObjectFile *obj = createObjectFile(obj_name);
-            fatal_if(!obj, "Failed to additional kernel object '%s'.\n",
+        if (p->kernel_extras_addrs.empty())
+            p->kernel_extras_addrs.resize(p->kernel_extras.size(), MaxAddr);
+        fatal_if(p->kernel_extras.size() != p->kernel_extras_addrs.size(),
+            "Additional kernel objects, not all load addresses specified\n");
+        for (int ker_idx = 0; ker_idx < p->kernel_extras.size(); ker_idx++) {
+            const std::string &obj_name = p->kernel_extras[ker_idx];
+            const bool raw = p->kernel_extras_addrs[ker_idx] != MaxAddr;
+            ObjectFile *obj = createObjectFile(obj_name, raw);
+            fatal_if(!obj, "Failed to build additional kernel object '%s'.\n",
                      obj_name);
             kernelExtras.push_back(obj);
         }
@@ -222,8 +238,8 @@ System::init()
         panic("System port on %s is not connected.\n", name());
 }
 
-BaseMasterPort&
-System::getMasterPort(const std::string &if_name, PortID idx)
+Port &
+System::getPort(const std::string &if_name, PortID idx)
 {
     // no need to distinguish at the moment (besides checking)
     return _systemPort;
@@ -261,6 +277,8 @@ System::registerThreadContext(ThreadContext *tc, ContextID assigned)
              "Cannot have two CPUs with the same id (%d)\n", id);
 
     threadContexts[id] = tc;
+    for (auto *e: liveEvents)
+        tc->schedule(e);
 
 #if THE_ISA != NULL_ISA
     int port = getRemoteGDBPort();
@@ -368,6 +386,36 @@ Addr System::getArrayBaseAddress(int id, const char* array_name) {
     return accelerators[id]->getBaseAddress(std::string(array_name));
 }
 
+ThreadContext *
+System::findFreeContext()
+{
+    for (auto &it : threadContexts) {
+        if (ThreadContext::Halted == it->status())
+            return it;
+    }
+    return nullptr;
+}
+
+bool
+System::schedule(PCEvent *event)
+{
+    bool all = true;
+    liveEvents.push_back(event);
+    for (auto *tc: threadContexts)
+        all = tc->schedule(event) && all;
+    return all;
+}
+
+bool
+System::remove(PCEvent *event)
+{
+    bool all = true;
+    liveEvents.remove(event);
+    for (auto *tc: threadContexts)
+        all = tc->remove(event) && all;
+    return all;
+}
+
 int
 System::numRunningContexts()
 {
@@ -375,7 +423,8 @@ System::numRunningContexts()
         threadContexts.cbegin(),
         threadContexts.cend(),
         [] (ThreadContext* tc) {
-            return tc->status() != ThreadContext::Halted;
+            return ((tc->status() != ThreadContext::Halted) &&
+                    (tc->status() != ThreadContext::Halting));
         }
     );
 }
@@ -391,32 +440,37 @@ System::initState()
         /**
          * Load the kernel code into memory
          */
+        auto mapper = [this](Addr a) {
+            return (a & loadAddrMask) + loadAddrOffset;
+        };
         if (params()->kernel != "")  {
             if (params()->kernel_addr_check) {
                 // Validate kernel mapping before loading binary
-                if (!(isMemAddr((kernelStart & loadAddrMask) +
-                                loadAddrOffset) &&
-                      isMemAddr((kernelEnd & loadAddrMask) +
-                                loadAddrOffset))) {
+                if (!isMemAddr(mapper(kernelStart)) ||
+                        !isMemAddr(mapper(kernelEnd))) {
                     fatal("Kernel is mapped to invalid location (not memory). "
                           "kernelStart 0x(%x) - kernelEnd 0x(%x) %#x:%#x\n",
-                          kernelStart,
-                          kernelEnd, (kernelStart & loadAddrMask) +
-                          loadAddrOffset,
-                          (kernelEnd & loadAddrMask) + loadAddrOffset);
+                          kernelStart, kernelEnd,
+                          mapper(kernelStart), mapper(kernelEnd));
                 }
             }
             // Load program sections into memory
-            kernel->loadSections(physProxy, loadAddrMask, loadAddrOffset);
-            for (const auto &extra_kernel : kernelExtras) {
-                extra_kernel->loadSections(physProxy, loadAddrMask,
-                                           loadAddrOffset);
-            }
+            kernelImage.write(physProxy);
 
             DPRINTF(Loader, "Kernel start = %#x\n", kernelStart);
             DPRINTF(Loader, "Kernel end   = %#x\n", kernelEnd);
             DPRINTF(Loader, "Kernel entry = %#x\n", kernelEntry);
             DPRINTF(Loader, "Kernel loaded...\n");
+        }
+        std::function<Addr(Addr)> extra_mapper;
+        for (auto ker_idx = 0; ker_idx < kernelExtras.size(); ker_idx++) {
+            const Addr load_addr = params()->kernel_extras_addrs[ker_idx];
+            auto image = kernelExtras[ker_idx]->buildImage();
+            if (load_addr != MaxAddr)
+                image = image.offset(load_addr);
+            else
+                image = image.move(mapper);
+            image.write(physProxy);
         }
     }
 }
@@ -429,6 +483,10 @@ System::replaceThreadContext(ThreadContext *tc, ContextID context_id)
               context_id, threadContexts.size());
     }
 
+    for (auto *e: liveEvents) {
+        threadContexts[context_id]->remove(e);
+        tc->schedule(e);
+    }
     threadContexts[context_id] = tc;
     if (context_id < remoteGDB.size())
         remoteGDB[context_id]->replaceThreadContext(tc);
@@ -460,7 +518,7 @@ System::allocPhysPages(int npages)
 
     Addr next_return_addr = pagePtr << PageShift;
 
-    AddrRange m5opRange(0xffff0000, 0xffffffff);
+    AddrRange m5opRange(0xffff0000, 0x100000000);
     if (m5opRange.contains(next_return_addr)) {
         warn("Reached m5ops MMIO region\n");
         return_addr = 0xffffffff;
@@ -524,7 +582,7 @@ System::unserialize(CheckpointIn &cp)
 void
 System::regStats()
 {
-    MemObject::regStats();
+    SimObject::regStats();
 
     for (uint32_t j = 0; j < numWorkIds ; j++) {
         workItemStats[j] = new Stats::Histogram();

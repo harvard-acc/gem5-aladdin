@@ -114,10 +114,6 @@ BaseKvmCPU::init()
         fatal("KVM: Multithreading not supported");
 
     tc->initMemProxies(tc);
-
-    // initialize CPU, including PC
-    if (FullSystem && !switchedOut())
-        TheISA::initCPU(tc, tc->contextId());
 }
 
 void
@@ -630,9 +626,9 @@ BaseKvmCPU::tick()
 
       case RunningServiceCompletion:
       case Running: {
+          auto &queue = thread->comInstEventQueue;
           const uint64_t nextInstEvent(
-              !comInstEventQueue[0]->empty() ?
-              comInstEventQueue[0]->nextTick() : UINT64_MAX);
+                  queue.empty() ? MaxTick : queue.nextTick());
           // Enter into KVM and complete pending IO instructions if we
           // have an instruction event pending.
           const Tick ticksToExecute(
@@ -688,8 +684,7 @@ BaseKvmCPU::tick()
           // Service any pending instruction events. The vCPU should
           // have exited in time for the event using the instruction
           // counter configured by setupInstStop().
-          comInstEventQueue[0]->serviceEvents(ctrInsts);
-          system->instEventQueue.serviceEvents(system->totalNumInsts);
+          queue.serviceEvents(ctrInsts);
 
           if (tryDrain())
               _status = Idle;
@@ -1349,11 +1344,10 @@ BaseKvmCPU::ioctlRun()
 void
 BaseKvmCPU::setupInstStop()
 {
-    if (comInstEventQueue[0]->empty()) {
+    if (thread->comInstEventQueue.empty()) {
         setupInstCounter(0);
     } else {
-        const uint64_t next(comInstEventQueue[0]->nextTick());
-
+        Tick next = thread->comInstEventQueue.nextTick();
         assert(next > ctrInsts);
         setupInstCounter(next - ctrInsts);
     }

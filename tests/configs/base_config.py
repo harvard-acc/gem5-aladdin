@@ -170,7 +170,7 @@ class BaseSystem(object):
             options.num_cpus = self.num_cpus
             options.num_dirs = 2
 
-            bootmem = getattr(system, 'bootmem', None)
+            bootmem = getattr(system, '_bootmem', None)
             Ruby.create_system(options, True, system, system.iobus,
                                system._dma_ports, bootmem)
 
@@ -218,10 +218,10 @@ class BaseSESystem(BaseSystem):
     """Basic syscall-emulation builder."""
 
     def __init__(self, **kwargs):
-        BaseSystem.__init__(self, **kwargs)
+        super(BaseSESystem, self).__init__(**kwargs)
 
     def init_system(self, system):
-        BaseSystem.init_system(self, system)
+        super(BaseSESystem, self).init_system(system)
 
     def create_system(self):
         system = System(physmem = self.mem_class(),
@@ -247,7 +247,7 @@ class BaseSESystemUniprocessor(BaseSESystem):
     """
 
     def __init__(self, **kwargs):
-        BaseSESystem.__init__(self, **kwargs)
+        super(BaseSESystemUniprocessor, self).__init__(**kwargs)
 
     def create_caches_private(self, cpu):
         # The atomic SE configurations do not use caches
@@ -264,10 +264,10 @@ class BaseFSSystem(BaseSystem):
     """Basic full system builder."""
 
     def __init__(self, **kwargs):
-        BaseSystem.__init__(self, **kwargs)
+        super(BaseFSSystem, self).__init__(**kwargs)
 
     def init_system(self, system):
-        BaseSystem.init_system(self, system)
+        super(BaseFSSystem, self).init_system(system)
 
         if self.use_ruby:
             # Connect the ruby io port to the PIO bus,
@@ -278,19 +278,8 @@ class BaseFSSystem(BaseSystem):
             # the physmem name to avoid bumping all the reference stats
             system.physmem = [self.mem_class(range = r)
                               for r in system.mem_ranges]
-            system.llc = [NoncoherentCache(addr_ranges = [r],
-                                           size = '4kB',
-                                           assoc = 2,
-                                           mshrs = 128,
-                                           tag_latency = 10,
-                                           data_latency = 10,
-                                           sequential_access = True,
-                                           response_latency = 20,
-                                           tgts_per_mshr = 8)
-                          for r in system.mem_ranges]
-            for i in xrange(len(system.physmem)):
-                system.physmem[i].port = system.llc[i].mem_side
-                system.llc[i].cpu_side = system.membus.master
+            for i in range(len(system.physmem)):
+                system.physmem[i].port = system.membus.master
 
             # create the iocache, which by default runs at the system clock
             system.iocache = IOCache(addr_ranges=system.mem_ranges)
@@ -310,7 +299,7 @@ class BaseFSSystemUniprocessor(BaseFSSystem):
     """
 
     def __init__(self, **kwargs):
-        BaseFSSystem.__init__(self, **kwargs)
+        super(BaseFSSystemUniprocessor, self).__init__(**kwargs)
 
     def create_caches_private(self, cpu):
         cpu.addTwoLevelCacheHierarchy(L1_ICache(size='32kB', assoc=1),
@@ -324,7 +313,7 @@ class BaseFSSwitcheroo(BaseFSSystem):
     """Uniprocessor system prepared for CPU switching"""
 
     def __init__(self, cpu_classes, **kwargs):
-        BaseFSSystem.__init__(self, **kwargs)
+        super(BaseFSSwitcheroo, self).__init__(**kwargs)
         self.cpu_classes = tuple(cpu_classes)
 
     def create_cpus(self, cpu_clk_domain):

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 ARM Limited
+ * Copyright (c) 2017,2019 ARM Limited
  * All rights reserved.
  *
  * The license below extends only to copyright in the software and shall
@@ -41,20 +41,21 @@
 #include "mem/ruby/slicc_interface/AbstractController.hh"
 
 #include "debug/RubyQueue.hh"
-#include "mem/protocol/MemoryMsg.hh"
 #include "mem/ruby/network/Network.hh"
+#include "mem/ruby/protocol/MemoryMsg.hh"
 #include "mem/ruby/system/GPUCoalescer.hh"
 #include "mem/ruby/system/RubySystem.hh"
 #include "mem/ruby/system/Sequencer.hh"
 #include "sim/system.hh"
 
 AbstractController::AbstractController(const Params *p)
-    : MemObject(p), Consumer(this), m_version(p->version),
+    : ClockedObject(p), Consumer(this), m_version(p->version),
       m_clusterID(p->cluster_id),
       m_masterId(p->system->getMasterId(this)), m_is_blocking(false),
       m_number_of_TBEs(p->number_of_TBEs),
       m_transitions_per_cycle(p->transitions_per_cycle),
       m_buffer_size(p->buffer_size), m_recycle_latency(p->recycle_latency),
+      m_mandatory_queue_latency(p->mandatory_queue_latency),
       memoryPort(csprintf("%s.memory", name()), this, ""),
       addrRanges(p->addr_ranges.begin(), p->addr_ranges.end())
 {
@@ -90,7 +91,7 @@ AbstractController::resetStats()
 void
 AbstractController::regStats()
 {
-    MemObject::regStats();
+    ClockedObject::regStats();
 
     m_fully_busy_cycles
         .name(name() + ".fully_busy_cycles")
@@ -229,9 +230,8 @@ AbstractController::isBlocked(Addr addr)
     return (m_block_map.count(addr) > 0);
 }
 
-BaseMasterPort &
-AbstractController::getMasterPort(const std::string &if_name,
-                                  PortID idx)
+Port &
+AbstractController::getPort(const std::string &if_name, PortID idx)
 {
     return memoryPort;
 }

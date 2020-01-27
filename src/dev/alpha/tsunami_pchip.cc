@@ -39,7 +39,6 @@
 #include <vector>
 
 #include "base/trace.hh"
-#include "config/the_isa.hh"
 #include "debug/Tsunami.hh"
 #include "dev/alpha/tsunami.hh"
 #include "dev/alpha/tsunami_cchip.hh"
@@ -50,8 +49,6 @@
 #include "sim/system.hh"
 
 using namespace std;
-//Should this be AlphaISA?
-using namespace TheISA;
 
 TsunamiPChip::TsunamiPChip(const Params *p)
     : GenericPciHost(p),
@@ -264,23 +261,6 @@ TsunamiPChip::dmaAddr(const PciBusAddr &dev, Addr busAddr) const
     Addr pteAddr;
     Addr dmaAddr;
 
-#if 0
-    DPRINTF(IdeDisk, "Translation for bus address: %#x\n", busAddr);
-    for (int i = 0; i < 4; i++) {
-        DPRINTF(IdeDisk, "(%d) base:%#x mask:%#x\n",
-                i, wsba[i], wsm[i]);
-
-        windowBase = wsba[i];
-        windowMask = ~wsm[i] & (ULL(0xfff) << 20);
-
-        if ((busAddr & windowMask) == (windowBase & windowMask)) {
-            DPRINTF(IdeDisk, "Would have matched %d (wb:%#x wm:%#x --> ba&wm:%#x wb&wm:%#x)\n",
-                    i, windowBase, windowMask, (busAddr & windowMask),
-                    (windowBase & windowMask));
-        }
-    }
-#endif
-
     for (int i = 0; i < 4; i++) {
 
         windowBase = wsba[i];
@@ -300,14 +280,16 @@ TsunamiPChip::dmaAddr(const PciBusAddr &dev, Addr busAddr) const
                         to create an address for the SG page
                     */
 
-                    tbaMask = ~(((wsm[i] & (ULL(0xfff) << 20)) >> 10) | ULL(0x3ff));
+                    tbaMask = ~(((wsm[i] & (ULL(0xfff) << 20)) >> 10) |
+                                ULL(0x3ff));
                     baMask = (wsm[i] & (ULL(0xfff) << 20)) | (ULL(0x7f) << 13);
                     pteAddr = (tba[i] & tbaMask) | ((busAddr & baMask) >> 10);
 
-                    sys->physProxy.readBlob(pteAddr, (uint8_t*)&pteEntry,
+                    sys->physProxy.readBlob(pteAddr, &pteEntry,
                                             sizeof(uint64_t));
 
-                    dmaAddr = ((pteEntry & ~ULL(0x1)) << 12) | (busAddr & ULL(0x1fff));
+                    dmaAddr = ((pteEntry & ~ULL(0x1)) << 12) |
+                              (busAddr & ULL(0x1fff));
 
                 } else {
                     baMask = (wsm[i] & (ULL(0xfff) << 20)) | ULL(0xfffff);

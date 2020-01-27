@@ -40,19 +40,19 @@ class multidict(object):
         return str(dict(self.items()))
 
     def __repr__(self):
-        return `dict(self.items())`
+        return repr(dict(list(self.items())))
 
     def __contains__(self, key):
-        return self.local.has_key(key) or self.parent.has_key(key)
+        return key in self.local or key in self.parent
 
     def __delitem__(self, key):
         try:
             del self.local[key]
-        except KeyError, e:
+        except KeyError as e:
             if key in self.parent:
                 self.deleted[key] = True
             else:
-                raise KeyError, e
+                raise KeyError(e)
 
     def __setitem__(self, key, value):
         self.deleted.pop(key, False)
@@ -61,11 +61,11 @@ class multidict(object):
     def __getitem__(self, key):
         try:
             return self.local[key]
-        except KeyError, e:
+        except KeyError as e:
             if not self.deleted.get(key, False) and key in self.parent:
                 return self.parent[key]
             else:
-                raise KeyError, e
+                raise KeyError(e)
 
     def __len__(self):
         return len(self.local) + len(self.parent)
@@ -82,31 +82,22 @@ class multidict(object):
     def has_key(self, key):
         return key in self
 
-    def iteritems(self):
+    def items(self):
         for item in self.next():
             yield item
 
-    def items(self):
-        return [ item for item in self.next() ]
-
-    def iterkeys(self):
+    def keys(self):
         for key,value in self.next():
             yield key
 
-    def keys(self):
-        return [ key for key,value in self.next() ]
-
-    def itervalues(self):
+    def values(self):
         for key,value in self.next():
             yield value
-
-    def values(self):
-        return [ value for key,value in self.next() ]
 
     def get(self, key, default=None):
         try:
             return self[key]
-        except KeyError, e:
+        except KeyError as e:
             return default
 
     def setdefault(self, key, default):
@@ -152,8 +143,8 @@ if __name__ == '__main__':
 
     test2.setdefault('f', multidict)
 
-    print('test1>', test1.items())
-    print('test2>', test2.items())
+    print('test1>', list(test1.items()))
+    print('test2>', list(test2.items()))
     #print(test1['a'])
     print(test1['b'])
     print(test1['c'])
@@ -166,7 +157,7 @@ if __name__ == '__main__':
     print(test2['d'])
     print(test2['e'])
 
-    for key in test2.iterkeys():
+    for key in test2.keys():
         print(key)
 
     test2.get('g', 'foo')
@@ -175,7 +166,7 @@ if __name__ == '__main__':
     test2.setdefault('b', 'blah')
     print(test1)
     print(test2)
-    print(`test2`)
+    print(repr(test2))
 
     print(len(test2))
 

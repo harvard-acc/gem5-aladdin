@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2017 ARM Limited
+# Copyright (c) 2016-2017, 2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -38,13 +38,17 @@
 
 # System components used by the bigLITTLE.py configuration script
 
+from __future__ import print_function
+from __future__ import absolute_import
+
 import m5
 from m5.objects import *
 m5.util.addToPath('../../')
 from common.Caches import *
-from common import CpuConfig
+from common import ObjectList
 
-have_kvm = "ArmV8KvmCPU" in CpuConfig.cpu_names()
+have_kvm = "ArmV8KvmCPU" in ObjectList.cpu_list.get_names()
+have_fastmodel = "FastModelCortexA76" in ObjectList.cpu_list.get_names()
 
 class L1I(L1_ICache):
     tag_latency = 1
@@ -155,6 +159,31 @@ class CpuCluster(SubSystem):
             cpu.connectAllPorts(self.toL2Bus)
         self.toL2Bus.master = self.l2.cpu_side
 
+    def addPMUs(self, ints, events=[]):
+        """
+        Instantiates 1 ArmPMU per PE. The method is accepting a list of
+        interrupt numbers (ints) used by the PMU and a list of events to
+        register in it.
+
+        :param ints: List of interrupt numbers. The code will iterate over
+            the cpu list in order and will assign to every cpu in the cluster
+            a PMU with the matching interrupt.
+        :type ints: List[int]
+        :param events: Additional events to be measured by the PMUs
+        :type events: List[Union[ProbeEvent, SoftwareIncrement]]
+        """
+        assert len(ints) == len(self.cpus)
+        for cpu, pint in zip(self.cpus, ints):
+            int_cls = ArmPPI if pint < 32 else ArmSPI
+            for isa in cpu.isa:
+                isa.pmu = ArmPMU(interrupt=int_cls(num=pint))
+                isa.pmu.addArchEvents(cpu=cpu, itb=cpu.itb, dtb=cpu.dtb,
+                                      icache=getattr(cpu, 'icache', None),
+                                      dcache=getattr(cpu, 'dcache', None),
+                                      l2cache=getattr(self, 'l2', None))
+                for ev in events:
+                    isa.pmu.addEvent(ev)
+
     def connectMemSide(self, bus):
         bus.slave
         try:
@@ -166,7 +195,8 @@ class CpuCluster(SubSystem):
 
 class AtomicCluster(CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock, cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("AtomicSimpleCPU"), None, None, None, None ]
+        cpu_config = [ ObjectList.cpu_list.get("AtomicSimpleCPU"), None,
+                       None, None, None ]
         super(AtomicCluster, self).__init__(system, num_cpus, cpu_clock,
                                             cpu_voltage, *cpu_config)
     def addL1(self):
@@ -174,109 +204,190 @@ class AtomicCluster(CpuCluster):
 
 class KvmCluster(CpuCluster):
     def __init__(self, system, num_cpus, cpu_clock, cpu_voltage="1.0V"):
-        cpu_config = [ CpuConfig.get("ArmV8KvmCPU"), None, None, None, None ]
+        cpu_config = [ ObjectList.cpu_list.get("ArmV8KvmCPU"), None, None,
+            None, None ]
         super(KvmCluster, self).__init__(system, num_cpus, cpu_clock,
                                          cpu_voltage, *cpu_config)
     def addL1(self):
         pass
 
+class FastmodelCluster(SubSystem):
+    def __init__(self, system,  num_cpus, cpu_clock, cpu_voltage="1.0V"):
+        super(FastmodelCluster, self).__init__()
 
-class SimpleSystem(LinuxArmSystem):
-    cache_line_size = 64
+        # Setup GIC
+        gic = system.realview.gic
+        gic.sc_gic.cpu_affinities = ','.join(
+            [ '0.0.%d.0' % i for i in range(num_cpus) ])
 
-    def __init__(self, caches, mem_size, **kwargs):
-        super(SimpleSystem, self).__init__(**kwargs)
+        # Parse the base address of redistributor.
+        redist_base = gic.get_redist_bases()[0]
+        redist_frame_size = 0x40000 if gic.sc_gic.has_gicv4_1 else 0x20000
+        gic.sc_gic.reg_base_per_redistributor = ','.join([
+            '0.0.%d.0=%#x' % (i, redist_base + redist_frame_size * i)
+            for i in range(num_cpus)
+        ])
 
-        self.voltage_domain = VoltageDomain(voltage="1.0V")
-        self.clk_domain = SrcClockDomain(clock="1GHz",
-                                         voltage_domain=Parent.voltage_domain)
+        gic_a2t = AmbaToTlmBridge64(amba=gic.amba_m)
+        gic_t2g = TlmToGem5Bridge64(tlm=gic_a2t.tlm, gem5=system.iobus.slave)
+        gic_g2t = Gem5ToTlmBridge64(gem5=system.membus.master)
+        gic_g2t.addr_ranges = gic.get_addr_ranges()
+        gic_t2a = AmbaFromTlmBridge64(tlm=gic_g2t.tlm)
+        gic.amba_s = gic_t2a.amba
 
-        self.realview = VExpress_GEM5_V1()
+        system.gic_hub = SubSystem()
+        system.gic_hub.gic_a2t = gic_a2t
+        system.gic_hub.gic_t2g = gic_t2g
+        system.gic_hub.gic_g2t = gic_g2t
+        system.gic_hub.gic_t2a = gic_t2a
 
-        self.gic_cpu_addr = self.realview.gic.cpu_addr
-        self.flags_addr = self.realview.realview_io.pio_addr + 0x30
+        self.voltage_domain = VoltageDomain(voltage=cpu_voltage)
+        self.clk_domain = SrcClockDomain(clock=cpu_clock,
+                                         voltage_domain=self.voltage_domain)
 
-        self.membus = MemBus()
+        # Setup CPU
+        assert num_cpus <= 4
+        CpuClasses = [FastModelCortexA76x1, FastModelCortexA76x2,
+                      FastModelCortexA76x3, FastModelCortexA76x4]
+        CpuClass = CpuClasses[num_cpus - 1]
 
-        self.intrctrl = IntrControl()
-        self.terminal = Terminal()
-        self.vncserver = VncServer()
+        cpu = CpuClass(GICDISABLE=False)
+        for core in cpu.cores:
+            core.semihosting_enable = False
+            core.RVBARADDR = 0x10
+            core.redistributor = gic.redistributor
+        self.cpus = [ cpu ]
 
-        self.iobus = IOXBar()
-        # CPUs->PIO
-        self.iobridge = Bridge(delay='50ns')
-        # Device DMA -> MEM
-        mem_range = self.realview._mem_regions[0]
-        mem_range_size = long(mem_range[1]) - long(mem_range[0])
-        assert mem_range_size >= long(Addr(mem_size))
-        self.mem_ranges = [ AddrRange(start=mem_range[0], size=mem_size) ]
-        self._caches = caches
-        if self._caches:
-            self.iocache = IOCache(addr_ranges=[self.mem_ranges[0]])
-        else:
-            self.dmabridge = Bridge(delay='50ns',
-                                    ranges=[self.mem_ranges[0]])
+        a2t = AmbaToTlmBridge64(amba=cpu.amba)
+        t2g = TlmToGem5Bridge64(tlm=a2t.tlm, gem5=system.membus.slave)
+        system.gic_hub.a2t = a2t
+        system.gic_hub.t2g = t2g
 
-        self._pci_devices = 0
-        self._clusters = []
-        self._num_cpus = 0
+        system.addCpuCluster(self, num_cpus)
 
-    def attach_pci(self, dev):
-        dev.pci_bus, dev.pci_dev, dev.pci_func = (0, self._pci_devices + 1, 0)
-        self._pci_devices += 1
-        self.realview.attachPciDevice(dev, self.iobus)
+    def requireCaches(self):
+        return False
 
-    def connect(self):
-        self.iobridge.master = self.iobus.slave
-        self.iobridge.slave = self.membus.master
+    def memoryMode(self):
+        return 'atomic_noncaching'
 
-        if self._caches:
-            self.iocache.mem_side = self.membus.slave
-            self.iocache.cpu_side = self.iobus.master
-        else:
-            self.dmabridge.master = self.membus.slave
-            self.dmabridge.slave = self.iobus.master
+    def addL1(self):
+        pass
 
-        self.gic_cpu_addr = self.realview.gic.cpu_addr
-        self.realview.attachOnChipIO(self.membus, self.iobridge)
-        self.realview.attachIO(self.iobus)
-        self.system_port = self.membus.slave
+    def addL2(self, clk_domain):
+        pass
 
-    def numCpuClusters(self):
-        return len(self._clusters)
+    def connectMemSide(self, bus):
+        pass
 
-    def addCpuCluster(self, cpu_cluster, num_cpus):
-        assert cpu_cluster not in self._clusters
-        assert num_cpus > 0
-        self._clusters.append(cpu_cluster)
-        self._num_cpus += num_cpus
+def simpleSystem(BaseSystem, caches, mem_size, platform=None, **kwargs):
+    """
+    Create a simple system example.  The base class in configurable so
+    that it is possible (e.g) to link the platform (hardware configuration)
+    with a baremetal ArmSystem or with a LinuxArmSystem.
+    """
+    class SimpleSystem(BaseSystem):
+        cache_line_size = 64
 
-    def numCpus(self):
-        return self._num_cpus
+        def __init__(self, caches, mem_size, platform=None, **kwargs):
+            super(SimpleSystem, self).__init__(**kwargs)
 
-    def addCaches(self, need_caches, last_cache_level):
-        if not need_caches:
+            self.voltage_domain = VoltageDomain(voltage="1.0V")
+            self.clk_domain = SrcClockDomain(
+                clock="1GHz",
+                voltage_domain=Parent.voltage_domain)
+
+            if platform is None:
+                self.realview = VExpress_GEM5_V1()
+            else:
+                self.realview = platform
+
+            if hasattr(self.realview.gic, 'cpu_addr'):
+                self.gic_cpu_addr = self.realview.gic.cpu_addr
+            self.flags_addr = self.realview.realview_io.pio_addr + 0x30
+
+            self.membus = MemBus()
+
+            self.intrctrl = IntrControl()
+            self.terminal = Terminal()
+            self.vncserver = VncServer()
+
+            self.iobus = IOXBar()
+            # CPUs->PIO
+            self.iobridge = Bridge(delay='50ns')
+            # Device DMA -> MEM
+            mem_range = self.realview._mem_regions[0]
+            assert long(mem_range.size()) >= long(Addr(mem_size))
+            self.mem_ranges = [
+                AddrRange(start=mem_range.start, size=mem_size) ]
+
+            self._caches = caches
+            if self._caches:
+                self.iocache = IOCache(addr_ranges=[self.mem_ranges[0]])
+            else:
+                self.dmabridge = Bridge(delay='50ns',
+                                        ranges=[self.mem_ranges[0]])
+
+            self._clusters = []
+            self._num_cpus = 0
+
+        def attach_pci(self, dev):
+            self.realview.attachPciDevice(dev, self.iobus)
+
+        def connect(self):
+            self.iobridge.master = self.iobus.slave
+            self.iobridge.slave = self.membus.master
+
+            if self._caches:
+                self.iocache.mem_side = self.membus.slave
+                self.iocache.cpu_side = self.iobus.master
+            else:
+                self.dmabridge.master = self.membus.slave
+                self.dmabridge.slave = self.iobus.master
+
+            if hasattr(self.realview.gic, 'cpu_addr'):
+                self.gic_cpu_addr = self.realview.gic.cpu_addr
+            self.realview.attachOnChipIO(self.membus, self.iobridge)
+            self.realview.attachIO(self.iobus)
+            self.system_port = self.membus.slave
+
+        def numCpuClusters(self):
+            return len(self._clusters)
+
+        def addCpuCluster(self, cpu_cluster, num_cpus):
+            assert cpu_cluster not in self._clusters
+            assert num_cpus > 0
+            self._clusters.append(cpu_cluster)
+            self._num_cpus += num_cpus
+
+        def numCpus(self):
+            return self._num_cpus
+
+        def addCaches(self, need_caches, last_cache_level):
+            if not need_caches:
+                # connect each cluster to the memory hierarchy
+                for cluster in self._clusters:
+                    cluster.connectMemSide(self.membus)
+                return
+
+            cluster_mem_bus = self.membus
+            assert last_cache_level >= 1 and last_cache_level <= 3
+            for cluster in self._clusters:
+                cluster.addL1()
+            if last_cache_level > 1:
+                for cluster in self._clusters:
+                    cluster.addL2(cluster.clk_domain)
+            if last_cache_level > 2:
+                max_clock_cluster = max(self._clusters,
+                                        key=lambda c: c.clk_domain.clock[0])
+                self.l3 = L3(clk_domain=max_clock_cluster.clk_domain)
+                self.toL3Bus = L2XBar(width=64)
+                self.toL3Bus.master = self.l3.cpu_side
+                self.l3.mem_side = self.membus.slave
+                cluster_mem_bus = self.toL3Bus
+
             # connect each cluster to the memory hierarchy
             for cluster in self._clusters:
-                cluster.connectMemSide(self.membus)
-            return
+                cluster.connectMemSide(cluster_mem_bus)
 
-        cluster_mem_bus = self.membus
-        assert last_cache_level >= 1 and last_cache_level <= 3
-        for cluster in self._clusters:
-            cluster.addL1()
-        if last_cache_level > 1:
-            for cluster in self._clusters:
-                cluster.addL2(cluster.clk_domain)
-        if last_cache_level > 2:
-            max_clock_cluster = max(self._clusters,
-                                    key=lambda c: c.clk_domain.clock[0])
-            self.l3 = L3(clk_domain=max_clock_cluster.clk_domain)
-            self.toL3Bus = L2XBar(width=64)
-            self.toL3Bus.master = self.l3.cpu_side
-            self.l3.mem_side = self.membus.slave
-            cluster_mem_bus = self.toL3Bus
-
-        # connect each cluster to the memory hierarchy
-        for cluster in self._clusters:
-            cluster.connectMemSide(cluster_mem_bus)
+    return SimpleSystem(caches, mem_size, platform, **kwargs)

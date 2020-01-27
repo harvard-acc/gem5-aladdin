@@ -1,4 +1,4 @@
-# Copyright (c) 2017 ARM Limited
+# Copyright (c) 2017,2019 ARM Limited
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -41,9 +41,9 @@
 
 from m5.params import *
 from m5.proxy import *
-from MemObject import MemObject
+from m5.objects.ClockedObject import ClockedObject
 
-class RubyController(MemObject):
+class RubyController(ClockedObject):
     type = 'RubyController'
     cxx_class = 'AbstractController'
     cxx_header = "mem/ruby/slicc_interface/AbstractController.hh"
@@ -60,6 +60,14 @@ class RubyController(MemObject):
     recycle_latency = Param.Cycles(10, "")
     number_of_TBEs = Param.Int(256, "")
     ruby_system = Param.RubySystem("")
+
+    # This is typically a proxy to the icache/dcache hit latency.
+    # If the latency depends on the request type or protocol-specific states,
+    # the protocol may ignore this parameter by overriding the
+    # mandatoryQueueLatency function
+    mandatory_queue_latency = \
+        Param.Cycles(1, "Default latency for requests added to the " \
+                        "mandatory queue on top-level controllers")
 
     memory = MasterPort("Port for attaching a memory controller")
     system = Param.System(Parent.any, "system object parameter")

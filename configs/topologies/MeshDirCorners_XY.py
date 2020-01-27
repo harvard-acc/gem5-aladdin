@@ -26,10 +26,15 @@
 #
 # Authors: Brad Beckmann
 
+from __future__ import print_function
+from __future__ import absolute_import
+
 from m5.params import *
 from m5.objects import *
 
-from BaseTopology import SimpleTopology
+from common import FileSystemConfig
+
+from .BaseTopology import SimpleTopology
 
 # Creates a Mesh topology with 4 directories, one at each corner.
 # One L1 (and L2, depending on the protocol) are connected to each router.
@@ -95,6 +100,27 @@ class MeshDirCorners_XY(SimpleTopology):
                                     latency = link_latency))
             link_count += 1
 
+        # NUMA Node for each quadrant
+        # With odd columns or rows, the nodes will be unequal
+        numa_nodes = [ [], [], [], []]
+        for i in xrange(num_routers):
+            if i % num_columns < num_columns / 2  and \
+               i < num_routers / 2:
+                numa_nodes[0].append(i)
+            elif i % num_columns >= num_columns / 2  and \
+               i < num_routers / 2:
+                numa_nodes[1].append(i)
+            elif i % num_columns < num_columns / 2  and \
+               i >= num_routers / 2:
+                numa_nodes[2].append(i)
+            else:
+                numa_nodes[3].append(i)
+
+        num_numa_nodes = 0
+        for n in numa_nodes:
+            if n:
+                num_numa_nodes += 1
+
         # Connect the dir nodes to the corners.
         ext_links.append(ExtLink(link_id=link_count, ext_node=dir_nodes[0],
                                 int_node=routers[0],
@@ -126,8 +152,8 @@ class MeshDirCorners_XY(SimpleTopology):
         int_links = []
 
         # East output to West input links (weight = 1)
-        for row in xrange(num_rows):
-            for col in xrange(num_columns):
+        for row in range(num_rows):
+            for col in range(num_columns):
                 if (col + 1 < num_columns):
                     east_out = col + (row * num_columns)
                     west_in = (col + 1) + (row * num_columns)
@@ -141,8 +167,8 @@ class MeshDirCorners_XY(SimpleTopology):
                     link_count += 1
 
         # West output to East input links (weight = 1)
-        for row in xrange(num_rows):
-            for col in xrange(num_columns):
+        for row in range(num_rows):
+            for col in range(num_columns):
                 if (col + 1 < num_columns):
                     east_in = col + (row * num_columns)
                     west_out = (col + 1) + (row * num_columns)
@@ -156,8 +182,8 @@ class MeshDirCorners_XY(SimpleTopology):
                     link_count += 1
 
         # North output to South input links (weight = 2)
-        for col in xrange(num_columns):
-            for row in xrange(num_rows):
+        for col in range(num_columns):
+            for row in range(num_rows):
                 if (row + 1 < num_rows):
                     north_out = col + (row * num_columns)
                     south_in = col + ((row + 1) * num_columns)
@@ -171,8 +197,8 @@ class MeshDirCorners_XY(SimpleTopology):
                     link_count += 1
 
         # South output to North input links (weight = 2)
-        for col in xrange(num_columns):
-            for row in xrange(num_rows):
+        for col in range(num_columns):
+            for row in range(num_rows):
                 if (row + 1 < num_rows):
                     north_in = col + (row * num_columns)
                     south_out = col + ((row + 1) * num_columns)
@@ -187,3 +213,13 @@ class MeshDirCorners_XY(SimpleTopology):
 
 
         network.int_links = int_links
+
+    # Register nodes with filesystem
+    def registerTopology(self, options):
+        i = 0
+        for n in numa_nodes:
+            if n:
+                FileSystemConfig.register_node(n,
+                    MemorySize(options.mem_size) / num_numa_nodes, i)
+            i += 1
+

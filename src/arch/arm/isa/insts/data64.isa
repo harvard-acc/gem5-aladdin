@@ -1,6 +1,6 @@
 // -*- mode:c++ -*-
 
-// Copyright (c) 2011-2013, 2016-2018 ARM Limited
+// Copyright (c) 2011-2013, 2016-2019 ARM Limited
 // All rights reserved
 //
 // The license below extends only to copyright in the software and shall
@@ -330,15 +330,28 @@ let {{
         if (fault != NoFault) return fault;
     '''
 
-    mrsCode = '''
+    msr_check_code = '''
+        auto pre_flat = (MiscRegIndex)snsBankedIndex64(dest, xc->tcBase());
         MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->
-            flattenRegId(RegId(MiscRegClass, op1)).index();
+            flattenRegId(RegId(MiscRegClass, pre_flat)).index();
         CPSR cpsr = Cpsr;
         ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
         %s
-        XDest = MiscOp1_ud;
+    ''' % (msrMrs64EnabledCheckCode % ('Write'),)
+
+    mrs_check_code = '''
+        auto pre_flat = (MiscRegIndex)snsBankedIndex64(op1, xc->tcBase());
+        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->
+            flattenRegId(RegId(MiscRegClass, pre_flat)).index();
+        CPSR cpsr = Cpsr;
+        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
+        %s
     ''' % (msrMrs64EnabledCheckCode % ('Read'),)
 
+
+    mrsCode = mrs_check_code + '''
+        XDest = MiscOp1_ud;
+    '''
     mrsIop = InstObjParams("mrs", "Mrs64", "RegMiscRegImmOp64",
                            mrsCode,
                            ["IsSerializeBefore"])
@@ -354,15 +367,9 @@ let {{
         XDest = cpsr;
     ''')
 
-    msrCode = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->
-            flattenRegId(RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-        %s
+    msrCode = msr_check_code + '''
         MiscDest_ud = XOp1;
-    ''' % (msrMrs64EnabledCheckCode % ('Write'),)
-
+    '''
     msrIop = InstObjParams("msr", "Msr64", "MiscRegRegImmOp64",
                            msrCode,
                            ["IsSerializeAfter", "IsNonSpeculative"])
@@ -377,14 +384,6 @@ let {{
         CondCodesC = cpsr.c;
         CondCodesV = cpsr.v;
     ''')
-
-    msr_check_code = '''
-        MiscRegIndex flat_idx = (MiscRegIndex) xc->tcBase()->
-            flattenRegId(RegId(MiscRegClass, dest)).index();
-        CPSR cpsr = Cpsr;
-        ExceptionLevel el = (ExceptionLevel) (uint8_t) cpsr.el;
-        %s
-    ''' % (msrMrs64EnabledCheckCode % ('Write'),)
 
 
     msrdczva_ea_code = msr_check_code
@@ -411,12 +410,20 @@ let {{
     exec_output += DCStore64InitiateAcc.subst(msrDCZVAIop);
     exec_output += Store64CompleteAcc.subst(msrDCZVAIop);
 
+    # Cache maintenance fault annotation
+    # The DC ZVA instruction is not classified as a cache maintenance
+    # instruction, and therefore we shouldn't annotate it.
+    cachem_fa = '''
+        fault->annotate(ArmFault::CM, 1);
+        fault->annotate(ArmFault::OFA, faultAddr);
+    '''
 
     msrdccvau_ea_code = msr_check_code
     msrdccvau_ea_code += '''
            Request::Flags memAccessFlags = Request::CLEAN | Request::DST_POU |
               ArmISA::TLB::MustBeOne;
            EA = XBase;
+           faultAddr = EA;
            System *sys = xc->tcBase()->getSystemPtr();
            Addr op_size = sys->cacheLineSize();
            EA &= ~(op_size - 1);
@@ -426,7 +433,8 @@ let {{
                                  { "ea_code" : msrdccvau_ea_code,
                                    "memacc_code" : ';',
                                    "use_uops" : 0,
-                                   "op_wb" : ";", "fa_code" : ";"},
+                                   "op_wb" : ";",
+                                   "fa_code" : cachem_fa},
                                  ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCVAUIop);
     decoder_output += DCStore64Constructor.subst(msrDCCVAUIop);
@@ -440,6 +448,7 @@ let {{
            Request::Flags memAccessFlags = Request::CLEAN | Request::DST_POC |
               ArmISA::TLB::MustBeOne;
            EA = XBase;
+           faultAddr = EA;
            System *sys = xc->tcBase()->getSystemPtr();
            Addr op_size = sys->cacheLineSize();
            EA &= ~(op_size - 1);
@@ -449,7 +458,8 @@ let {{
                                  { "ea_code" : msrdccvac_ea_code,
                                    "memacc_code" : ';',
                                    "use_uops" : 0,
-                                   "op_wb" : ";", "fa_code" : ";"},
+                                   "op_wb" : ";",
+                                   "fa_code" : cachem_fa},
                                  ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCCVACIop);
@@ -463,6 +473,7 @@ let {{
            Request::Flags memAccessFlags = Request::CLEAN |
               Request::INVALIDATE | Request::DST_POC | ArmISA::TLB::MustBeOne;
            EA = XBase;
+           faultAddr = EA;
            System *sys = xc->tcBase()->getSystemPtr();
            Addr op_size = sys->cacheLineSize();
            EA &= ~(op_size - 1);
@@ -472,7 +483,8 @@ let {{
                                   { "ea_code" : msrdccivac_ea_code,
                                     "memacc_code" : ';',
                                     "use_uops" : 0,
-                                    "op_wb" : ";", "fa_code" : ";"},
+                                    "op_wb" : ";",
+                                    "fa_code" : cachem_fa},
                                   ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCCIVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCCIVACIop);
@@ -486,6 +498,7 @@ let {{
            Request::Flags memAccessFlags = Request::INVALIDATE |
               Request::DST_POC | ArmISA::TLB::MustBeOne;
            EA = XBase;
+           faultAddr = EA;
            HCR hcr = Hcr64;
            SCR scr = Scr64;
            if (el == EL1 && ArmSystem::haveVirtualization(xc->tcBase()) &&
@@ -501,7 +514,8 @@ let {{
                                  { "ea_code" : msrdcivac_ea_code,
                                    "memacc_code" : ';',
                                    "use_uops" : 0,
-                                   "op_wb" : ";", "fa_code" : ";"},
+                                   "op_wb" : ";",
+                                   "fa_code" : cachem_fa},
                                  ['IsStore', 'IsMemRef']);
     header_output += DCStore64Declare.subst(msrDCIVACIop);
     decoder_output += DCStore64Constructor.subst(msrDCIVACIop);
@@ -509,45 +523,53 @@ let {{
     exec_output += DCStore64InitiateAcc.subst(msrDCIVACIop);
     exec_output += Store64CompleteAcc.subst(msrDCIVACIop);
 
+    def buildMsrImmInst(mnem, inst_name, code):
+        global header_output, decoder_output, exec_output
+        msrImmPermission = '''
+            auto pre_flat =
+                (MiscRegIndex)snsBankedIndex64(dest, xc->tcBase());
+            MiscRegIndex misc_index = (MiscRegIndex) xc->tcBase()->
+                flattenRegId(RegId(MiscRegClass, pre_flat)).index();
 
-    buildDataXImmInst("msrSP", '''
-        if (!canWriteAArch64SysReg(
-                (MiscRegIndex) xc->tcBase()->flattenRegId(
-                   RegId(MiscRegClass, dest)).index(),
-                Scr64, Cpsr, xc->tcBase())) {
-            return std::make_shared<UndefinedInstruction>(machInst, false,
-                                                          mnemonic);
-        }
-        MiscDest_ud = imm;
-    ''', optArgs = ["IsSerializeAfter", "IsNonSpeculative"])
+            if (!miscRegInfo[misc_index][MISCREG_IMPLEMENTED]) {
+                    return std::make_shared<UndefinedInstruction>(
+                                    machInst, false,
+                                    mnemonic);
+            }
 
-    buildDataXImmInst("msrDAIFSet", '''
-        if (!canWriteAArch64SysReg(
-                (MiscRegIndex) xc->tcBase()->flattenRegId(
-                   RegId(MiscRegClass, dest)).index(),
+            if (!canWriteAArch64SysReg(misc_index,
                 Scr64, Cpsr, xc->tcBase())) {
-            return std::make_shared<UndefinedInstruction>(
-                            machInst, 0, EC_TRAPPED_MSR_MRS_64,
-                            mnemonic);
-        }
+
+                    return std::make_shared<UndefinedInstruction>(
+                                    machInst, 0, EC_TRAPPED_MSR_MRS_64,
+                                    mnemonic);
+            }
+
+        '''
+        msrIop = InstObjParams("msr", inst_name, "MiscRegImmOp64",
+                               msrImmPermission + code,
+                               ["IsSerializeAfter", "IsNonSpeculative"])
+        header_output += MiscRegOp64Declare.subst(msrIop)
+        decoder_output += MiscRegOp64Constructor.subst(msrIop)
+        exec_output += BasicExecute.subst(msrIop)
+
+    buildMsrImmInst("msr", "MsrImm64", '''
+        // Mask and shift immediate (depending on PSTATE field)
+        // before assignment
+        MiscDest_ud = miscRegImm();
+    ''')
+
+    buildMsrImmInst("msr", "MsrImmDAIFSet64", '''
         CPSR cpsr = Cpsr;
         cpsr.daif = cpsr.daif | imm;
         Cpsr = cpsr;
-    ''', optArgs = ["IsSerializeAfter", "IsNonSpeculative"])
+    ''')
 
-    buildDataXImmInst("msrDAIFClr", '''
-        if (!canWriteAArch64SysReg(
-                (MiscRegIndex) xc->tcBase()->flattenRegId(
-                   RegId(MiscRegClass, dest)).index(),
-                Scr64, Cpsr, xc->tcBase())) {
-            return std::make_shared<UndefinedInstruction>(
-                                machInst, 0, EC_TRAPPED_MSR_MRS_64,
-                                mnemonic);
-        }
+    buildMsrImmInst("msr", "MsrImmDAIFClr64", '''
         CPSR cpsr = Cpsr;
         cpsr.daif = cpsr.daif & ~imm;
         Cpsr = cpsr;
-    ''', optArgs = ["IsSerializeAfter", "IsNonSpeculative"])
+    ''')
 
     def buildDataXCompInst(mnem, instType, suffix, code):
         global header_output, decoder_output, exec_output

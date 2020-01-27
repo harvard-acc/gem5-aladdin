@@ -35,12 +35,15 @@
 #include <sys/mman.h>
 #include <sys/param.h>
 #include <sys/syscall.h>
+#if !defined ( __GNU_LIBRARY__ )
 #include <sys/sysctl.h>
+#endif
 #include <sys/types.h>
 #include <utime.h>
 
 #include "arch/arm/freebsd/freebsd.hh"
 #include "arch/arm/isa_traits.hh"
+#include "base/loader/object_file.hh"
 #include "base/trace.hh"
 #include "cpu/thread_context.hh"
 #include "kern/freebsd/freebsd.hh"
@@ -52,21 +55,51 @@
 using namespace std;
 using namespace ArmISA;
 
-static SyscallReturn
-issetugidFunc(SyscallDesc *desc, int callnum, Process *process,
-              ThreadContext *tc)
+namespace
 {
 
+class ArmFreebsdObjectFileLoader : public Process::Loader
+{
+  public:
+    Process *
+    load(ProcessParams *params, ObjectFile *obj_file) override
+    {
+        auto arch = obj_file->getArch();
+        auto opsys = obj_file->getOpSys();
+
+        if (arch != ObjectFile::Arm && arch != ObjectFile::Thumb &&
+                arch != ObjectFile::Arm64) {
+            return nullptr;
+        }
+
+        if (opsys != ObjectFile::FreeBSD)
+            return nullptr;
+
+        if (arch == ObjectFile::Arm64)
+            return new ArmFreebsdProcess64(params, obj_file, arch);
+        else
+            return new ArmFreebsdProcess32(params, obj_file, arch);
+    }
+};
+
+ArmFreebsdObjectFileLoader loader;
+
+} // anonymous namespace
+
+static SyscallReturn
+issetugidFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
+{
     return 0;
 }
 
+#if !defined ( __GNU_LIBRARY__ )
 static SyscallReturn
-sysctlFunc(SyscallDesc *desc, int callnum, Process *process,
-           ThreadContext *tc)
+sysctlFunc(SyscallDesc *desc, int callnum, ThreadContext *tc)
 {
     int index = 0;
     uint64_t ret;
 
+    auto process = tc->getProcessPtr();
     Addr namep = process->getSyscallArg(tc, index);
     size_t namelen = process->getSyscallArg(tc, index);
     Addr oldp = process->getSyscallArg(tc, index);
@@ -79,13 +112,13 @@ sysctlFunc(SyscallDesc *desc, int callnum, Process *process,
     BufferArg buf3(oldlenp, sizeof(size_t));
     BufferArg buf4(newp, sizeof(size_t));
 
-    buf.copyIn(tc->getMemProxy());
-    buf2.copyIn(tc->getMemProxy());
-    buf3.copyIn(tc->getMemProxy());
+    buf.copyIn(tc->getVirtProxy());
+    buf2.copyIn(tc->getVirtProxy());
+    buf3.copyIn(tc->getVirtProxy());
 
     void *hnewp = NULL;
     if (newp) {
-        buf4.copyIn(tc->getMemProxy());
+        buf4.copyIn(tc->getVirtProxy());
         hnewp = (void *)buf4.bufferPtr();
     }
 
@@ -95,14 +128,15 @@ sysctlFunc(SyscallDesc *desc, int callnum, Process *process,
 
     ret = sysctl((int *)hnamep, namelen, holdp, holdlenp, hnewp, newlen);
 
-    buf.copyOut(tc->getMemProxy());
-    buf2.copyOut(tc->getMemProxy());
-    buf3.copyOut(tc->getMemProxy());
+    buf.copyOut(tc->getVirtProxy());
+    buf2.copyOut(tc->getVirtProxy());
+    buf3.copyOut(tc->getVirtProxy());
     if (newp)
-        buf4.copyOut(tc->getMemProxy());
+        buf4.copyOut(tc->getVirtProxy());
 
     return (ret);
 }
+#endif
 
 static SyscallDesc syscallDescs32[] = {
     /*    0 */ SyscallDesc("unused#000", unimplementedFunc),
@@ -858,7 +892,11 @@ static SyscallDesc syscallDescs64[] = {
     /*  199 */ SyscallDesc("unused#199", unimplementedFunc),
     /*  200 */ SyscallDesc("unused#200", unimplementedFunc),
     /*  201 */ SyscallDesc("unused#201", unimplementedFunc),
+#if !defined ( __GNU_LIBRARY__ )
     /*  202 */ SyscallDesc("sysctl", sysctlFunc),
+#else
+    /*  202 */ SyscallDesc("sysctl", unimplementedFunc),
+#endif
     /*  203 */ SyscallDesc("unused#203", unimplementedFunc),
     /*  204 */ SyscallDesc("unused#204", unimplementedFunc),
     /*  205 */ SyscallDesc("unused#205", unimplementedFunc),
@@ -1278,4 +1316,16 @@ ArmFreebsdProcess64::initState()
 {
     ArmProcess64::initState();
     // The 64 bit equivalent of the comm page would be set up here.
+}
+
+void
+ArmFreebsdProcess32::syscall(ThreadContext *tc, Fault *fault)
+{
+    doSyscall(tc->readIntReg(INTREG_R7), tc, fault);
+}
+
+void
+ArmFreebsdProcess64::syscall(ThreadContext *tc, Fault *fault)
+{
+    doSyscall(tc->readIntReg(INTREG_X8), tc, fault);
 }

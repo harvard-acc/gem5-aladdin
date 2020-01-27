@@ -34,6 +34,7 @@
 #include "arch/alpha/generated/max_inst_regs.hh"
 #include "arch/alpha/ipr.hh"
 #include "arch/generic/types.hh"
+#include "arch/generic/vec_pred_reg.hh"
 #include "arch/generic/vec_reg.hh"
 #include "base/types.hh"
 
@@ -45,26 +46,20 @@ using AlphaISAInst::MaxInstDestRegs;
 // Locked read/write flags are can't be detected by the ISA parser
 const int MaxMiscDestRegs = AlphaISAInst::MaxMiscDestRegs + 1;
 
-typedef RegVal IntReg;
+// Not applicable to Alpha
+using VecElem = ::DummyVecElem;
+using VecReg = ::DummyVecReg;
+using ConstVecReg = ::DummyConstVecReg;
+using VecRegContainer = ::DummyVecRegContainer;
+constexpr unsigned NumVecElemPerVecReg = ::DummyNumVecElemPerVecReg;
+constexpr size_t VecRegSizeBytes = ::DummyVecRegSizeBytes;
 
-// floating point register file entry type
-typedef FloatRegVal FloatReg;
-typedef RegVal FloatRegBits;
-
-// control register file contents
-typedef RegVal MiscReg;
-
-// dummy typedef since we don't have CC regs
-typedef uint8_t CCReg;
-
-// dummy typedefs since we don't have vector regs
-constexpr unsigned NumVecElemPerVecReg = 2;
-using VecElem = uint32_t;
-using VecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, false>;
-using ConstVecReg = ::VecRegT<VecElem, NumVecElemPerVecReg, true>;
-using VecRegContainer = VecReg::Container;
-// This has to be one to prevent warnings that are treated as errors
-constexpr unsigned NumVecRegs = 1;
+// Not applicable to Alpha
+using VecPredReg = ::DummyVecPredReg;
+using ConstVecPredReg = ::DummyConstVecPredReg;
+using VecPredRegContainer = ::DummyVecPredRegContainer;
+constexpr size_t VecPredRegSizeBits = ::DummyVecPredRegSizeBits;
+constexpr bool VecPredRegHasPackedRepr = ::DummyVecPredRegHasPackedRepr;
 
 enum MiscRegIndex
 {
@@ -97,6 +92,10 @@ const int NumFloatArchRegs = 32;
 
 const int NumIntRegs = NumIntArchRegs + NumPALShadowRegs;
 const int NumFloatRegs = NumFloatArchRegs;
+const int NumVecRegs = 1;  // Not applicable to Alpha
+                           // (1 to prevent warnings)
+const int NumVecPredRegs = 1;  // Not applicable to Alpha
+                               // (1 to prevent warnings)
 const int NumCCRegs = 0;
 const int NumMiscRegs = NUM_MISCREGS;
 
