@@ -420,9 +420,6 @@ def dump(stats_desc="", root=None):
             _dump_to_visitor(output, root=root)
             output.end()
 
-    # global dump_count
-    # dump_count = dump_count + 1
-
 def reset():
     '''Reset all statistics to the base state'''
 

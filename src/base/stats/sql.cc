@@ -150,6 +150,11 @@ bool OutputSQL::create_tables() {
   }
 }
 
+void OutputSQL::write_metadata(const Info &info) {
+  StatInfo metadata(info);
+  exec_sql(metadata.create_sql_cmd(statName(info.name)));
+}
+
 void OutputSQL::begin(std::string desc) {
   if (exec_sql("begin deferred transaction;") != SQLITE_OK) {
     return;
@@ -166,6 +171,26 @@ void OutputSQL::begin(std::string desc) {
 void OutputSQL::end() {
   exec_sql("commit transaction;");
   dump_count++;
+}
+
+std::string OutputSQL::statName(const std::string &name) const {
+  if (path.empty())
+    return name;
+  else
+    return csprintf("%s.%s", path.top(), name);
+}
+
+void OutputSQL::beginGroup(const char *name) {
+    if (path.empty()) {
+        path.push(name);
+    } else {
+        path.push(csprintf("%s.%s", path.top(), name));
+    }
+}
+
+void OutputSQL::endGroup() {
+    assert(!path.empty());
+    path.pop();
 }
 
 int OutputSQL::insert_vector_value(int id, int dump, const unsigned char *blob,
@@ -196,10 +221,8 @@ void OutputSQL::visit(const ScalarInfo &info) {
   if (no_output(info))
     return;
 
-  if (dump_count == 0) {
-    StatInfo metadata(info);
-    exec_sql(metadata.create_sql_cmd());
-  }
+  if (dump_count == 0)
+    write_metadata(info);
   std::string sql = "insert into scalarValue (id, dump, value) values (?, ?, ?);";
   sqlite3_stmt *pstmt;
   int ret = sqlite3_prepare_v2(db, sql.c_str(), sql.size(), &pstmt, nullptr);
@@ -223,10 +246,8 @@ void OutputSQL::visit(const VectorInfo &info) {
   if (no_output(info))
     return;
 
-  if (dump_count == 0) {
-    StatInfo metadata(info);
-    exec_sql(metadata.create_sql_cmd());
-  }
+  if (dump_count == 0)
+    write_metadata(info);
   // Store the vector of results as a simple blob - the backing C array itself.
   //
   const Result* vresult = info.result().data();
@@ -241,10 +262,8 @@ void OutputSQL::visit(const DistInfo &info) {
   if (no_output(info))
     return;
 
-  if (dump_count == 0) {
-    StatInfo metadata(info);
-    exec_sql(metadata.create_sql_cmd());
-  }
+  if (dump_count == 0)
+    write_metadata(info);
   const Counter* cvec = info.data.cvec.data();
   unsigned nbytes = info.data.cvec.size() * sizeof(Counter);
   unsigned char* blob = new unsigned char[nbytes];
@@ -305,10 +324,8 @@ void OutputSQL::visit(const Vector2dInfo &info) {
   if (no_output(info))
     return;
 
-  if (dump_count == 0) {
-    StatInfo metadata(info);
-    exec_sql(metadata.create_sql_cmd());
-  }
+  if (dump_count == 0)
+    write_metadata(info);
   const Counter* cvec = info.cvec.data();
   unsigned nbytes = info.cvec.size() * sizeof(Counter);
   unsigned char* blob = new unsigned char[nbytes];
@@ -321,10 +338,8 @@ void OutputSQL::visit(const FormulaInfo &info) {
   if (no_output(info))
     return;
 
-  if (dump_count == 0) {
-    StatInfo metadata(info);
-    exec_sql(metadata.create_sql_cmd());
-  }
+  if (dump_count == 0)
+    write_metadata(info);
   const Result* vresult = info.result().data();
   unsigned nbytes = info.size() * sizeof(Result);
   unsigned char* blob = new unsigned char[nbytes];
@@ -352,26 +367,26 @@ StatInfo::StatInfo(const Info &info, const std::string &_type,
     : id(info.id), name(info.name), desc(info.desc), precision(info.precision),
       flags(info.flags), type(_type), subnames(""), y_subnames(""),
       subdescs(""), x(_x), y(_y), formula(_formula) {
-  if (info.prereq)
-    prereq = info.prereq->id;
-  else
-    prereq = StatInfo::NO_PREREQ;
+    if (info.prereq)
+        prereq = info.prereq->id;
+    else
+        prereq = StatInfo::NO_PREREQ;
 }
 
 StatInfo::StatInfo(const ScalarInfo &info) : StatInfo(info, "ScalarInfo") {}
 
 StatInfo::StatInfo(const VectorInfo &info) : StatInfo(info, "VectorInfo") {
-  subnames = join(info.subnames);
-  subdescs = join(info.subdescs);
+    subnames = join(info.subnames);
+    subdescs = join(info.subdescs);
 }
 
 StatInfo::StatInfo(const DistInfo &info) : StatInfo(info, "") {
-  if (info.data.type == Stats::DistType::Deviation) 
-    type = "Deviation";
-  else if (info.data.type == Stats::DistType::Dist) 
-    type = "Dist";
-  else if (info.data.type == Stats::DistType::Hist) 
-    type = "Hist";
+    if (info.data.type == Stats::DistType::Deviation)
+        type = "Deviation";
+    else if (info.data.type == Stats::DistType::Dist)
+        type = "Dist";
+    else if (info.data.type == Stats::DistType::Hist)
+        type = "Hist";
 }
 
 StatInfo::StatInfo(const Vector2dInfo &info)
@@ -383,8 +398,8 @@ StatInfo::StatInfo(const Vector2dInfo &info)
 
 StatInfo::StatInfo(const FormulaInfo &info)
     : StatInfo(info, "FormulaInfo", info.str()) {
-  subnames = join(info.subnames);
-  subdescs = join(info.subdescs);
+    subnames = join(info.subnames);
+    subdescs = join(info.subdescs);
 }
 
 StatInfo::StatInfo(const SparseHistInfo &info)
@@ -403,11 +418,11 @@ std::string StatInfo::join(const std::vector<std::string> &array,
   return joined;
 }
 
-std::string StatInfo::create_sql_cmd() {
+std::string StatInfo::create_sql_cmd(const std::string& statName) {
   std::stringstream sql_col_creator, sql_val_creator;
   sql_col_creator << "id, name, desc, flags, precision, type";
   sql_val_creator << id << ", \""
-                  << name << "\", \""
+                  << statName << "\", \""
                   << desc << "\", "
                   << flags << ", "
                   << precision << ", \""

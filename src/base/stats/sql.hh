@@ -28,6 +28,7 @@
 #define __BASE_STATS_SQL_HH__
 
 #include <iosfwd>
+#include <stack>
 #include <string>
 
 #include "base/stats/info.hh"
@@ -53,6 +54,8 @@ class OutputSQL: public Output {
     // If a database already exists at the location, it is overwritten.
     void open(const std::string &filename);
 
+    std::string statName(const std::string &name) const;
+
     // Statistic object visitors.
     virtual void visit(const ScalarInfo &info) override;
     virtual void visit(const VectorInfo &info) override;
@@ -68,12 +71,15 @@ class OutputSQL: public Output {
     virtual void begin(std::string desc="") override;
     virtual void end() override;
 
-    void beginGroup(const char *name) override {}
-    void endGroup() override {}
+    void beginGroup(const char *name) override;
+    void endGroup() override;
 
   protected:
     // Creates all the tables used to store statistics info and values.
     bool create_tables();
+
+    // Write metadata of the stats into the table named "stats".
+    void write_metadata(const Info &info);
 
     // Executes a SQL command and returns the return code.
     //
@@ -104,6 +110,9 @@ class OutputSQL: public Output {
     // This gets recorded along with each stat value so that stats for distinct
     // epochs of simulation can be distinguished.
     int dump_count;
+
+    // Object/group path
+    std::stack<std::string> path;
 };
 
 class StatInfo {
@@ -120,7 +129,7 @@ class StatInfo {
     StatInfo(const SparseHistInfo& info);
     StatInfo(const VectorDistInfo& info);
 
-    std::string create_sql_cmd();
+    std::string create_sql_cmd(const std::string& statName);
 
   protected:
     static const int NO_PREREQ = -1;
