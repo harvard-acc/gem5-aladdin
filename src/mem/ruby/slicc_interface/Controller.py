@@ -69,5 +69,8 @@ class RubyController(ClockedObject):
         Param.Cycles(1, "Default latency for requests added to the " \
                         "mandatory queue on top-level controllers")
 
+    # Is this controller write-through?
+    write_through = Param.Bool(False, "The controller by default uses a writeback " \
+                                      "policy.")
     memory = MasterPort("Port for attaching a memory controller")
     system = Param.System(Parent.any, "system object parameter")

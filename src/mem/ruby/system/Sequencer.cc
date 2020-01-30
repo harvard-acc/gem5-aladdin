@@ -90,16 +90,16 @@ Sequencer::wakeup()
 
     for (const auto &table_entry : m_RequestTable) {
         for (const auto seq_req : table_entry.second) {
-            if (current_time - seq_req.issue_time < m_deadlock_threshold)
+            if (current_time - seq_req->issue_time < m_deadlock_threshold)
                 continue;
 
             panic("Possible Deadlock detected. Aborting!\n version: %d "
                   "request.paddr: 0x%x m_readRequestTable: %d current time: "
                   "%u issue_time: %d difference: %d\n", m_version,
-                  seq_req.pkt->getAddr(), table_entry.second.size(),
-                  current_time * clockPeriod(), seq_req.issue_time
+                  seq_req->pkt->getAddr(), table_entry.second.size(),
+                  current_time * clockPeriod(), seq_req->issue_time
                   * clockPeriod(), (current_time * clockPeriod())
-                  - (seq_req.issue_time * clockPeriod()));
+                  - (seq_req->issue_time * clockPeriod()));
         }
         total_outstanding += table_entry.second.size();
     }
@@ -157,7 +157,8 @@ Sequencer::insertRequest(PacketPtr pkt, RubyRequestType primary_type,
     // Check if there is any outstanding request for the same cache line.
     auto &seq_req_list = m_RequestTable[line_addr];
     // Create a default entry
-    seq_req_list.emplace_back(pkt, primary_type, secondary_type, curCycle());
+    seq_req_list.emplace_back(
+        new SequencerRequest(pkt, primary_type, secondary_type, curCycle()));
     m_outstanding_count++;
 
     if (seq_req_list.size() > 1) {
@@ -319,15 +320,21 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
     int aliased_stores = 0;
     int aliased_loads = 0;
     while (!seq_req_list.empty()) {
-        SequencerRequest &seq_req = seq_req_list.front();
+        SequencerRequest *seq_req = seq_req_list.front();
+        // We need to remove the request before the retry signal is sent in the
+        // call of hitCallback, otherwise the retry request could find itself
+        // aliased with the current request, causing a failed retry (if the
+        // controller uses a write-through policy) and in turn a deadlock
+        // because no further retry signal will be sent.
+        seq_req_list.pop_front();
         if (ruby_request) {
-            assert(seq_req.m_type != RubyRequestType_LD);
-            assert(seq_req.m_type != RubyRequestType_IFETCH);
+            assert(seq_req->m_type != RubyRequestType_LD);
+            assert(seq_req->m_type != RubyRequestType_IFETCH);
         }
 
         // handle write request
-        if ((seq_req.m_type != RubyRequestType_LD) &&
-            (seq_req.m_type != RubyRequestType_IFETCH)) {
+        if ((seq_req->m_type != RubyRequestType_LD) &&
+            (seq_req->m_type != RubyRequestType_IFETCH)) {
             //
             // For Alpha, properly handle LL, SC, and write requests with
             // respect to locked cache blocks.
@@ -336,12 +343,12 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
             //
             bool success = true;
             if (!m_runningGarnetStandalone)
-                success = handleLlsc(address, &seq_req);
+                success = handleLlsc(address, seq_req);
 
             // Handle SLICC block_on behavior for Locked_RMW accesses. NOTE: the
             // address variable here is assumed to be a line address, so when
             // blocking buffers, must check line addresses.
-            if (seq_req.m_type == RubyRequestType_Locked_RMW_Read) {
+            if (seq_req->m_type == RubyRequestType_Locked_RMW_Read) {
                 // blockOnQueue blocks all first-level cache controller queues
                 // waiting on memory accesses for the specified address that go
                 // to the specified queue. In this case, a Locked_RMW_Write must
@@ -349,31 +356,32 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
                 // controller. This will block standard loads, stores, ifetches,
                 // etc.
                 m_controller->blockOnQueue(address, m_mandatory_q_ptr);
-            } else if (seq_req.m_type == RubyRequestType_Locked_RMW_Write) {
+            } else if (seq_req->m_type == RubyRequestType_Locked_RMW_Write) {
                 m_controller->unblock(address);
             }
 
             if (ruby_request) {
-                recordMissLatency(&seq_req, success, mach, externalHit,
+                recordMissLatency(seq_req, success, mach, externalHit,
                                   initialRequestTime, forwardRequestTime,
                                   firstResponseTime);
             } else {
                 aliased_stores++;
             }
-            hitCallback(&seq_req, data, success, mach, externalHit,
+            hitCallback(seq_req, data, success, mach, externalHit,
                         initialRequestTime, forwardRequestTime,
                         firstResponseTime);
         } else {
             // handle read request
             assert(!ruby_request);
             aliased_loads++;
-            hitCallback(&seq_req, data, true, mach, externalHit,
+            hitCallback(seq_req, data, true, mach, externalHit,
                         initialRequestTime, forwardRequestTime,
                         firstResponseTime);
         }
-        seq_req_list.pop_front();
         markRemoved();
         ruby_request = false;
+        if (m_controller->isWriteThrough())
+            break;
     }
 
     // free all outstanding requests corresponding to this address
@@ -403,28 +411,28 @@ Sequencer::readCallback(Addr address, DataBlock& data,
     bool ruby_request = true;
     int aliased_loads = 0;
     while (!seq_req_list.empty()) {
-        SequencerRequest &seq_req = seq_req_list.front();
+        SequencerRequest *seq_req = seq_req_list.front();
         if (ruby_request) {
-            assert((seq_req.m_type == RubyRequestType_LD) ||
-                   (seq_req.m_type == RubyRequestType_IFETCH));
+            assert((seq_req->m_type == RubyRequestType_LD) ||
+                   (seq_req->m_type == RubyRequestType_IFETCH));
         } else {
             aliased_loads++;
         }
-        if ((seq_req.m_type != RubyRequestType_LD) &&
-            (seq_req.m_type != RubyRequestType_IFETCH)) {
+        if ((seq_req->m_type != RubyRequestType_LD) &&
+            (seq_req->m_type != RubyRequestType_IFETCH)) {
             // Write request: reissue request to the cache hierarchy
-            issueRequest(seq_req.pkt, seq_req.m_second_type);
+            issueRequest(seq_req->pkt, seq_req->m_second_type);
             break;
         }
         if (ruby_request) {
-            recordMissLatency(&seq_req, true, mach, externalHit,
+            recordMissLatency(seq_req, true, mach, externalHit,
                               initialRequestTime, forwardRequestTime,
                               firstResponseTime);
         }
-        hitCallback(&seq_req, data, true, mach, externalHit,
+        seq_req_list.pop_front();
+        hitCallback(seq_req, data, true, mach, externalHit,
                     initialRequestTime, forwardRequestTime,
                     firstResponseTime);
-        seq_req_list.pop_front();
         markRemoved();
         ruby_request = false;
     }
@@ -492,6 +500,9 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
         assert(testerSenderState);
         testerSenderState->subBlock.mergeFrom(data);
     }
+
+    delete srequest;
+
 
     RubySystem *rs = m_ruby_system;
     if (RubySystem::getWarmupEnabled()) {
@@ -602,6 +613,18 @@ Sequencer::makeRequest(PacketPtr pkt)
         return RequestStatus_Aliased;
     }
 
+    // The Ruby sequencer by default assumes a writeback policy is used in its
+    // connected controller, so that it buffers aliased request and wakes up and
+    // processes them when the outstanding request comes back with the requested
+    // line data. This can't be applied to a write-through cache, so instead of
+    // buffering the aliased requests in the sequencer, we simply let the sender
+    // retry later.
+    Addr lineAddr = makeLineAddress(pkt->getAddr());
+    if (m_controller->isWriteThrough() &&
+        m_RequestTable.find(lineAddr) != m_RequestTable.end() &&
+        !m_RequestTable[lineAddr].empty()) {
+        return RequestStatus_Aliased;
+    }
     RequestStatus status = insertRequest(pkt, primary_type, secondary_type);
 
     // It is OK to receive RequestStatus_Aliased, it can be considered Issued
@@ -661,7 +684,7 @@ operator<<(ostream &out, const std::unordered_map<KEY, VALUE> &map)
     for (const auto &table_entry : map) {
         out << "[ " << table_entry.first << " =";
         for (const auto &seq_req : table_entry.second) {
-            out << " " << RubyRequestType_to_string(seq_req.m_second_type);
+            out << " " << RubyRequestType_to_string(seq_req->m_second_type);
         }
     }
     out << " ]";

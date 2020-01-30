@@ -89,6 +89,8 @@ class AbstractController : public ClockedObject, public Consumer
     void unblock(Addr);
     bool isBlocked(Addr);
 
+    bool isWriteThrough() const;
+
     virtual MessageBuffer* getMandatoryQueue() const = 0;
     virtual MessageBuffer* getMemoryQueue() const = 0;
     virtual AccessPermission getAccessPermission(const Addr &addr) = 0;
@@ -202,6 +204,7 @@ class AbstractController : public ClockedObject, public Consumer
     const int m_transitions_per_cycle;
     const unsigned int m_buffer_size;
     Cycles m_recycle_latency;
+    const bool m_write_through;
     const Cycles m_mandatory_queue_latency;
 
     //! Counter for the number of cycles when the transitions carried out

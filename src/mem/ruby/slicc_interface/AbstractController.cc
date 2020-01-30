@@ -56,6 +56,7 @@ AbstractController::AbstractController(const Params *p)
       m_transitions_per_cycle(p->transitions_per_cycle),
       m_buffer_size(p->buffer_size), m_recycle_latency(p->recycle_latency),
       m_mandatory_queue_latency(p->mandatory_queue_latency),
+      m_write_through(p->write_through),
       memoryPort(csprintf("%s.memory", name()), this, ""),
       addrRanges(p->addr_ranges.begin(), p->addr_ranges.end())
 {
@@ -214,6 +215,8 @@ AbstractController::isBlocked(Addr addr) const
 {
     return m_is_blocking && (m_block_map.find(addr) != m_block_map.end());
 }
+
+bool AbstractController::isWriteThrough() const { return m_write_through; }
 
 void
 AbstractController::unblock(Addr addr)

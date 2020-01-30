@@ -161,6 +161,7 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                is_icache = False)
         acp_cntrl = ACP_Controller(version = i,
                                    l2_select_num_bits = l2_bits,
+                                   write_through = True,
                                    ruby_system = ruby_system)
 
         acp_seq = RubySequencer(version = i,

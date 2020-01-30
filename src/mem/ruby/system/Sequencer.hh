@@ -189,7 +189,7 @@ class Sequencer : public RubyPort
     Cycles m_inst_cache_hit_latency;
 
     // RequestTable contains both read and write requests, handles aliasing
-    std::unordered_map<Addr, std::list<SequencerRequest>> m_RequestTable;
+    std::unordered_map<Addr, std::list<SequencerRequest *>> m_RequestTable;
 
     // Global outstanding request count, across all request tables
     int m_outstanding_count;
