@@ -78,7 +78,6 @@ def config_filesystem(system, options = None):
       - /proc/stat simply lists all CPUs
       - /sys/devices/system/cpu/online and /sys/devices/system/cpu/possible
         These files list all of the CPUs in this system.
-      - /tmp
 
     These files are created in the `fs` directory in the outdir path.
     """
@@ -147,10 +146,6 @@ def config_filesystem(system, options = None):
 
     file_append((cpudir, 'online'), '0-%d' % (len(cpus) - 1))
     file_append((cpudir, 'possible'), '0-%d' % (len(cpus) - 1))
-
-    # Set up /tmp
-    tmpdir = joinpath(fsdir, 'tmp')
-    replace_tree(tmpdir)
 
     system.redirect_paths = _redirect_paths(options)
 
@@ -226,9 +221,7 @@ def _redirect_paths(options):
     redirect_paths = [RedirectPath(app_path = "/proc",
                           host_paths = ["%s/fs/proc" % m5.options.outdir]),
                       RedirectPath(app_path = "/sys",
-                          host_paths = ["%s/fs/sys"  % m5.options.outdir]),
-                      RedirectPath(app_path = "/tmp",
-                          host_paths = ["%s/fs/tmp"  % m5.options.outdir])]
+                          host_paths = ["%s/fs/sys"  % m5.options.outdir])]
 
     # Setting the redirect paths so that the guest dynamic linker
     # can point to the proper /lib collection (e.g. to load libc)
