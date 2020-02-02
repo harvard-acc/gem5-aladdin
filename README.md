@@ -25,6 +25,31 @@ list (see link at the very bottom).
 
 ## Notices ##
 
+#### Feburary 1st, 2020 ####
+
+Major update for gem5-Aladdin to version 2.0:
+
+* Aladdin v2.0 brings support for tracing C++ programs. Requires an update to
+  LLVM 6.0.
+* Sampling support for accelerated kernel.
+* New systolic array cycle-level model.
+* Interrupt-like mechanism for waking up accelerators (instead of spin locks
+  and polling).
+* Accelerator command queuing. Multiple invocations of an accelerator can be
+  pushed to a queue, and the system will run each of them until the queue is
+  empty, without the need for the main CPU thread to intervene.
+* Accelerator coherency port (ACP) for one-way cache coherency.
+* Change the configured memory type of an array on the fly, so a program can
+  dynamically decide whether to transfer data over DMA, ACP, or hardware cache
+  coherency.
+* The "standalone" simulation mode (accelerator and memory system but no CPU)
+  has been deprecated.
+* Merge with gem5 upstream. Includes all commits as of 377898c.
+
+A new docker image has been pushed with environment updates for all of these
+changes. It is tagged `llvm-6.0`. Download
+[here](https://hub.docker.com/repository/docker/xyzsam/gem5-aladdin).
+
 #### December 1st, 2017 ####
 
 All commits from gem5 upstream as of 01/24/19 have been merged into
