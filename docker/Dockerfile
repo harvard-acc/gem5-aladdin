@@ -25,7 +25,6 @@ RUN apt-get install -y m4 \
 # Install Aladdin dependencies.
 RUN apt-get install -y \
       libboost-graph-dev \
-      libboost-regex-dev \
       libpthread-stubs0-dev \
       libreadline-dev \
       libncurses5-dev
@@ -39,21 +38,22 @@ ENV BOOST_ROOT /usr/include
 
 ENV SHELL /bin/bash
 
-# Install LLVM 3.4 from source.
+# Build LLVM and Clang 6.0 from source.
 WORKDIR /tmp
-RUN wget -q http://releases.llvm.org/3.4.2/llvm-3.4.2.src.tar.gz && \
-    tar -xf llvm-3.4.2.src.tar.gz
-
-RUN wget -q http://releases.llvm.org/3.4.2/cfe-3.4.2.src.tar.gz && \
-    tar -xf cfe-3.4.2.src.tar.gz && \
-    mkdir -p llvm-3.4.2.src/tools/clang && \
-    mv cfe-3.4.2.src/* llvm-3.4.2.src/tools/clang && \
-    cd llvm-3.4.2.src && \
+RUN wget -q http://releases.llvm.org/6.0.0/llvm-6.0.0.src.tar.xz && \
+    tar -xf llvm-6.0.0.src.tar.xz && \
+    wget -q http://releases.llvm.org/6.0.0/cfe-6.0.0.src.tar.xz && \
+    tar -xf cfe-6.0.0.src.tar.xz && \
+    mkdir -p llvm-6.0.0.src/tools/clang && \
+    mv cfe-6.0.0.src/* llvm-6.0.0.src/tools/clang && \
+    cd llvm-6.0.0.src && \
     mkdir build && \
     cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
-    make -j8 && \
-    make install
+    cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Debug .. && \
+    make -j24 && \
+    make install && \
+    rm -rf /tmp/llvm-6.0.0* && \
+    rm -rf /tmp/cfe-6.0.0*
 
 # Install a newer version of ZLIB from source.
 RUN wget -q https://www.zlib.net/zlib-1.2.11.tar.gz && \
@@ -61,7 +61,8 @@ RUN wget -q https://www.zlib.net/zlib-1.2.11.tar.gz && \
     cd zlib-1.2.11 && \
     ./configure && \
     make && \
-    make install
+    make install && \
+    rm -rf /tmp/zlib-1.2.11*
 
 # Install libconfuse 3.2.1 from source.
 RUN wget -q https://github.com/martinh/libconfuse/releases/download/v3.2.1/confuse-3.2.1.tar.gz && \
@@ -75,6 +76,8 @@ WORKDIR /workspace
 # Build and install LLVM-Tracer
 RUN git clone https://github.com/ysshao/LLVM-Tracer && \
     cd LLVM-Tracer && \
+    git fetch --all && \
+    git checkout llvm-6.0 && \
     mkdir bin && \
     mkdir lib && \
     mkdir build && cd build && \
