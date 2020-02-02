@@ -40,6 +40,8 @@ def run_with_timeout(cmd, timeout_sec):
     stdout, stderr = proc.communicate()
   finally:
     timer.cancel()
+    print("Build canceled before Travis CI times out...")
+    print("Return code was %d" % proc.returncode)
 
   return proc.returncode
 

@@ -1,5 +1,4 @@
-sudo: required
-dist: trusty
+dist: xenial
 
 before_install:
   - sudo apt-get update -qq
@@ -9,9 +8,10 @@ before_install:
   - sudo apt-get install -y libprotobuf-dev
   - sudo apt-get install -y protobuf-compiler
   - sudo apt-get install -y libsqlite3-dev
+  - sudo apt-get install -y scons
+  - sudo apt-get install -y libpython2.7 libpython2.7-dev
   # These are Aladdin dependencies.
   - sudo apt-get install -y libboost-graph-dev
-  - sudo apt-get install -y libboost-regex-dev
   - sudo apt-get install -y libpthread-stubs0-dev
   - git submodule update --init --recursive
 
@@ -71,4 +71,5 @@ notifications:
     on_success: never
     on_failure: always
     recipients:
-      - samxi@seas.harvard.edu
+      - slxi1202@gmail.com
+      - yaoyuannnn@gmail.com
