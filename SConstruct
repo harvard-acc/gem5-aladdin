@@ -364,7 +364,7 @@ if 'BOOST_ROOT' in main and main['BOOST_ROOT']:
     main.Append(CPPPATH=[os.path.join(main['BOOST_ROOT'], 'include')])
     main.Append(LIBPATH=[boost_lib_path])
     main.Append(LD_LIBRARY_PATH=[boost_lib_path])
-    main.Append(LIBS=['boost_graph', 'boost_regex'])
+    main.Append(LIBS=['boost_graph'])
 
 if GetOption('use_db'):
     if 'MYSQL_HOME' in main and main['MYSQL_HOME']:
