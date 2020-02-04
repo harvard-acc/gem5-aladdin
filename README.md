@@ -31,7 +31,7 @@ Major update for gem5-Aladdin to version 2.0:
 
 * Aladdin v2.0 brings support for tracing C++ programs. Requires an update to
   LLVM 6.0.
-* Sampling support for accelerated kernel.
+* Sampling support for accelerated kernels.
 * New systolic array cycle-level model.
 * Interrupt-like mechanism for waking up accelerators (instead of spin locks
   and polling).
@@ -49,6 +49,99 @@ Major update for gem5-Aladdin to version 2.0:
 A new docker image has been pushed with environment updates for all of these
 changes. It is tagged `llvm-6.0`. Download
 [here](https://hub.docker.com/repository/docker/xyzsam/gem5-aladdin).
+
+Usage of a few new features:
+
+* Tracing C++ programs
+
+As an example shown below, now we can trace a C++ program, as long as the traced
+function is written in pure C with C-style linkage (the top\_level function in
+the example is in an `extern C` context to ensure C-style linkage).
+
+```c
+// Though we can write C++ code, only code with external C-style linkage will be
+// instrumented (extern "C").
+#ifdef __cplusplus
+extern "C" {
+#endif
+int top_level(int a, int b) { return a + b; }
+#ifdef __cplusplus
+}
+#endif
+
+class Adder {
+ public:
+  Adder(int _a, int _b) : a(_a), b(_b) {}
+  int run() {
+    // The traced function needs to be pure C.
+    return top_level(a, b);
+  }
+
+ private:
+  int a;
+  int b;
+};
+
+int main() {
+  Adder adder(2, 3);
+  int result = adder.run();
+  std::cout << "result: " << result << "\n";
+  return 0;
+}
+```
+
+* Sampling support for accelerated kernel
+
+Some workloads are highly compute and memory intensive, such that simulating the
+complete workload would be infeasible because of trace storage limitations and
+simulation time. To make it possible to simulate bigger workloads, we introduce
+sampling support, which works at the loop granularity. The example below shows
+how to use the sampling API. The user informs Aladdin the sampled loop label and
+the sampling factor via a call to setSamplingFactor. Aladdin will unsample the
+sampled loop iterations and produce a final overall cycles estimate.
+
+```
+int reduction(int* a, int size, int sample) {
+    // Generally avoid sampling loops containing data
+    // transfer operations to avoid changing the memory
+    // footprint of the application.
+    dmaLoad(a, size * sizeof(int));
+    int result = 0;
+    setSamplingFactor("loop", (float)size / sample);
+    loop:
+    // Run only `sample` iterations of this loop; the result
+    // might be wrong, but that’s expected for sampling.
+    for (int i = 0; i < sample; i++)
+        result += a[i]; return result;
+}
+```
+
+* New systolic array cycle-level model
+
+We added a cycle-level model for a 2D systolic array accelerator, which supports
+computing convolution and matrix multiplication. Check out the usage in
+`src/systolic_array/test`.
+
+* Interrupt-like mechanism for synchronization between CPUs and accelerators
+
+This eliminates the polling involved in the CPUs while waiting for the
+accelerators to finish the assigned work. Instead, it puts the CPU to sleep
+using a magic simulator instruction. The accelerator will wake the CPU when it
+is done. This should also speed up simulation time by eliminating all the
+redundant memory operations required by polling. Please see
+`src/aladdin/integration-test/with-cpu/test_multiple_accelerators` as an
+example.
+
+* Support for Accelerator coherency port (ACP)
+
+This is another choice for accelerator SoC interface, other than using
+software-managed DMAs and fully-coherent caches. It enables the accelerator to
+directly access the coherent data in the last-level-cache (LLC) without having a
+private cache. For more details and usage, please see the `test_acp` of the
+integration tests.
+
+We also have a way to dynamically change the configured memory type of an array,
+using the setMemoryType API (see the integration test `test_host_load_store`).
 
 #### December 1st, 2017 ####
 
