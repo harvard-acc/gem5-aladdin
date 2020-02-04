@@ -13,10 +13,24 @@ before_install:
   # These are Aladdin dependencies.
   - sudo apt-get install -y libboost-graph-dev
   - sudo apt-get install -y libpthread-stubs0-dev
+  # Install pre-built LLVM 6.0. This doesn't actually work for tracing, but it
+  # at least lets gem5-Aladdin to build by letting it set LLVM_VERSION
+  # correctly.
+  - |
+    pushd /tmp
+    wget -q http://releases.llvm.org/6.0.0/clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+    tar -xf clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+    cd clang+llvm-6.0.0-x86_64-linux-gnu-ubuntu-16.04
+    sudo cp -rf bin/ /usr/local/
+    sudo cp -rf include/ /usr/local/
+    sudo cp -rf lib /usr/local/
+    sudo cp -rf libexec /usr/local/
+    sudo cp -rf share /usr/local/
+    popd
   - git submodule update --init --recursive
 
 env:
-  - ALADDIN_HOME=$PWD/src/aladdin BOOST_ROOT=/usr/include/boost
+  - ALADDIN_HOME=$PWD/src/aladdin BOOST_ROOT=/usr/include/boost PATH=/usr/local/bin:$PATH
 
 language: c++
 compiler:
