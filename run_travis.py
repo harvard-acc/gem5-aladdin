@@ -50,11 +50,14 @@ def run_build(cmd):
   num_retries = 0
   while num_retries < MAXIMUM_RETRIES:
     ret = run_with_timeout(cmd, TIMEOUT*60)
-    if ret != -signal.SIGINT:
-      return ret
+    if ret == -signal.SIGINT or ret == 0:
+      # SIGINT is the one we send and want to fake as success. Anything else
+      # than 0 should be an actual build error.
+      return 0
     num_retries +=1
     if num_retries < MAXIMUM_RETRIES:
       print "Last build was killed after %d minutes. Starting again..." % TIMEOUT
+  return -1
 
 def create_variables_file():
   contents = ("TARGET_ISA = 'x86'\n"
@@ -68,11 +71,7 @@ def create_variables_file():
 def main():
   create_variables_file()
   ret = run_build(CMD)
-  # SIGINT is the one we send and want to fake as success. Anything else than
-  # 0 should be an actual build error.
-  if ret == -signal.SIGINT:
-    return 0
-  elif ret != 0:
+  if ret != 0:
     return ret
 
   suite = unittest.TestSuite()
