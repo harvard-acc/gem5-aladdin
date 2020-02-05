@@ -20,9 +20,13 @@ sys.path.append(os.path.join(os.getcwd(), "src", "aladdin", "integration-test", 
 import run_cpu_tests
 import run_ruby_tests
 
-MAXIMUM_RETRIES = 1
-TIMEOUT = 40  # Minutes.
+TIMEOUT_SECS = 40*60
 CMD = "scons build/X86/gem5.opt --ignore-style -j2"
+
+def timeout_func(proc):
+  print("Build canceled before Travis CI times out...")
+  # Kill the entire process group (since we do parallel builds).
+  os.killpg(os.getpgid(proc.pid), signal.SIGINT)
 
 def run_with_timeout(cmd, timeout_sec):
   """ Run the command for up to timeout_sec.
@@ -32,29 +36,15 @@ def run_with_timeout(cmd, timeout_sec):
   Returns the return code.
   """
   proc = subprocess.Popen(cmd, stderr=subprocess.STDOUT, shell=True, preexec_fn=os.setsid)
-  # Kill the entire process group (since we do parallel builds).
-  kill_pg = lambda proc: os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-  timer = threading.Timer(timeout_sec, kill_pg, [proc])
+  timer = threading.Timer(timeout_sec, timeout_func, [proc])
   try:
     timer.start()
     stdout, stderr = proc.communicate()
   finally:
     timer.cancel()
-    print("Build canceled before Travis CI times out...")
     print("Return code was %d" % proc.returncode)
 
   return proc.returncode
-
-def run_build(cmd):
-  """ Run the command up to MAXIMUM_RETRIES times. """
-  num_retries = 0
-  while num_retries < MAXIMUM_RETRIES:
-    ret = run_with_timeout(cmd, TIMEOUT*60)
-    if ret != -signal.SIGINT:
-      return ret
-    num_retries +=1
-    if num_retries < MAXIMUM_RETRIES:
-      print "Last build was killed after %d minutes. Starting again..." % TIMEOUT
 
 def create_variables_file():
   contents = ("TARGET_ISA = 'x86'\n"
@@ -67,9 +57,10 @@ def create_variables_file():
 
 def main():
   create_variables_file()
-  ret = run_build(CMD)
-  # SIGINT is the one we send and want to fake as success. Anything else than
-  # 0 should be an actual build error.
+  ret = run_with_timeout(CMD, TIMEOUT_SECS)
+  # SIGINT is the one we send and want to fake as success, but we don't want to
+  # run the integration tests. Anything else than 0 should be an actual build
+  # error.
   if ret == -signal.SIGINT:
     return 0
   elif ret != 0:
@@ -79,8 +70,7 @@ def main():
   suite.addTests(unittest.TestLoader().loadTestsFromModule(run_cpu_tests))
   suite.addTests(unittest.TestLoader().loadTestsFromModule(run_ruby_tests))
   result = unittest.TextTestRunner(verbosity=2).run(suite)
-  retcode = 0 if result.wasSuccessful() else 1
-  sys.exit(retcode)
+  return 0 if result.wasSuccessful() else 1
 
 if __name__ == "__main__":
-  main()
+  sys.exit(main())
