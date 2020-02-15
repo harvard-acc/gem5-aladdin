@@ -93,5 +93,8 @@ RUN git clone https://github.com/harvard-acc/gem5-aladdin && \
     git submodule init && \
     git submodule update
 
-# Install a supported version of pyparsing.
+# Install a supported version of pyparsing for Xenon.
 RUN pip install pyparsing==2.3.0
+
+# Some extra gem5 dependencies.
+RUN pip install six
