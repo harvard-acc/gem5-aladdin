@@ -2,7 +2,7 @@
 #define __SYSTOLIC_ARRAY_UTILS_H__
 
 #include "datatypes.h"
-#include "FP16/include/fp16.h"
+#include "fp16/include/fp16.h"
 
 namespace systolic {
 

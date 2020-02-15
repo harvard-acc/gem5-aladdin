@@ -5,7 +5,7 @@
 
 #include "systolic_array_connection.h"
 #include "aladdin/gem5/aladdin_sys_connection.h"
-#include "FP16/include/fp16.h"
+#include "fp16.h"
 
 #define CACHELINE_SIZE 32
 

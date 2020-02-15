@@ -5,8 +5,5 @@
 	path = sweeps/xenon
 	url = https://github.com/xyzsam/xenon
 [submodule "FP16"]
-	path = src/systolic_array/FP16
-	url = https://github.com/xyzsam/FP16
-[submodule "FP16-2"]
 	path = ext/fp16
 	url = https://github.com/xyzsam/FP16
