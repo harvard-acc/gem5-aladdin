@@ -306,7 +306,7 @@ global_vars.AddVariables(
          'Path to toolchain if installed in non-standard location',
          environ.get('USER_TOOLCHAIN_ROOT'), None),
     ('FORCE_CXX11_ABI', 'Force use of CXX11 ABI on gcc 5.0+',
-         environ.get('FORCE_CXX11_ABI'), False),
+         environ.get('FORCE_CXX11_ABI'), True),
     ('EXTRAS', 'Add extra directories to the compilation', '')
     )
 
