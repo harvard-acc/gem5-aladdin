@@ -304,9 +304,9 @@ global_vars.AddVariables(
     ('MYSQL_HOME', 'MySQL library location', environ.get('MYSQL_HOME'), None),
     ('USER_TOOLCHAIN_ROOT',
          'Path to toolchain if installed in non-standard location',
-         environ.get('USER_TOOLCHAIN_ROOT'), None),
+         environ.get('USER_TOOLCHAIN_ROOT', None)),
     ('FORCE_CXX11_ABI', 'Force use of CXX11 ABI on gcc 5.0+',
-         environ.get('FORCE_CXX11_ABI'), True),
+         environ.get('FORCE_CXX11_ABI', True)),
     ('EXTRAS', 'Add extra directories to the compilation', '')
     )
 
