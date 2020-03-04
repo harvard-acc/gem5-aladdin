@@ -1044,6 +1044,11 @@ DefaultCommit<Impl>::commitInsts()
             bool commit_success = commitHead(head_inst, num_committed);
 
             if (commit_success) {
+                // If the thread trying to exit and a syscall instruction
+                // successfully commits, it's time to schedule the thread exit
+                // event.
+                if (cpu->isThreadExiting(tid) && head_inst->isSyscall())
+                    cpu->scheduleThreadExitEvent(tid);
                 ++num_committed;
                 statCommittedInstType[tid][head_inst->opClass()]++;
                 ppCommit->notify(head_inst);
