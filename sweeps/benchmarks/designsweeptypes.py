@@ -25,7 +25,6 @@ class Gem5DesignSweep(ExhaustiveSweep):
     # Simulation mode.
     # Valid options are:
     #   - aladdin: Run Aladdin only.
-    #   - gem5-cache: Run Aladdin connected to gem5's memory system, but no CPU.
     #   - gem5-cpu: Run Aladdin in conjunction with a gem5 CPU model. In this case,
     #     Aladdin must be invoked by the user program running on the CPU.
     self.simulator = ""
@@ -35,7 +34,7 @@ class Gem5DesignSweep(ExhaustiveSweep):
     if not os.path.exists(self.source_dir):
       raise IOError("Source directory %s does not exist!" % self.source_dir)
 
-    valid_simulators = ["gem5-cpu", "gem5-cache", "aladdin"]
+    valid_simulators = ["gem5-cpu", "aladdin"]
     if not self.simulator in valid_simulators:
       raise ValueError("Attribute simulator has invalid value %s." % (
           self.simulator, valid_simulators))
