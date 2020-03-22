@@ -37,7 +37,8 @@ class TraceGenerator(base_generator.Generator):
       for benchmark in self.sweep.iterattrvalues(objtype=Sweepable):
         os.chdir(cwd)
         assert(isinstance(benchmark, Benchmark))
-        print "Building traces for", benchmark.name
+        print("Building %s traces for %s" % (
+            "DMA" if self.dma_mode else "non-DMA", benchmark.name))
         bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir)
         if not os.path.isabs(bmk_source_dir):
           bmk_source_dir = os.path.join(cwd, bmk_source_dir)

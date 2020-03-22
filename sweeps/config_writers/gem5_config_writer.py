@@ -98,7 +98,8 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
       nonaccel_bin = os.path.join(bmk_src_dir, "%s-gem5" % bmk_name)
       accel_bin = os.path.join(bmk_src_dir, "%s-gem5-accel" % bmk_name)
       if not (os.path.exists(nonaccel_bin) and os.path.exists(accel_bin)):
-        raise IOError("Cannot setup gem5 run directory before the benchmarks are built.")
+        raise IOError("Benchmarks have not been completely built. Did you add "
+                      "\"generate \"gem5_binary\" to the sweep script?")
       link = os.path.join(sweep_dir, "%s-gem5" % bmk_name)
       if os.path.lexists(link):
         os.remove(link)
