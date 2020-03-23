@@ -3,6 +3,8 @@
 # TODO: Replace 0 and 1 with constants for FLATTEN and NO_UNROLL.
 set unrolling for bfs_bulk.bfs.loop_horizons                     1
 set unrolling for bfs_bulk.bfs.loop_neighbors                    0
+set unrolling for bfs_bulk.bfs.init_horizons                     0
+set unrolling for bfs_queue.bfs.init_horizons                    0
 set unrolling for gemm_blocked.bbgemm.loopjj                     1
 set unrolling for gemm_blocked.bbgemm.loopkk                     1
 set unrolling for gemm_blocked.bbgemm.loopk                      0
@@ -67,11 +69,9 @@ set partition_type for fft_transpose.data_x "complete"
 set partition_type for fft_transpose.data_y "complete"
 set partition_type for kmp_kmp.pattern "complete"
 set partition_type for kmp_kmp.kmpNext "complete"
-set partition_type for kmp_kmp.n_matches "complete"
 set partition_type for stencil_stencil2d.filter "complete"
 set partition_type for stencil_stencil3d.C "complete"
 set partition_type for viterbi_viterbi.obs "complete"
-set partition_type for viterbi_viterbi.path "complete"
 
 # These arrays should never be cached.
 set memory_type for aes_aes.sbox "spad"
