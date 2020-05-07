@@ -87,10 +87,10 @@ void Dataflow::evaluate() {
     // If all fetch units' queues are filled, schedule a start streaming event
     // for each one.
     bool prefillDone = true;
-    for (auto fetch : inputFetchUnits)
-      prefillDone &= fetch->filled();
-    for (auto fetch : weightFetchUnits)
-      prefillDone &= fetch->filled();
+    for (const auto& fetch : inputFetchUnits)
+      prefillDone &= fetch->isUnused() || fetch->filled();
+    for (const auto& fetch : weightFetchUnits)
+      prefillDone &= fetch->isUnused() || fetch->filled();
     if (prefillDone) {
       DPRINTF(SystolicDataflow, "Prefilling done.\n");
       // Schedule streaming event for every fetch unit.

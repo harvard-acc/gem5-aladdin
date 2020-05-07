@@ -94,6 +94,8 @@ class Fetch : public LocalSpadInterface {
 
   bool filled() const { return fetchQueue.size() == fetchQueueCapacity; }
 
+  bool isUnused() const { return unused; }
+
   // Start data streaming.
   void startStreaming();
 

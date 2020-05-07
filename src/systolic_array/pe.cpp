@@ -10,6 +10,7 @@ void MulAccUnit::checkEndOfWindow() {
       weightIndices[2] == accel.weightCols - 1 &&
       weightIndices[3] == accel.weightChans - 1)
     output->windowEnd = true;
+    output->bubble = false;
 }
 
 // We can't directly do float16 operations, here we use a FP16 library for that.

@@ -189,9 +189,11 @@ void Commit::queueCommitRequest(int lineIndex) {
   uint8_t* data = new uint8_t[accel.lineSize]();
   // Copy data from the buffer for the collected data.
   for (int i = 0; i < elemsPerLine; i++) {
-    memcpy(&data[i * accel.elemSize],
-           outputBuffer[lineIndex * elemsPerLine + i].getDataPtr<uint8_t>(),
-           accel.elemSize);
+    if (!outputBuffer[lineIndex * elemsPerLine + i].isBubble()) {
+      memcpy(&data[i * accel.elemSize],
+             outputBuffer[lineIndex * elemsPerLine + i].getDataPtr<uint8_t>(),
+             accel.elemSize);
+    }
   }
   PacketPtr pkt = nullptr;
   LineData* line = nullptr;
