@@ -327,6 +327,7 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
         // controller uses a write-through policy) and in turn a deadlock
         // because no further retry signal will be sent.
         seq_req_list.pop_front();
+        bool lastReq = seq_req_list.empty();
         if (ruby_request) {
             assert(seq_req->m_type != RubyRequestType_LD);
             assert(seq_req->m_type != RubyRequestType_IFETCH);
@@ -380,7 +381,17 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
         }
         markRemoved();
         ruby_request = false;
-        if (m_controller->isWriteThrough())
+        // Calling hitCallback from the last request can potentially
+        // be dangerous: because of the retry signal, Ruby may receive a new
+        // aliased request which gets added to seq_req_list. However, because
+        // the last request has been popped from the list (before it calls
+        // hitCallback), the new request won't be considered as an alias and
+        // instead an actual request will be issued to the cache. Now, if we
+        // don't exit the loop, the next iteration will directly finish the new
+        // request, confusing the cache response received later as the request
+        // has already been removed from the list.
+        if (m_controller->isWriteThrough() ||
+            (lastReq && !seq_req_list.empty()))
             break;
     }
 
@@ -430,11 +441,16 @@ Sequencer::readCallback(Addr address, DataBlock& data,
                               firstResponseTime);
         }
         seq_req_list.pop_front();
+        bool lastReq = seq_req_list.empty();
         hitCallback(seq_req, data, true, mach, externalHit,
                     initialRequestTime, forwardRequestTime,
                     firstResponseTime);
         markRemoved();
         ruby_request = false;
+        // Similar to writeCallback(), if processing the last request ends up
+        // adding new requests to the list, we must exit the loop.
+        if (lastReq && !seq_req_list.empty())
+            break;
     }
 
     // free all outstanding requests corresponding to this address
