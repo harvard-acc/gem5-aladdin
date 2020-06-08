@@ -76,7 +76,7 @@ Hdf5::~Hdf5()
 
 
 void
-Hdf5::begin()
+Hdf5::begin(std::string desc)
 {
     h5File = H5::H5File(fname,
                         // Truncate the file if this is the first dump
