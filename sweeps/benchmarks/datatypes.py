@@ -50,6 +50,16 @@ class Benchmark(Sweepable):
     assert(not hasattr(self, array.name))
     setattr(self, array.name, array)
 
+  def add_host_array(self, *args):
+    """ Add an host array of this benchmark.
+
+    Args:
+      *args: Array constructor args.
+    """
+    array = Array(*args, True)
+    assert(not hasattr(self, array.name))
+    setattr(self, array.name, array)
+
   def add_function_array(self, func, *args):
     """ Add an array of this benchmark that does not belong to the kernel.
 
@@ -132,11 +142,12 @@ class Array(Sweepable):
       params.memory_type,
   ]
 
-  def __init__(self, name, size, word_length):
+  def __init__(self, name, size, word_length, is_host_array=False):
     """ Creates an array. """
     super(Array, self).__init__(name)
     self.size = size
     self.word_length = word_length
+    self.is_host_array = is_host_array
 
 class Function(Sweepable):
   sweepable_params = []

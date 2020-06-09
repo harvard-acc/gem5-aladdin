@@ -105,13 +105,16 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
     if parent["type"] == "Function":
       array["name"] = "{0}.{1}".format(parent["name"], array["name"])
 
-    if array["memory_type"] == params.SPAD:
+    is_host_array = array["is_host_array"]
+    if array["memory_type"] == params.SPAD and not is_host_array:
       str_format = "partition,%(partition_type)s,%(name)s,%(size)d,%(word_length)d"
       if (array["partition_type"] == params.CYCLIC or
           array["partition_type"] == params.BLOCK):
         str_format += ",%(partition_factor)s"
-    else:
+    elif array["memory_type"] == params.CACHE and is_host_array:
       str_format = "cache,%(name)s,%(size)d,%(word_length)d"
+    else:
+      return
 
     array["size"] = array["size"] * array["word_length"]
     self.output.write(str_format % array)
