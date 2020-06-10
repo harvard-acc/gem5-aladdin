@@ -341,6 +341,7 @@ if 'USER_TOOLCHAIN_ROOT' in main and main['USER_TOOLCHAIN_ROOT']:
     main.Append(LIBPATH=[toolchain_lib_path])
     main['CC'] = os.path.join(toolchain_bin_path, main['CC'])
     main['CXX'] = os.path.join(toolchain_bin_path, main['CXX'])
+    main['PYTHON_CONFIG'] = os.path.join(toolchain_bin_path, 'python-config')
 
 if GetOption('verbose'):
     def MakeAction(action, string, *args, **kwargs):
@@ -389,7 +390,8 @@ main['TCMALLOC_CCFLAGS'] = []
 CXX_version = readCommand([main['CXX'],'--version'], exception=False)
 CXX_V = readCommand([main['CXX'],'-V'], exception=False)
 
-main['GCC'] = CXX_version and CXX_version.find('g++') >= 0
+main['GCC'] = CXX_version and (CXX_version.find('g++') >= 0 or \
+    CXX_version.find('c++') >= 0)
 main['CLANG'] = CXX_version and CXX_version.find('clang') >= 0
 if main['GCC'] + main['CLANG'] > 1:
     error('Two compilers enabled at once?')
