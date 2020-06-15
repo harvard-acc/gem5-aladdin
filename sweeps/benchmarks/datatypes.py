@@ -56,7 +56,7 @@ class Benchmark(Sweepable):
     Args:
       *args: Array constructor args.
     """
-    array = Array(*args, True)
+    array = Array(*args, is_host_array=True)
     assert(not hasattr(self, array.name))
     setattr(self, array.name, array)
 
