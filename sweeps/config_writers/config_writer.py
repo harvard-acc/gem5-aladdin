@@ -42,8 +42,8 @@ class ConfigWriter(object):
 
   def next_id(self, benchmark_name):
     if benchmark_name in self.next_sweep_id_:
-      sweep_id = self.next_sweep_id_[benchmark_name]
       self.next_sweep_id_[benchmark_name] += 1
+      sweep_id = self.next_sweep_id_[benchmark_name]
       return sweep_id
     else:
       self.next_sweep_id_[benchmark_name] = 0
