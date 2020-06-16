@@ -1,9 +1,8 @@
 # Writes Condor scripts to schedule all simulations.
 
 import os
-import StringIO
 
-import config_writer
+from config_writers import config_writer
 
 header = [
     "#Submit this file in the directory where the input and output files live",

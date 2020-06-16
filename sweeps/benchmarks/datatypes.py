@@ -1,7 +1,7 @@
 from xenon.base.datatypes import Sweepable
 from xenon.base.designsweeptypes import ExhaustiveSweep
 
-import params
+from benchmarks import params
 
 class Benchmark(Sweepable):
   sweepable_params = [

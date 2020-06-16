@@ -1,11 +1,11 @@
 # Writes JSON design sweep dumps as gem5 configuration files.
 
-import ConfigParser
+import configparser
 import os
 
 from benchmarks import datatypes
 from benchmarks import params
-import config_writer
+from config_writers import config_writer
 from xenon.base.datatypes import Param
 
 GEM5_HOME = os.path.abspath(os.path.join(os.environ["ALADDIN_HOME"], "..", ".."))
@@ -14,7 +14,7 @@ DEFAULTS = {}
 
 def buildParamDefaults():
   defaults = {}
-  for attr_name, attr_value in params.__dict__.iteritems():
+  for attr_name, attr_value in params.__dict__.items():
     if isinstance(attr_value, Param):
       defaults[attr_name] = attr_value.format(attr_value.default)
   return defaults
@@ -116,7 +116,7 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
     benchmark_name_section = benchmark["name"].replace("-", "")
     output_prefix = os.path.join(output_dir, benchmark_name)
 
-    config_writer = ConfigParser.SafeConfigParser(DEFAULTS)
+    config_writer = configparser.ConfigParser(DEFAULTS)
     config_writer.add_section(benchmark_name_section)
     # Add the non sweepable parameters.
     self.addGlobalSweepParams(sweep, benchmark_name_section, config_writer)
@@ -322,4 +322,3 @@ class Gem5ConfigWriter(config_writer.JsonConfigWriter):
       return int(size_str[:-2])
     else:
       raise ValueError("Size \"%s\" cannot be converted into bytes." % size_str)
-

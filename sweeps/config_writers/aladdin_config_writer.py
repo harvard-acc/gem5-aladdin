@@ -1,10 +1,10 @@
 # Writes JSON design sweep dumps as Aladdin config files.
 
-import StringIO
+from io import StringIO
 import os
 
 from benchmarks import datatypes, params
-import config_writer
+from config_writers import config_writer
 
 ALADDIN_PATH = os.path.join(os.environ["ALADDIN_HOME"], "common", "aladdin")
 
@@ -14,7 +14,7 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
   def __init__(self):
     super(AladdinConfigWriter, self).__init__()
     self.topLevelType = "Benchmark"
-    self.output = StringIO.StringIO()
+    self.output = StringIO()
     self.printFunctionsMap = {
         "Benchmark": self.printBenchmark,
         "Function": self.doNothing,
@@ -57,7 +57,7 @@ class AladdinConfigWriter(config_writer.JsonConfigWriter):
         with open(output_file, "w") as f:
           f.write(self.output.getvalue())
           self.output.close()
-          self.output = StringIO.StringIO()
+          self.output = StringIO()
         if self.generate_runscripts:
           self.writeRunscript(benchmark, output_file)
 

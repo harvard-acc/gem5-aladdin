@@ -1,7 +1,7 @@
 # MachSuite benchmark definitions.
 
-from datatypes import *
-from params import *
+from benchmarks.datatypes import *
+from benchmarks.params import *
 
 aes_aes = Benchmark("aes_aes", "aes/aes")
 aes_aes.set_kernels(["aes256_encrypt_ecb"])

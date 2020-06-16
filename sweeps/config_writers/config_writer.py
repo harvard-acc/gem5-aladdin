@@ -51,13 +51,13 @@ class ConfigWriter(object):
 
   def itersimpletypes(self, dictionary):
     """ Returns a generator over non-dict and non-list items in dictionary. """
-    for param, value in dictionary.iteritems():
+    for param, value in dictionary.items():
       if not isinstance(value, dict) and not isinstance(value, list):
         yield param, value
 
   def iterdicttypes(self, dictionary):
     """ Returns a generator over dict-type items in dictionary. """
-    for param, value in dictionary.iteritems():
+    for param, value in dictionary.items():
       if isinstance(value, dict):
         yield param, value
 

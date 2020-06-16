@@ -21,7 +21,7 @@ class Gem5BinaryGenerator(base_generator.Generator):
       genfiles = []
       for benchmark in self.sweep.iterattrvalues(objtype=Sweepable):
         assert(isinstance(benchmark, Benchmark))
-        print "Building gem5 binaries for %s" % benchmark.name
+        print("Building gem5 binaries for %s" % benchmark.name)
         bmk_source_dir = os.path.join(self.sweep.source_dir, benchmark.sub_dir)
         if not os.path.isabs(bmk_source_dir):
           bmk_source_dir = os.path.join(cwd, bmk_source_dir)
