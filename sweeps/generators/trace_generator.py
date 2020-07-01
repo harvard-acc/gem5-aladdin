@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import shutil
 
 from xenon.base.datatypes import *
 from xenon.generators import base_generator
@@ -74,7 +75,7 @@ class TraceGenerator(base_generator.Generator):
           os.makedirs(trace_abs_dir)
         # Moves and overwrites a trace at the destination if it already exists.
         trace_new_path = os.path.join(trace_abs_dir, DYNAMIC_TRACE)
-        os.rename(trace_orig_path, trace_new_path)
+        shutil.move(trace_orig_path, trace_new_path)
         genfiles.append(trace_new_path)
 
         # Cleanup.
