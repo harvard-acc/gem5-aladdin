@@ -102,15 +102,14 @@ sampled loop iterations and produce a final overall cycles estimate.
 
 ```c
 int reduction(int* a, int size, int sample) {
-    // Generally avoid sampling loops containing data
-    // transfer operations to avoid changing the memory
-    // footprint of the application.
+    // The DMA load is an operation that happens outside of the loop so it
+    // doesn't need to be sampled.
     dmaLoad(a, size * sizeof(int));
     int result = 0;
     setSamplingFactor("loop", (float)size / sample);
     loop:
     // Run only `sample` iterations of this loop; the result
-    // might be wrong, but that’s expected for sampling.
+    // might be wrong, but that's expected for sampling.
     for (int i = 0; i < sample; i++)
         result += a[i]; return result;
 }
