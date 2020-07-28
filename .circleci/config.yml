@@ -41,34 +41,6 @@ jobs:
             # if the DB thinks they're present but we don't cache them, checking for
             # dependencies will fail.
             - build/.scons_config
-            # Cache everything we're not likely to modify. So exclude aladdin and all
-            # top level files in mem, sim, and dev.
-            - build/X86/arch
-            - build/X86/cpu
-            - build/X86/proto
-            - build/X86/python
-            - build/X86/enums
-            - build/X86/base
-            - build/X86/gpu-compute
-            - build/X86/unittest
-            - build/X86/debug
-            - build/X86/params
-            - build/X86/kern
-            - build/X86/mem/protocol
-            - build/X86/mem/cache
-            - build/X86/mem/ruby
-            - build/X86/mem/probes
-            - build/X86/sim/power
-            - build/X86/sim/probe
-            - build/X86/dev/alpha
-            - build/X86/dev/arm
-            - build/X86/dev/i2c
-            - build/X86/dev/mips
-            - build/X86/dev/net
-            - build/X86/dev/pci
-            - build/X86/dev/sparc
-            - build/X86/dev/storage
-            - build/X86/dev/virtio
-            - build/X86/dev/x86
+            - build/X86
       - store_artifacts:
           path: build/X86/gem5.opt
