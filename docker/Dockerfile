@@ -1,7 +1,10 @@
-FROM ubuntu:16.04
-LABEL maintainer="Sam Xi"
+FROM ubuntu:18.04
+LABEL maintainer="Sam Xi, Yuan Yao"
 
-# Install tools for development.
+###################################################
+####      Install tools for development.       ####
+###################################################
+
 RUN apt-get update && apt-get install -y \
   python \
   python-pip \
@@ -14,22 +17,10 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --upgrade pip
 
-# Install gem5 dependencies.
-RUN apt-get update -qq
-RUN apt-get install -y m4 \
-      libprotobuf-dev \
-      protobuf-compiler \
-      libsqlite3-dev \
-      libtcmalloc-minimal4
+###########################################
+####      Environment variables        ####
+###########################################
 
-# Install Aladdin dependencies.
-RUN apt-get install -y \
-      libboost-graph-dev \
-      libpthread-stubs0-dev \
-      libreadline-dev \
-      libncurses5-dev
-
-# Environment variables for gem5-aladdin
 RUN mkdir -p /workspace
 ENV ALADDIN_HOME /workspace/gem5-aladdin/src/aladdin
 ENV TRACER_HOME /workspace/LLVM-Tracer
@@ -37,6 +28,47 @@ ENV LLVM_HOME /usr/local
 ENV BOOST_ROOT /usr/include
 
 ENV SHELL /bin/bash
+
+# So we can link gem5 against libprotobuf when installed from apt.
+ENV FORCE_CXX11_ABI 1
+
+#######################################################
+####      Install gem5-Aladdin dependencies.       ####
+#######################################################
+
+# Install gem5 dependencies.
+RUN apt-get update -qq
+RUN apt-get install -y m4 \
+      libprotobuf-dev \
+      protobuf-compiler \
+      libsqlite3-dev \
+      libtcmalloc-minimal4 \
+      scons \
+      zlib1g \
+      zlib1g-dev \
+      python3 \
+      python3-pip \
+      libgoogle-perftools-dev
+# Change the default Python version to 3.6.
+RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip2 1
+RUN update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 2
+RUN pip3 install --user --upgrade pip
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.6 2
+
+RUN pip install numpy \
+      six \
+      configparser \
+      pyparsing \
+      pytest \
+      pytest-xdist
+
+# Install Aladdin dependencies.
+RUN apt-get install -y \
+      libboost-graph-dev \
+      libpthread-stubs0-dev \
+      libreadline-dev \
+      libncurses5-dev
 
 # Build LLVM and Clang 6.0 from source.
 WORKDIR /tmp
@@ -49,52 +81,24 @@ RUN wget -q http://releases.llvm.org/6.0.0/llvm-6.0.0.src.tar.xz && \
     cd llvm-6.0.0.src && \
     mkdir build && \
     cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Debug .. && \
+    cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release .. && \
     make -j24 && \
     make install && \
     rm -rf /tmp/llvm-6.0.0* && \
     rm -rf /tmp/cfe-6.0.0*
 
-# Install a newer version of ZLIB from source.
-RUN wget -q https://www.zlib.net/zlib-1.2.11.tar.gz && \
-    tar -xf zlib-1.2.11.tar.gz && \
-    cd zlib-1.2.11 && \
-    ./configure && \
-    make && \
-    make install && \
-    rm -rf /tmp/zlib-1.2.11*
-
-# Install libconfuse 3.2.1 from source.
-RUN wget -q https://github.com/martinh/libconfuse/releases/download/v3.2.1/confuse-3.2.1.tar.gz && \
-    tar -xf confuse-3.2.1.tar.gz && \
-    cd confuse-3.2.1 && \
-    ./configure && \
-    make install
-
-WORKDIR /workspace
-
 # Build and install LLVM-Tracer
+WORKDIR /workspace
 RUN git clone https://github.com/ysshao/LLVM-Tracer && \
     cd LLVM-Tracer && \
     git fetch --all && \
-    git checkout llvm-6.0 && \
     mkdir bin && \
     mkdir lib && \
     mkdir build && cd build && \
     cmake .. && make && make install
 
-# So we can link gem5 against libprotobuf when installed from apt.
-ENV FORCE_CXX11_ABI 1
-
 # Clone gem5-aladdin, but don't build. We'll assume the developer will build.
-RUN apt-get install -y scons
 RUN git clone https://github.com/harvard-acc/gem5-aladdin && \
     cd gem5-aladdin && \
     git submodule init && \
     git submodule update
-
-# Install a supported version of pyparsing for Xenon.
-RUN pip install pyparsing==2.3.0
-
-# Some extra gem5 dependencies.
-RUN pip install six
