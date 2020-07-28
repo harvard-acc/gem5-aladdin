@@ -100,7 +100,7 @@ how to use the sampling API. The user informs Aladdin the sampled loop label and
 the sampling factor via a call to setSamplingFactor. Aladdin will unsample the
 sampled loop iterations and produce a final overall cycles estimate.
 
-```
+```c
 int reduction(int* a, int size, int sample) {
     // Generally avoid sampling loops containing data
     // transfer operations to avoid changing the memory
