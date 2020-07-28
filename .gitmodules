@@ -1,6 +1,6 @@
 [submodule "aladdin"]
   path = src/aladdin
-  url = https://github.com/ysshao/aladdin
+  url = https://github.com/harvard-acc/aladdin
 [submodule "xenon"]
 	path = sweeps/xenon
 	url = https://github.com/xyzsam/xenon
