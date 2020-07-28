@@ -1,7 +1,7 @@
 gem5-Aladdin SoC Simulator
 ==============================
 
-[![build status](https://travis-ci.org/harvard-acc/gem5-aladdin.svg?branch=master)](https://travis-ci.org/harvard-acc/gem5-aladdin)
+[![harvard-acc](https://circleci.com/gh/harvard-acc/gem5-aladdin.svg?style=shield)](<https://circleci.com/gh/harvard-acc>/gem5-aladdin)
 
 Welcome to the gem5-Aladdin SoC simulator!
 
