@@ -631,6 +631,9 @@ def run(options, root, testsys, cpu_class):
     root.apply_config(options.param)
     m5.instantiate(checkpoint_dir)
 
+    testsys.cpu[0].workload[0].map(0x10000000, testsys.spad.pio_addr,
+        testsys.spad.pio_size)
+
     # Initialization is complete.  If we're not in control of simulation
     # (that is, if we're a slave simulator acting as a component in another
     #  'master' simulator) then we're done here.  The other simulator will

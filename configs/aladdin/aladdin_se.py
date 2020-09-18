@@ -389,6 +389,13 @@ for i in xrange(np):
     system.cpu[i].createThreads()
 
 if options.ruby:
+    system.piobus = IOXBar(width=32, response_latency=0,
+                           frontend_latency=0, forward_latency=0)
+    # Create the global scratchpad.
+    system.spad = GlobalScratchpad()
+    system.spad.pio_addr = 0x8000000000000000
+    system.spad.pio_size = 1048576
+
     Ruby.create_system(options, False, system)
     assert(options.num_cpus + 3*len(system.find_all(HybridDatapath)[0] + \
            system.find_all(SystolicArray)[0]) == len(system.ruby._cpu_ports))
@@ -412,7 +419,6 @@ if options.ruby:
             system.cpu[i].interrupts[0].int_slave = ruby_port.master
             system.cpu[i].itb.walker.port = ruby_port.slave
             system.cpu[i].dtb.walker.port = ruby_port.slave
-
     if options.accel_cfg_file:
         datapaths = []
         datapaths.extend(system.find_all(HybridDatapath)[0])
@@ -421,6 +427,11 @@ if options.ruby:
             datapath.cache_port = system.ruby._cpu_ports[options.num_cpus+3*i].slave
             datapath.spad_port = system.ruby._cpu_ports[options.num_cpus+3*i+1].slave
             datapath.acp_port = system.ruby._cpu_ports[options.num_cpus+3*i+2].slave
+
+    for ruby_port in system.ruby._cpu_ports:
+      ruby_port.pio_master_port = system.piobus.slave
+      ruby_port.mem_master_port = system.piobus.slave
+    system.spad.pio = system.piobus.master
 
 else:
     system.membus = SystemXBar(width=options.xbar_width)
