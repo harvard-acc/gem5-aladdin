@@ -44,3 +44,20 @@ jobs:
             - build/X86
       - store_artifacts:
           path: build/X86/gem5.opt
+
+workflows:
+  version: 2
+  compile:
+    jobs:
+      - build
+
+  weekly:
+    jobs:
+      - build
+    triggers:
+      - schedule:
+          # Rebuild every Sunday at midnight to keep the artifacts fresh.
+          cron: 0 0 * * 0
+          filters:
+            branches:
+              only: master
