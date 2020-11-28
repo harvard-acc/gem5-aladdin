@@ -46,12 +46,14 @@ jobs:
           path: build/X86/gem5.opt
 
 workflows:
-  version:2
+  version: 2
   compile:
     jobs:
       - build
 
-  schedule:
+  weekly:
+    jobs:
+      - build
     triggers:
       - schedule:
           # Rebuild every Sunday at midnight to keep the artifacts fresh.
