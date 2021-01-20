@@ -42,18 +42,17 @@ TEST_CASE("Test tensor index iterator", "[tensor-index]") {
       REQUIRE(int(iter) == 1235);
     }
     SECTION("Region-based advance") {
-      SECTION("Advance a region that don't go out of dimension bounds") {
+      SECTION("Advance a region that doesn't go out of dimension bounds") {
         doRegionTest(iter, { 1, 2, 3, 4 });
         doRegionTest(iter, { 1, 3, 3, 3 });
       }
-      SECTION("Advance a regions that go out of one dimension bound.") {
+      SECTION("Advance a region that goes out of one dimension bound.") {
         doRegionTest(iter, { 0, 1, 1, 18 });
       }
-      SECTION("Advance a region that go out of multiple dimension bounds.") {
+      SECTION("Advance a region that goes out of multiple dimension bounds.") {
         doRegionTest(iter, { 0, 9, 10, 18 });
       }
-      SECTION("Advance a region that triggers carries greater than "
-              "1.") {
+      SECTION("Advance a region that triggers carries greater than 1") {
         doRegionTest(iter, { 0, 17, 10, 100 });
       }
     }
@@ -78,14 +77,13 @@ TEST_CASE("Test tensor index iterator", "[tensor-index]") {
       REQUIRE(iter.inHaloRegion() == false);
     }
     SECTION("Region-based advance") {
-      SECTION("Advance a regions that go out of one dimension bound.") {
+      SECTION("Advance a region that goes out of one dimension bound") {
         doRegionTest(iter, { 0, 1, 1, 18 });
       }
-      SECTION("Advance a region that go out of multiple dimension bounds.") {
+      SECTION("Advance a region that goes out of multiple dimension bounds") {
         doRegionTest(iter, { 0, 9, 10, 18 });
       }
-      SECTION("Advance a region that triggers carries greater than "
-              "1.") {
+      SECTION("Advance a region that triggers carries greater than 1") {
         doRegionTest(iter, { 0, 17, 10, 100 });
       }
     }
@@ -103,7 +101,7 @@ TEST_CASE("Test tensor region index iterator", "[region-index]") {
     SECTION("Advance a region that goes beyond one region bound") {
       doRegionTest(iter, { 1, 1, 1, 4 });
     }
-    SECTION("Advance a region that go beyond multiple region bounds") {
+    SECTION("Advance a region that goes beyond multiple region bounds") {
       doRegionTest(iter, { 1, 16, 8, 4 });
     }
   }
@@ -117,11 +115,10 @@ TEST_CASE("Test tensor region index iterator", "[region-index]") {
     SECTION("Advance a region that goes beyond one region bound") {
       doRegionTest(iter, { 1, 1, 1, 4 });
     }
-    SECTION("Advance a region that go beyond multiple region bounds") {
+    SECTION("Advance a region that goes beyond multiple region bounds") {
       doRegionTest(iter, { 1, 16, 8, 4 });
     }
-    SECTION("Advance the iterator by regions that triggers carries greater "
-            "than 1") {
+    SECTION("Advance a region that triggers carries greater than 1") {
       doRegionTest(iter, { 0, 0, 18, 13 });
     }
   }
