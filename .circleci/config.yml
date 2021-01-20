@@ -27,7 +27,7 @@ jobs:
             python2.7 `which scons` build/X86/gem5.opt PROTOCOL=MESI_Two_Level_aladdin --ignore-style -j2
       - run:
           name: Running unit tests
-          command: make -f src/systolic-array/unit-test/Makefile test
+          command: make -f src/systolic_array/unit_test/Makefile test
       - run:
           name: Running integration tests
           command: |
