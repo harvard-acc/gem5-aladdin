@@ -4,6 +4,8 @@
 #include <vector>
 #include <tuple>
 #include <cassert>
+#include <cmath>
+#include <memory>
 
 namespace systolic {
 
@@ -128,6 +130,10 @@ class TensorIndexIterator {
       state[i] = -halo[i].first;
   }
 
+  virtual std::unique_ptr<TensorIndexIterator> clone() const {
+    return std::make_unique<TensorIndexIterator>(*this);
+  }
+
   operator int() const { return getIndex(state); }
 
   bool end() const { return atEnd; }
@@ -157,7 +163,7 @@ class TensorIndexIterator {
     return !(*this == other);
   }
 
-  const std::vector<int>& getIndices() { return state; }
+  const std::vector<int>& getIndices() const { return state; }
 
   bool inHaloRegion() const {
     for (int i = 0; i < state.size(); i++) {
@@ -166,6 +172,8 @@ class TensorIndexIterator {
     }
     return false;
   }
+
+  virtual int getDimSize(int index) const { return effecDims[index]; }
 
   friend std::ostream& operator<<(std::ostream& os,
                                   const TensorIndexIterator& iter);
@@ -217,8 +225,11 @@ class TensorIndexIterator {
       int stridesOutBound = (offset - bound) / stride;
       // The number of strides this dimension can take.
       int stridesThisDim = bound / stride + 1;
-      int carry = (stridesOutBound / stridesThisDim + 1) * nextStride;
-      int newOffset = (stridesOutBound % stridesThisDim - 1) * stride;
+      int carry =
+              std::ceil(stridesOutBound * 1.0 / stridesThisDim) * nextStride;
+      int newOffset = ((stridesOutBound % stridesThisDim) - 1) * stride;
+      if (newOffset < 0)
+        newOffset = bound;
       return {newOffset, carry};
     } else {
       return { offset, 0 };
@@ -268,6 +279,10 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
     state = origin;
   }
 
+  std::unique_ptr<TensorIndexIterator> clone() const override {
+    return std::make_unique<TensorRegionIndexIterator>(*this);
+  }
+
   void operator=(const TensorRegionIndexIterator& other) {
     TensorIndexIterator::operator=(other);
     origin = other.origin;
@@ -290,6 +305,8 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
     origin = _origin;
     advanceOrigin({ 0, 0, 0, 0 });
   }
+
+  int getDimSize(int index) const override { return regionSize[index]; }
 
  protected:
   // Advance the tensor region index with the specified region size.
