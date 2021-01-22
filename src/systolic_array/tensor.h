@@ -5,6 +5,7 @@
 #include <tuple>
 #include <cassert>
 #include <cmath>
+#include <memory>
 
 namespace systolic {
 
@@ -129,8 +130,8 @@ class TensorIndexIterator {
       state[i] = -halo[i].first;
   }
 
-  virtual TensorIndexIterator* clone() const {
-    return new TensorIndexIterator(*this);
+  virtual std::unique_ptr<TensorIndexIterator> clone() const {
+    return std::make_unique<TensorIndexIterator>(*this);
   }
 
   operator int() const { return getIndex(state); }
@@ -278,8 +279,8 @@ class TensorRegionIndexIterator : public TensorIndexIterator {
     state = origin;
   }
 
-  TensorRegionIndexIterator* clone() const override {
-    return new TensorRegionIndexIterator(*this);
+  std::unique_ptr<TensorIndexIterator> clone() const override {
+    return std::make_unique<TensorRegionIndexIterator>(*this);
   }
 
   void operator=(const TensorRegionIndexIterator& other) {

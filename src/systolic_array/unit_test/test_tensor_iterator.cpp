@@ -12,7 +12,7 @@ using namespace systolic;
 // us the correct results.
 std::vector<int> computeReferenceResults(const TensorIndexIterator& iter,
                                          const std::vector<int>& region) {
-  std::unique_ptr<TensorIndexIterator> refIter(iter.clone());
+  auto refIter = iter.clone();
   int numSingleSteps = 0;
   int stride = 1;
   for (int i = region.size() - 1; i >= 0; i--) {
