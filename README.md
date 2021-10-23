@@ -31,6 +31,7 @@ list (see link at the very bottom).
 5. [Writing a new program](#writing)
 
 <a name="notices"/>
+
 ## Notices ##
 
 #### Feburary 1st, 2020 ####
@@ -204,6 +205,7 @@ The devel branch will soon be made the default branch, at which point you can
 drop the `-b devel` argument.
 
 <a name="requirements"/>
+
 ## Requirements: ##
 
 To build gem5-Aladdin, you will need to satisfy the dependencies of three
@@ -251,6 +253,7 @@ Xenon requires:
 2. The pyparsing module (any version between 2.2.0 and 2.3.0, inclusive).
 
 <a name="installation"/>
+
 ## Installation ##
 
 NOTE: If you are using the Docker image, please remember to **update your
@@ -299,6 +302,7 @@ The basic source release includes these subdirectories:
    - util: useful utility programs and files
 
 <a name="running"/>
+
 ## Running gem5-Aladdin ##
 
 gem5-Aladdin can be run in two ways: standalone and CPU.
@@ -324,6 +328,7 @@ If successful, the output of the simulator will be placed under the `outputs`
 subdirectory, while the `stdout` dump will be preserved in `stdout.gz`.
 
 <a name="writing"/>
+
 ## Writing an accelerated program ##
 
 For an example of how to write a program that invokes an Aladdin accelerator,
