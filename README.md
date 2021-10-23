@@ -256,7 +256,7 @@ Xenon requires:
 
 ## Installation ##
 
-NOTE: If you are using the Docker image, please remember to **update your
+**NOTE**: If you are using the Docker image, please remember to **update your
 local Git repository to the latest HEAD**. The Docker image is only designed to
 set up your environment; it is your responsibility to ensure the code you're
 working off of is up to date. You can update just by running `git pull origin
