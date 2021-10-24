@@ -23,6 +23,15 @@ International Symposium on Microarchitecture (MICRO), June 2016.
 If you have any questions, please send them to the gem5-aladdin users mailing
 list (see link at the very bottom).
 
+##### Table of Contents ####
+1. [Notices](#notices)
+2. [Requirements](#requirements)
+3. [Installation](#installation)
+4. [Running the simulator](#running)
+5. [Writing a new program](#writing)
+
+<a name="notices"/>
+
 ## Notices ##
 
 #### Feburary 1st, 2020 ####
@@ -195,6 +204,8 @@ than trying to bring this into your current local repository. To do so:
 The devel branch will soon be made the default branch, at which point you can
 drop the `-b devel` argument.
 
+<a name="requirements"/>
+
 ## Requirements: ##
 
 To build gem5-Aladdin, you will need to satisfy the dependencies of three
@@ -241,17 +252,25 @@ Xenon requires:
 1. Python 2.7.6+
 2. The pyparsing module (any version between 2.2.0 and 2.3.0, inclusive).
 
+<a name="installation"/>
+
 ## Installation ##
+
+**NOTE**: If you are using the Docker image, please remember to **update your
+local Git repository to the latest HEAD**. The Docker image is only designed to
+set up your environment; it is your responsibility to ensure the code you're
+working off of is up to date. You can update just by running `git pull origin
+master`.
 
 ### Setting up the source code ###
 
-1. Clone gem5-Aladdin.
+1. If this is your first time, you will need to clone the repository.
 
   ```
   git clone https://github.com/harvard-acc/gem5-aladdin
   ```
 
-2. Setup the Aladdin and Xenon submodules.
+2. Set up the Aladdin and Xenon submodules.
 
   ```
   git submodule update --init --recursive
@@ -282,6 +301,8 @@ The basic source release includes these subdirectories:
    - tests: regression tests
    - util: useful utility programs and files
 
+<a name="running"/>
+
 ## Running gem5-Aladdin ##
 
 gem5-Aladdin can be run in two ways: standalone and CPU.
@@ -305,6 +326,8 @@ appropriate directory and execute the following command:
 
 If successful, the output of the simulator will be placed under the `outputs`
 subdirectory, while the `stdout` dump will be preserved in `stdout.gz`.
+
+<a name="writing"/>
 
 ## Writing an accelerated program ##
 
