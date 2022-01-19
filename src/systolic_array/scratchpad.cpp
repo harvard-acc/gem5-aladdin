@@ -19,12 +19,13 @@ Scratchpad::Scratchpad(const Params* p)
 void Scratchpad::accessData(Addr addr, int size, uint8_t* data, bool isRead) {
   uint8_t* ptr = nullptr;
   Addr currAddr = addr;
+  int accessSize = std::min(size, lineSize);
   for (int i = 0; i < size; i += lineSize) {
     ptr = &data[i];
     if (isRead)
-      chunk.readData(currAddr, ptr, lineSize);
+      chunk.readData(currAddr, ptr, accessSize);
     else
-      chunk.writeData(currAddr, ptr, lineSize);
+      chunk.writeData(currAddr, ptr, accessSize);
     currAddr += lineSize;
   }
 }
