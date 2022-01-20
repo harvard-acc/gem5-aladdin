@@ -75,10 +75,10 @@ class Commit : public LocalSpadInterface {
   void localSpadCallback(PacketPtr pkt) override;
 
   // Check if we have collected all the output data in the specified line.
-  bool isLineComplete(int lineIndex);
+  bool isLineComplete(int start, int elemsToWrite);
 
   // Create a writeback request and queue it to the commit queue.
-  void queueCommitRequest(int lineIndex);
+  void queueCommitRequest(int start, int elemsToWrite);
 
   template <typename ElemType>
   void accumOutputs(ElemType* currOutputs, ElemType* prevOutputs) {
