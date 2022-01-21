@@ -1,3 +1,5 @@
+#include <math.h>
+
 #include "systolic_array.h"
 #include "commit.h"
 #include "activations.h"
@@ -34,7 +36,7 @@ void Commit::setParams() {
       { 0, 0, 0, 0 },
       { 1, accel.outputRows, accel.outputCols, accel.peArrayCols });
   // Move the iterator to the correct starting place.
-  iter += { 0, 0, 0, accel.lineSize / accel.elemSize * id };
+  iter += { 0, 0, id, 0 };
   // If the iterator reaches the end of the tensor, then this commit unit should
   // be left idle through the whole execution.
   if (iter.end())
@@ -56,31 +58,37 @@ void Commit::evaluate() {
     return;
 
   // Collect any finished output pixel from the output register of the PEs.
-  // Since the writeback granularity is a line, if we have collected every
-  // output pixel forming the line, create a commit request and queue it to the
-  // commit queue to be sent.
+  // Since the writeback granularity is a line (or the number of PE columns for
+  // a small configuration), if we have collected every output pixel in a
+  // writeback, create a commit request and queue it to the commit queue to be
+  // sent.
   //
   // There are two cases where the commit unit will never see some of output
   // pixels ready: 1) The commit unit is not used at all, which means the whole
   // PE row is left idle. 2) Some of the PE columns are left idle due to a lack
   // of weights. In this case, we should do a writeback once all the "active"
   // columns have produced outputs.
-  for (int i = 0; i < inputs.size() / elemsPerLine; i++) {
-    for (int j = 0; j < elemsPerLine; j++) {
-      int index = i * elemsPerLine + j;
-      if (inputs[index]->isWindowEnd()) {
-        assert(!outputBuffer[index].isWindowEnd() &&
+
+  for (int remainingElems = inputs.size(); remainingElems > 0;
+       remainingElems -= elemsPerLine) {
+    // Check if we have collected all the pixels for a writeback.
+    int elemsToWrite = std::min(elemsPerLine, remainingElems);
+    int start = inputs.size() - remainingElems;
+    if (isLineComplete(start, elemsToWrite))
+      queueCommitRequest(start, elemsToWrite);
+
+    // Collect any finished output pixels.
+    for (int i = 0; i < elemsToWrite; i++, start++) {
+      if (inputs[start]->isWindowEnd()) {
+        assert(!outputBuffer[start].isWindowEnd() &&
                "A new output pixel finished while the previous one from the "
                "same PE has not been written back.");
         // Collect the output pixel and store it in the local buffer.
-        outputBuffer[index] = *inputs[index];
-        DPRINTF(
-            SystolicCommit, "Collected output data from column %d.\n", index);
+        outputBuffer[start] = *inputs[start];
+        DPRINTF(SystolicCommit, "Collected output data from column %d.\n",
+                start);
       }
     }
-    // Check if we have collected all the pixels for a writeback.
-    if (isLineComplete(i))
-      queueCommitRequest(i);
   }
 
   // Send requests from the commit queue if there are requests waiting
@@ -111,13 +119,12 @@ void Commit::evaluate() {
   }
 }
 
-bool Commit::isLineComplete(int lineIndex) {
+bool Commit::isLineComplete(int start, int elemsToWrite) {
   // Check if every slot in the local output buffer has been filled with
   // finished output. We also take the last weight fold into account, where some
   // PE columns can be left idle, thus the corresponding slot in the local
   // buffer will never see finished data.
-  for (int i = lineIndex * elemsPerLine; i < (lineIndex + 1) * elemsPerLine;
-       i++) {
+  for (int i = start; i < start + elemsToWrite; i++) {
     // We have idle PE columns in the last weight fold if the number of weights
     // is non-multiples of peArrayCols.
     bool haveIdleColumns = remainingWeightFolds == 1 &&
@@ -138,6 +145,7 @@ void Commit::accumOutputs(float16* currOutputs, float16* prevOutputs) {
 }
 
 void Commit::localSpadCallback(PacketPtr pkt) {
+  assert(pkt->getSize() % accel.elemSize == 0);
   DPRINTF(SystolicCommit, "Received response, addr %#x.\n", pkt->getAddr());
   CommitSenderState* state = pkt->findNextSenderState<CommitSenderState>();
   LineData* lineSlotPtr = state->getCommitQueueSlotPtr();
@@ -163,14 +171,14 @@ void Commit::localSpadCallback(PacketPtr pkt) {
       // If the outputs are finished, do the activation function before we send
       // the outputs back to the scratchpad.
       activationFunc(lineSlotPtr->getDataPtr<uint8_t>(),
-                     elemsPerLine,
+                     pkt->getSize() / accel.elemSize,
                      accel.actType,
                      accel.actParams,
                      accel.dataType);
     }
     // Send the write request.
     auto req = std::make_shared<Request>(
-        pkt->getAddr(), accel.lineSize, 0, localSpadMasterId);
+        pkt->getAddr(), pkt->getSize(), 0, localSpadMasterId);
     req->setContext(accel.getContextId());
     PacketPtr pkt = new Packet(req, MemCmd::WriteReq);
     pkt->dataDynamic(lineSlotPtr->getDataPtr<uint8_t>());
@@ -184,14 +192,15 @@ void Commit::localSpadCallback(PacketPtr pkt) {
   }
 }
 
-void Commit::queueCommitRequest(int lineIndex) {
+void Commit::queueCommitRequest(int start, int elemsToWrite) {
   Addr addr = iter * accel.elemSize;
-  uint8_t* data = new uint8_t[accel.lineSize]();
+  int reqSize = elemsToWrite * accel.elemSize;
+  uint8_t* data = new uint8_t[reqSize];
   // Copy data from the buffer for the collected data.
-  for (int i = 0; i < elemsPerLine; i++) {
-    if (!outputBuffer[lineIndex * elemsPerLine + i].isBubble()) {
+  for (int i = 0; i < elemsToWrite; i++) {
+    if (!outputBuffer[start + i].isBubble()) {
       memcpy(&data[i * accel.elemSize],
-             outputBuffer[lineIndex * elemsPerLine + i].getDataPtr<uint8_t>(),
+             outputBuffer[start + i].getDataPtr<uint8_t>(),
              accel.elemSize);
     }
   }
@@ -200,7 +209,7 @@ void Commit::queueCommitRequest(int lineIndex) {
   if (accel.accumResults) {
     // If we need to accumulate results, read the previous results first.
     auto req =
-        std::make_shared<Request>(addr, accel.lineSize, 0, localSpadMasterId);
+        std::make_shared<Request>(addr, reqSize, 0, localSpadMasterId);
     req->setContext(accel.getContextId());
     pkt = new Packet(req, MemCmd::ReadReq);
     pkt->allocate();
@@ -209,13 +218,13 @@ void Commit::queueCommitRequest(int lineIndex) {
     if (accel.sendResults) {
       // If the outputs are finished, do the activation function before we send
       // the outputs back to the scratchpad.
-      activationFunc(
-          data, elemsPerLine, accel.actType, accel.actParams, accel.dataType);
+      activationFunc(data, elemsToWrite, accel.actType, accel.actParams,
+                     accel.dataType);
     }
     // Directly write to the scratchpad if we don't need to accumulate the
     // results.
     auto req =
-        std::make_shared<Request>(addr, accel.lineSize, 0, localSpadMasterId);
+        std::make_shared<Request>(addr, reqSize, 0, localSpadMasterId);
     req->setContext(accel.getContextId());
     pkt = new Packet(req, MemCmd::WriteReq);
     pkt->dataDynamic(data);
@@ -234,8 +243,7 @@ void Commit::queueCommitRequest(int lineIndex) {
   pkt->pushSenderState(state);
 
   // Clear the line in output buffer.
-  for (int i = lineIndex * elemsPerLine; i < (lineIndex + 1) * elemsPerLine;
-       i++) {
+  for (int i = start; i < start + elemsToWrite; i++) {
     outputBuffer[i].clear();
   }
 
@@ -251,7 +259,7 @@ void Commit::queueCommitRequest(int lineIndex) {
     } else {
       // Move the iterator to the correct starting place for the next weight
       // fold.
-      iter += { 0, 0, 0, accel.lineSize / accel.elemSize * id };
+      iter += { 0, 0, id, 0 };
       DPRINTF(SystolicCommit, "Advanced iterator to %s.\n", iter);
     }
   }
