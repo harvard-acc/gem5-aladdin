@@ -422,6 +422,7 @@ MSHR::handleSnoop(PacketPtr pkt, Counter _order)
     // should always be the same, however, this assumes that we never
     // snoop writes as they are currently not marked as invalidations
     panic_if((pkt->needsWritable() != pkt->isInvalidate()) &&
+             !pkt->req->isUncacheable() &&
              !pkt->req->isCacheMaintenance(),
              "%s got snoop %s where needsWritable, "
              "does not match isInvalidate", name(), pkt->print());
